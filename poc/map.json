@@ -1,0 +1,521 @@
+{
+ "name": "Sunnyvale (placeholder)",
+ "note": "Throwaway placeholder town for the connection proof of concept. Shape follows the map contract in the design doc; the real map replaces this file.",
+ "bounds": {
+  "minX": -60,
+  "maxX": 60,
+  "minZ": -60,
+  "maxZ": 60
+ },
+ "spawn": {
+  "x": 0,
+  "z": -35
+ },
+ "roads": [
+  {
+   "x": -60,
+   "z": -5,
+   "w": 120,
+   "d": 10
+  },
+  {
+   "x": -5,
+   "z": -60,
+   "w": 10,
+   "d": 120
+  },
+  {
+   "x": -60,
+   "z": -50,
+   "w": 120,
+   "d": 6
+  },
+  {
+   "x": -60,
+   "z": -40,
+   "w": 120,
+   "d": 10,
+   "elevated": true
+  }
+ ],
+ "zones": [
+  {
+   "id": "overpass",
+   "name": "The Overpass",
+   "x": -16,
+   "z": -46,
+   "w": 32,
+   "d": 22
+  },
+  {
+   "id": "main_street",
+   "name": "Main Street",
+   "x": -58,
+   "z": -22,
+   "w": 50,
+   "d": 16
+  },
+  {
+   "id": "corner_store",
+   "name": "Corner Store",
+   "x": 8,
+   "z": -22,
+   "w": 24,
+   "d": 16
+  },
+  {
+   "id": "parking_lot",
+   "name": "Big Lot",
+   "x": 33,
+   "z": -22,
+   "w": 25,
+   "d": 16
+  },
+  {
+   "id": "school",
+   "name": "Sunny Days School",
+   "x": -58,
+   "z": 7,
+   "w": 50,
+   "d": 51
+  },
+  {
+   "id": "park",
+   "name": "Lollipop Park",
+   "x": 8,
+   "z": 7,
+   "w": 50,
+   "d": 51
+  },
+  {
+   "id": "suburbs",
+   "name": "Cul-de-sac",
+   "x": 18,
+   "z": -58,
+   "w": 40,
+   "d": 12
+  },
+  {
+   "id": "warehouses",
+   "name": "Old Warehouses",
+   "x": -58,
+   "z": -58,
+   "w": 40,
+   "d": 12
+  }
+ ],
+ "buildings": [
+  {
+   "kind": "shop",
+   "x": -54,
+   "z": -21,
+   "w": 12,
+   "d": 9,
+   "h": 6,
+   "color": "#ff7eb6"
+  },
+  {
+   "kind": "shop",
+   "x": -40,
+   "z": -21,
+   "w": 12,
+   "d": 9,
+   "h": 8,
+   "color": "#7ee3ff"
+  },
+  {
+   "kind": "shop",
+   "x": -26,
+   "z": -21,
+   "w": 14,
+   "d": 9,
+   "h": 5,
+   "color": "#ffd23f"
+  },
+  {
+   "kind": "store",
+   "x": 10,
+   "z": -21,
+   "w": 14,
+   "d": 8,
+   "h": 5,
+   "color": "#7cff8a",
+   "sign": "CORNER STORE"
+  },
+  {
+   "kind": "school",
+   "x": -50,
+   "z": 30,
+   "w": 30,
+   "d": 16,
+   "h": 9,
+   "color": "#ff9f43",
+   "sign": "SCHOOL"
+  },
+  {
+   "kind": "house",
+   "x": 22,
+   "z": -58,
+   "w": 8,
+   "d": 8,
+   "h": 5,
+   "color": "#c39bff"
+  },
+  {
+   "kind": "house",
+   "x": 34,
+   "z": -58,
+   "w": 8,
+   "d": 8,
+   "h": 5,
+   "color": "#ff8c8c"
+  },
+  {
+   "kind": "house",
+   "x": 46,
+   "z": -58,
+   "w": 8,
+   "d": 8,
+   "h": 5,
+   "color": "#8cf0ff"
+  },
+  {
+   "kind": "warehouse",
+   "x": -56,
+   "z": -58,
+   "w": 16,
+   "d": 7,
+   "h": 7,
+   "color": "#b0b8ff"
+  },
+  {
+   "kind": "warehouse",
+   "x": -36,
+   "z": -58,
+   "w": 14,
+   "d": 7,
+   "h": 6,
+   "color": "#ffb0d9"
+  },
+  {
+   "kind": "pillar",
+   "x": -12,
+   "z": -32,
+   "w": 2,
+   "d": 2,
+   "h": 6,
+   "color": "#e8e0ff"
+  },
+  {
+   "kind": "pillar",
+   "x": 10,
+   "z": -32,
+   "w": 2,
+   "d": 2,
+   "h": 6,
+   "color": "#e8e0ff"
+  },
+  {
+   "kind": "pillar",
+   "x": -12,
+   "z": -38,
+   "w": 2,
+   "d": 2,
+   "h": 6,
+   "color": "#e8e0ff"
+  },
+  {
+   "kind": "pillar",
+   "x": 10,
+   "z": -38,
+   "w": 2,
+   "d": 2,
+   "h": 6,
+   "color": "#e8e0ff"
+  }
+ ],
+ "props": [
+  {
+   "kind": "tree",
+   "x": 15,
+   "z": 15
+  },
+  {
+   "kind": "tree",
+   "x": 25,
+   "z": 22
+  },
+  {
+   "kind": "tree",
+   "x": 45,
+   "z": 14
+  },
+  {
+   "kind": "tree",
+   "x": 50,
+   "z": 40
+  },
+  {
+   "kind": "tree",
+   "x": 14,
+   "z": 48
+  },
+  {
+   "kind": "tree",
+   "x": 33,
+   "z": 50
+  },
+  {
+   "kind": "tree",
+   "x": -14,
+   "z": 52
+  },
+  {
+   "kind": "tree",
+   "x": -56,
+   "z": 12
+  },
+  {
+   "kind": "pond",
+   "x": 32,
+   "z": 34,
+   "r": 6
+  },
+  {
+   "kind": "slide",
+   "x": 20,
+   "z": 32
+  }
+ ],
+ "interactables": [
+  {
+   "id": "dumpster_overpass",
+   "type": "dumpster",
+   "x": -6,
+   "z": -32
+  },
+  {
+   "id": "dumpster_store",
+   "type": "dumpster",
+   "x": 27,
+   "z": -18
+  },
+  {
+   "id": "dumpster_school",
+   "type": "dumpster",
+   "x": -18,
+   "z": 20
+  },
+  {
+   "id": "dumpster_warehouse",
+   "type": "dumpster",
+   "x": -18,
+   "z": -55
+  },
+  {
+   "id": "trash_park_1",
+   "type": "trash_can",
+   "x": 12,
+   "z": 26
+  },
+  {
+   "id": "trash_park_2",
+   "type": "trash_can",
+   "x": 40,
+   "z": 24
+  },
+  {
+   "id": "trash_main",
+   "type": "trash_can",
+   "x": -32,
+   "z": -9
+  },
+  {
+   "id": "light_ne",
+   "type": "stop_light",
+   "x": 7,
+   "z": -7
+  },
+  {
+   "id": "light_sw",
+   "type": "stop_light",
+   "x": -7,
+   "z": 7
+  },
+  {
+   "id": "sign_cul",
+   "type": "stop_sign",
+   "x": 7,
+   "z": -42.5
+  },
+  {
+   "id": "window_store",
+   "type": "window",
+   "x": 17,
+   "z": -12.5
+  },
+  {
+   "id": "window_school",
+   "type": "window",
+   "x": -35,
+   "z": 29.4
+  },
+  {
+   "id": "window_shop",
+   "type": "window",
+   "x": -34,
+   "z": -11.5
+  },
+  {
+   "id": "shelter_main",
+   "type": "bus_shelter",
+   "x": -16,
+   "z": -11
+  },
+  {
+   "id": "car_lot_1",
+   "type": "car",
+   "x": 40,
+   "z": -16
+  },
+  {
+   "id": "car_lot_2",
+   "type": "car",
+   "x": 50,
+   "z": -14
+  },
+  {
+   "id": "campfire",
+   "type": "campfire",
+   "x": 0,
+   "z": -38
+  },
+  {
+   "id": "sign_cul_2",
+   "type": "stop_sign",
+   "x": -7,
+   "z": -51.5
+  }
+ ],
+ "actions": {
+  "dumpster": {
+   "verb": "Set dumpster on fire",
+   "cost": 450,
+   "repairSec": 40
+  },
+  "trash_can": {
+   "verb": "Burn the trash",
+   "cost": 25,
+   "repairSec": 20
+  },
+  "stop_light": {
+   "verb": "Panhandle",
+   "cost": 12,
+   "repairSec": 4,
+   "cash": 3
+  },
+  "stop_sign": {
+   "verb": "Panhandle",
+   "cost": 8,
+   "repairSec": 4,
+   "cash": 2
+  },
+  "window": {
+   "verb": "Throw a beer bottle",
+   "cost": 300,
+   "repairSec": 45
+  },
+  "bus_shelter": {
+   "verb": "Smash the bus shelter",
+   "cost": 1800,
+   "repairSec": 60
+  },
+  "car": {
+   "verb": "Bottle the windshield",
+   "cost": 650,
+   "repairSec": 50
+  },
+  "campfire": {
+   "verb": "Hang out by the fire",
+   "cost": 0,
+   "repairSec": 2,
+   "hangout": true
+  }
+ },
+ "traffic": {
+  "note": "Lanes are straight one-way paths; a car follows its lane, obeys every intersection it crosses, and loops back to the lane start at the map edge.",
+  "cars": 10,
+  "lanes": [
+   {
+    "id": "main_east",
+    "axis": "x",
+    "dir": 1,
+    "at": 2.5,
+    "from": -58,
+    "to": 58
+   },
+   {
+    "id": "main_west",
+    "axis": "x",
+    "dir": -1,
+    "at": -2.5,
+    "from": 58,
+    "to": -58
+   },
+   {
+    "id": "cross_south",
+    "axis": "z",
+    "dir": 1,
+    "at": -2.5,
+    "from": -58,
+    "to": 58
+   },
+   {
+    "id": "cross_north",
+    "axis": "z",
+    "dir": -1,
+    "at": 2.5,
+    "from": 58,
+    "to": -58
+   },
+   {
+    "id": "cul_east",
+    "axis": "x",
+    "dir": 1,
+    "at": -45.5,
+    "from": -58,
+    "to": 58
+   },
+   {
+    "id": "cul_west",
+    "axis": "x",
+    "dir": -1,
+    "at": -48.5,
+    "from": 58,
+    "to": -58
+   }
+  ],
+  "intersections": [
+   {
+    "id": "main_light",
+    "x": 0,
+    "z": 0,
+    "control": "light",
+    "cycle": {
+     "green": 9,
+     "yellow": 2.5
+    },
+    "hx": 5,
+    "hz": 5
+   },
+   {
+    "id": "cul_stop",
+    "x": 0,
+    "z": -47,
+    "control": "stop",
+    "hx": 5,
+    "hz": 3
+   }
+  ]
+ }
+}

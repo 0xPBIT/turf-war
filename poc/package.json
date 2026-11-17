@@ -1,0 +1,19 @@
+{
+  "name": "turf-war-poc",
+  "version": "1.0.0",
+  "description": "Throwaway proof of concept: persistent physics town server for Turf War",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "three": "^0.170.0",
+    "ws": "^8.23.0"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

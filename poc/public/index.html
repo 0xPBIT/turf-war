@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turf War (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #3b2a63; --card: rgba(255,255,255,0.88); --pop: #ff5fa2; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #8fd8ff; font-family: 'Fredoka', system-ui, sans-serif; color: var(--ink); }
+  canvas { display: block; }
+  .card { background: var(--card); border-radius: 18px; box-shadow: 0 6px 0 rgba(59,42,99,0.18); padding: 10px 14px; }
+  #damage { position: fixed; top: 14px; right: 14px; text-align: right; }
+  #damage .label { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7; }
+  #damage .big { font-size: 34px; font-weight: 700; color: var(--pop); line-height: 1.1; }
+  #damage .me { font-size: 15px; }
+  #zone { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); text-align: center; font-size: 15px; min-width: 180px; }
+  #zone b { font-size: 18px; }
+  #board { position: fixed; top: 14px; left: 14px; font-size: 14px; min-width: 170px; }
+  #board .row { display: flex; gap: 8px; align-items: center; }
+  #board .dot { width: 10px; height: 10px; border-radius: 50%; }
+  #board .zz { opacity: 0.5; }
+  #help { position: fixed; bottom: 14px; left: 14px; font-size: 13px; line-height: 1.5; }
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: white; box-shadow: 0 0 0 3px rgba(255,95,162,0.8); pointer-events: none; }
+  #prompt { position: fixed; bottom: 22%; left: 50%; transform: translateX(-50%); font-size: 18px; display: none; }
+  #feed { position: fixed; bottom: 14px; right: 14px; font-size: 14px; text-align: right; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  #feed .card { padding: 6px 12px; }
+  #login { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(143,216,255,0.6); }
+  #login .card { padding: 26px 30px; text-align: center; max-width: 340px; }
+  #login h1 { margin: 0 0 4px; font-size: 40px; color: var(--pop); }
+  #login input { font: inherit; font-size: 18px; padding: 10px 14px; border-radius: 12px; border: 3px solid #ffd23f; width: 220px; text-align: center; color: var(--ink); }
+  #login button { font: inherit; font-size: 18px; font-weight: 700; margin-top: 12px; padding: 10px 22px; border-radius: 14px; border: 0; background: var(--pop); color: white; cursor: pointer; box-shadow: 0 4px 0 #c43c7c; }
+  #status { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 22px; display: none; }
+  @media (max-width: 640px) { #board, #help { display: none; } #damage .big { font-size: 24px; } }
+</style>
+<script type="importmap">
+  { "imports": { "three": "/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="damage" class="card"><div class="label">Cost to the town</div><div class="big" id="town">$0</div><div class="me">You: <b id="mine">$0</b> · cash <b id="cash">$0</b></div></div>
+<div id="zone" class="card"><b id="zoneName">Sunnyvale</b><div id="zoneOwner">nobody owns this turf</div></div>
+<div id="board" class="card"><b>Vagrants</b><div id="rows"></div></div>
+<div id="help" class="card"><b>Click</b> to look around · <b>WASD</b> walk · <b>Shift</b> run · <b>Space</b> jump<br><b>Click</b> throw a bottle · <b>E</b> do the thing · <b>F</b> grab / let go<br><b>Tab</b> overview camera · close the tab and your vagrant lies down right here.</div>
+<div id="crosshair"></div>
+<div id="prompt" class="card"></div>
+<div id="feed"></div>
+<div id="status" class="card"></div>
+<div id="login" style="display:none"><div class="card"><h1>Turf War</h1><p>Pick a name, vagrant.</p><input id="nameInput" maxlength="16" placeholder="Sunny Steve"><br><button id="go">Wake up</button></div></div>
+<script type="module" src="/client.js"></script>
+</body>
+</html>
