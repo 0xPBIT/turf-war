@@ -10,13 +10,15 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
-const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'world.json');
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'town-v2.json');
 const GRACE_MS = Number(process.env.GRACE_MS || 5000); // design doc says 20 s; shorter for the demo
 const HEAT_HALF_LIFE_S = Number(process.env.HEAT_HALF_LIFE_S || 600); // design doc says ~24 h
 const PHYSICS_HZ = 60, SNAPSHOT_HZ = 20, META_HZ = 2;
-const WALK = 6, RUN = 9.5, JUMP = 6.5, GRAVITY = -20;
+// Same numbers as the client's predicted movement, so prediction rarely needs correcting.
+const WALK = 4.6, RUN = 8, JUMP = 6.5, GRAVITY = -18;
+const CAP_HALF = 0.55, CAP_R = 0.35; // capsule centre sits 0.9 m above the ground
 
-const MAP = JSON.parse(fs.readFileSync(path.join(__dirname, 'map.json'), 'utf8'));
+const MAP = JSON.parse(fs.readFileSync(path.join(__dirname, process.env.MAP_FILE || 'town.json'), 'utf8'));
 
 await RAPIER.init();
 const world = new RAPIER.World({ x: 0, y: GRAVITY, z: 0 });
@@ -46,8 +48,14 @@ const { minX, maxX, minZ, maxZ } = MAP.bounds;
 fixed(0, -0.5, 0, (maxX - minX) / 2, 0.5, (maxZ - minZ) / 2); // ground
 fixed(minX - 0.5, 5, 0, 0.5, 10, 70); fixed(maxX + 0.5, 5, 0, 0.5, 10, 70);
 fixed(0, 5, minZ - 0.5, 70, 10, 0.5); fixed(0, 5, maxZ + 0.5, 70, 10, 0.5);
-for (const r of MAP.roads) if (r.elevated) fixed(r.x + r.w / 2, 6.3, r.z + r.d / 2, r.w / 2, 0.3, r.d / 2);
-for (const b of MAP.buildings) fixed(b.x + b.w / 2, b.h / 2, b.z + b.d / 2, b.w / 2, b.h / 2, b.d / 2);
+// Colliders come from the art look test, in the order the client builds them.
+const colliderFor = (c) => {
+  const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], c.p[1], c.p[2]);
+  if (c.q) desc.setRotation({ x: c.q[0], y: c.q[1], z: c.q[2], w: c.q[3] });
+  const b = world.createRigidBody(desc);
+  const shape = c.box ? RAPIER.ColliderDesc.cuboid(c.box[0], c.box[1], c.box[2]) : RAPIER.ColliderDesc.cylinder(c.cyl[1] / 2, c.cyl[0]);
+  return world.createCollider(shape.setFriction(0.8), b);
+};
 
 // ---------- entities ----------
 const sessions = new Map(); // playerId -> { ws, entity, input, lastAct, graceTimer }
@@ -77,43 +85,41 @@ function describe(e) {
   if (e.player) Object.assign(d, { name: e.player.name, color: e.player.color, pid: e.player.id });
   if (e.fixedPos) d.pos = e.fixedPos;
   if (e.color) d.color = e.color;
+  if (e.index !== undefined) d.index = e.index;
+  if (e.spec) { d.s = e.spec.s; d.hex = e.spec.hex; }
   return d;
 }
 
-const PROP_SPECS = {
-  dumpster:  { shape: () => RAPIER.ColliderDesc.cuboid(1.1, 0.7, 0.65), mass: 300, y: 0.7 },
-  trash_can: { shape: () => RAPIER.ColliderDesc.cylinder(0.45, 0.32), mass: 8, y: 0.45 },
-  car:       { shape: () => RAPIER.ColliderDesc.cuboid(1.0, 0.6, 2.1), mass: 1100, y: 0.6 },
-};
-const FIXED_SPECS = {
-  window:      [0.9, 0.7, 0.08, 1.6],
-  bus_shelter: [1.8, 1.3, 0.7, 1.3],
-  stop_light:  [0.15, 2.0, 0.15, 2.0],
-  stop_sign:   [0.1, 1.2, 0.1, 1.2],
-};
-
-// Map interactables become entities. Movable ones are dynamic bodies whose resting
-// position persists, so the town stays as messy as players leave it.
-for (const it of MAP.interactables) {
-  const id = 'o:' + it.id;
-  if (PROP_SPECS[it.type]) {
-    const spec = PROP_SPECS[it.type];
-    const saved = save.objects[id];
-    const desc = RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(saved ? saved.p[0] : it.x, saved ? saved.p[1] : spec.y, saved ? saved.p[2] : it.z)
-      .setLinearDamping(0.6).setAngularDamping(0.8);
-    if (saved) desc.setRotation({ x: saved.q[0], y: saved.q[1], z: saved.q[2], w: saved.q[3] });
-    const body = world.createRigidBody(desc);
-    const collider = world.createCollider(spec.shape().setMass(spec.mass).setFriction(0.7), body);
-    addEntity({ id, kind: 'prop', type: it.type, body, collider, mass: spec.mass, state: {} });
-  } else {
-    const [hx, hy, hz, cy] = FIXED_SPECS[it.type] || [0.4, 0.3, 0.4, 0.3];
-    const collider = it.type === 'campfire'
-      ? null
-      : fixed(it.x, cy, it.z, hx, hy, hz);
-    addEntity({ id, kind: 'fixture', type: it.type, collider, fixedPos: [it.x, cy, it.z], state: {} });
-  }
+// Fixtures: static things you can act on (trash piles, the dumpster, the stop sign,
+// windows, parked cars). The client already draws them; the server owns their state.
+const fixtureCount = {};
+MAP.colliders.forEach((c, i) => {
+  const collider = colliderFor(c);
+  if (!c.tag || c.tag === 'npc') return;
+  const n = fixtureCount[c.tag] = (fixtureCount[c.tag] || 0) + 1;
+  const id = c.tag === 'pile' ? 'pile:' + c.pile : `f:${c.tag}${n}`;
+  addEntity({ id, kind: 'fixture', type: c.tag, collider, fixedPos: c.p, index: c.pile, state: {} });
+});
+for (const w of MAP.windows) {
+  const collider = colliderFor({ p: w.p, q: w.q, box: w.half });
+  addEntity({ id: w.id, kind: 'fixture', type: 'window', collider, fixedPos: w.p, index: w.gi, value: w.value, state: {} });
 }
+// Props: crates and cones are dynamic bodies. Their resting spots persist.
+const PROP_SHAPES = {
+  crate: (pr) => RAPIER.ColliderDesc.cuboid(pr.s / 2, pr.s / 2, pr.s / 2).setMass(2),
+  cone: () => RAPIER.ColliderDesc.cylinder(0.38, 0.2).setMass(0.8),
+};
+function spawnProp(pr, fresh) {
+  const saved = !fresh && save.objects['o:' + pr.id.slice(2)];
+  const desc = RAPIER.RigidBodyDesc.dynamic()
+    .setTranslation(...(saved ? saved.p : pr.p)).setLinearDamping(0.3).setAngularDamping(0.5);
+  if (saved) desc.setRotation({ x: saved.q[0], y: saved.q[1], z: saved.q[2], w: saved.q[3] });
+  const body = world.createRigidBody(desc);
+  const collider = world.createCollider(PROP_SHAPES[pr.type](pr).setFriction(0.6).setRestitution(0.25), body);
+  body.sleep();
+  return addEntity({ id: pr.id, kind: 'prop', type: pr.type, body, collider, mass: pr.type === 'crate' ? 2 : 0.8, spec: pr, state: {} });
+}
+for (const pr of MAP.props) spawnProp(pr);
 
 // ---------- players ----------
 const controller = world.createCharacterController(0.05);
@@ -126,8 +132,8 @@ const COLORS = ['#ff5fa2', '#46c6ff', '#ffb627', '#7ae582', '#b388ff', '#ff7b54'
 function vagrantId(pid) { return 'p:' + pid; }
 
 function spawnAwake(p) {
-  const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y + 0.3, p.z));
-  const collider = world.createCollider(RAPIER.ColliderDesc.capsule(0.5, 0.4).setFriction(0.5), body);
+  const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, Math.max(p.y, CAP_HALF + CAP_R) + 0.05, p.z));
+  const collider = world.createCollider(RAPIER.ColliderDesc.capsule(CAP_HALF, CAP_R).setFriction(0.5), body);
   return addEntity({ id: vagrantId(p.id), kind: 'vagrant', player: p, body, collider, vy: 0, grabbing: null, state: {} });
 }
 
@@ -138,7 +144,7 @@ function spawnSleeper(p) {
     .setRotation(p.q ? { x: p.q[0], y: p.q[1], z: p.q[2], w: p.q[3] } : { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 })
     .setLinearDamping(1.5).setAngularDamping(2.0);
   const body = world.createRigidBody(desc);
-  const collider = world.createCollider(RAPIER.ColliderDesc.capsule(0.5, 0.4).setMass(70).setFriction(0.9), body);
+  const collider = world.createCollider(RAPIER.ColliderDesc.capsule(CAP_HALF, CAP_R).setMass(70).setFriction(0.9), body);
   return addEntity({ id: vagrantId(p.id), kind: 'sleeper', player: p, body, collider, mass: 70, state: {} });
 }
 
@@ -160,7 +166,7 @@ function wakeUp(p) {
   const e = entities.get(id);
   if (e && e.kind === 'sleeper') {
     const t = e.body.translation();
-    Object.assign(p, { x: t.x, y: 0.6, z: t.z });
+    Object.assign(p, { x: t.x, y: CAP_HALF + CAP_R, z: t.z });
     removeEntity(id);
   }
   p.asleep = false;
@@ -225,20 +231,24 @@ function nearest(e, radius, filter) {
   return best;
 }
 
+const HIT_ONLY = new Set(['window', 'car', 'crate', 'cone']);
 function interact(s) {
   const e = s.entity, p = e.player;
   const now = Date.now();
   if (now - (s.lastAct || 0) < 600) return;
   s.lastAct = now;
-  const target = nearest(e, 3, o => o.type && ACTIONS[o.type] && o.type !== 'window' && o.type !== 'car');
+  const target = nearest(e, 3, o => o.kind === 'fixture' && ACTIONS[o.type] && !HIT_ONLY.has(o.type));
   if (!target) return;
   const a = ACTIONS[target.type];
   const busyUntil = target.state.busyUntil || 0;
   if (now < busyUntil) return;
   target.state.busyUntil = now + a.repairSec * 1000;
-  if (target.type === 'dumpster' || target.type === 'trash_can') target.state.fireUntil = now + a.repairSec * 1000;
+  // A trash pile burns for 30 s then sits charred until the town cleans it up.
+  if (target.type === 'pile') target.state.fireUntil = now + 30000;
+  if (target.type === 'dumpster') target.state.fireUntil = now + a.repairSec * 1000;
+  if (target.type === 'pile' || target.type === 'dumpster') target.state.burntUntil = now + a.repairSec * 1000;
   if (a.cash) { p.cash = (p.cash || 0) + a.cash; broadcast({ t: 'fx', kind: 'say', id: e.id, text: `Spare change? (+$${a.cash})` }); }
-  if (a.hangout) broadcast({ t: 'fx', kind: 'say', id: e.id, text: 'just vibin by the fire' });
+  if (a.hangout) broadcast({ t: 'fx', kind: 'say', id: e.id, text: target.type === 'couch' ? 'comfy' : 'warming up' });
   addDamage(p, a.cost, posOf(target), a.verb);
 }
 
@@ -252,8 +262,8 @@ function throwBottle(s, dir) {
   const dx = dir.x / len, dy = Math.max(-0.6, Math.min(0.9, dir.y / len)), dz = dir.z / len;
   const t = e.body.translation();
   const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(t.x + dx * 0.7, t.y + 0.6 + dy * 0.7, t.z + dz * 0.7)
-    .setLinvel(dx * 16, dy * 16 + 2.5, dz * 16).setAngvel({ x: 8, y: 0, z: 3 }).setCcdEnabled(true));
+    .setTranslation(t.x + dx * 0.6, t.y + 0.55 + dy * 0.6, t.z + dz * 0.6)
+    .setLinvel(dx * 22, dy * 22 + 3, dz * 22).setAngvel({ x: 8, y: 0, z: 3 }).setCcdEnabled(true));
   const collider = world.createCollider(RAPIER.ColliderDesc.capsule(0.12, 0.07).setMass(0.4)
     .setRestitution(0.2).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
   addEntity({ id: 'b:' + nextBottle++, kind: 'bottle', body, collider, thrower: e.player, born: now, state: {} });
@@ -266,14 +276,25 @@ function onBottleHit(bottle, other) {
   const at = posOf(bottle);
   const p = bottle.thrower;
   const now = Date.now();
-  if (other && ['window', 'car', 'bus_shelter'].includes(other.type)) {
+  const vel = bottle.body.linvel();
+  if (other && (other.type === 'window' || other.type === 'car')) {
     const a = ACTIONS[other.type];
     if (now >= (other.state.brokenUntil || 0)) {
       other.state.brokenUntil = now + a.repairSec * 1000;
-      addDamage(p, a.cost, posOf(other), a.verb.replace('Throw a beer bottle', 'Smashed a window'));
+      addDamage(p, other.value || a.cost, posOf(other), a.verb);
+      broadcast({ t: 'fx', kind: 'break', id: other.id, at, v: [vel.x, vel.y, vel.z] });
     } else addDamage(p, 15, at, 'More glass');
+  } else if (other && other.type === 'crate') {
+    const a = ACTIONS.crate, spec = other.spec, cp = posOf(other);
+    removeEntity(other.id);
+    save.objects['o:' + spec.id.slice(2)] = undefined;
+    broadcast({ t: 'fx', kind: 'crate', at: cp, s: spec.s, hex: spec.hex, v: [vel.x, vel.y, vel.z] });
+    addDamage(p, a.cost, cp, a.verb);
+    setTimeout(() => { if (!entities.has(spec.id)) spawnProp(spec, true); }, a.repairSec * 1000);
+  } else if (other && other.type === 'cone') {
+    if (now >= (other.state.hitUntil || 0)) { other.state.hitUntil = now + ACTIONS.cone.repairSec * 1000; addDamage(p, ACTIONS.cone.cost, posOf(other), ACTIONS.cone.verb); }
   } else addDamage(p, 3, at, 'Broken bottle');
-  broadcast({ t: 'fx', kind: 'smash', at });
+  broadcast({ t: 'fx', kind: 'smash', at, v: [vel.x, vel.y, vel.z] });
   setTimeout(() => removeEntity(bottle.id), 30);
 }
 
@@ -308,7 +329,7 @@ world.timestep = dt;
 // AI cars are kinematic bodies on one-way lanes. They obey lights and stop signs,
 // stop for anyone in the street ahead, and honk if you keep standing there.
 const TRAFFIC = MAP.traffic || { lanes: [], intersections: [], cars: 0 };
-const CRUISE = 9, ACCEL = 4, BRAKE = 10, CAR_HALF_LEN = 2.1, CAR_HALF_W = 1.0;
+const CRUISE = 8, ACCEL = 4, BRAKE = 10, CAR_HALF_LEN = 2.25, CAR_HALF_W = 0.9;
 const lightStart = Date.now();
 function lightPhase(ix) {
   const c = ix.cycle, period = 2 * (c.green + c.yellow);
@@ -333,6 +354,7 @@ for (const lane of TRAFFIC.lanes) {
   laneCrossings.set(lane.id, list);
 }
 const cars = [];
+const CAR_COLORS = ['#FF8A7A', '#26D3A0', '#3FB8FF', '#FFC93C', '#8F6BFF', '#FF6E9E'];
 function carPos(car) {
   const l = car.lane;
   return l.axis === 'x' ? { x: car.s, z: l.at } : { x: l.at, z: car.s };
@@ -347,9 +369,9 @@ function spawnCars() {
     const p = carPos(car);
     const yaw = lane.axis === 'x' ? (lane.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (lane.dir > 0 ? 0 : Math.PI);
     car.rot = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
-    const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, 0.6, p.z).setRotation(car.rot));
-    const collider = world.createCollider(RAPIER.ColliderDesc.cuboid(CAR_HALF_W, 0.6, CAR_HALF_LEN), body);
-    car.entity = addEntity({ id: car.id, kind: 'traffic', type: 'car', body, collider, state: {}, color: COLORS[(i * 3) % COLORS.length] });
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, 0.7, p.z).setRotation(car.rot));
+    const collider = world.createCollider(RAPIER.ColliderDesc.cuboid(CAR_HALF_W, 0.7, CAR_HALF_LEN), body);
+    car.entity = addEntity({ id: car.id, kind: 'traffic', type: 'car', body, collider, state: {}, color: CAR_COLORS[i % CAR_COLORS.length] });
     cars.push(car);
   }
 }
@@ -359,7 +381,7 @@ function obstacleAhead(car, look) {
   let best = Infinity, vagrant = null;
   for (const e of entities.values()) {
     if (e === car.entity || !e.body) continue;
-    if (!['vagrant', 'sleeper', 'traffic', 'prop'].includes(e.kind)) continue;
+    if (!['vagrant', 'sleeper', 'traffic'].includes(e.kind)) continue; // cones and crates just get knocked aside
     const t = e.body.translation();
     const along = (l.axis === 'x' ? t.x - car.s : t.z - car.s) * l.dir;
     const side = l.axis === 'x' ? t.z - l.at : t.x - l.at;
@@ -417,7 +439,7 @@ function stepTraffic(now) {
       if (clear) { car.s = l.from; car.stopState = {}; } else car.s = l.to;
     }
     const p = carPos(car);
-    car.entity.body.setNextKinematicTranslation({ x: p.x, y: 0.6, z: p.z });
+    car.entity.body.setNextKinematicTranslation({ x: p.x, y: 0.7, z: p.z });
     car.entity.state.braking = car.v < want - 0.05 || car.v < 0.1;
   }
 }
@@ -435,7 +457,21 @@ spawnCars();
 
 function stepPlayers() {
   for (const s of sessions.values()) {
-    const e = s.entity, inp = s.input;
+    // Inputs are played back for exactly the time the client simulated them, so the
+    // server lands where the client's prediction did. No input queued: stand still.
+    const q = s.queue || (s.queue = []);
+    if (!q.length) continue;
+    let queued = 0; for (const i of q) queued += i.rem;
+    while (queued > 0.5 && q.length > 1) queued -= q.shift().rem;   // way behind: drop old inputs
+    const step = queued > 0.15 ? dt * 2 : dt;                       // a little behind: catch up
+    const inp = q[0];
+    let need = step - inp.rem; inp.rem -= step;
+    if (inp.rem <= 1e-6) {
+      q.shift(); s.ackSeq = inp.seq;
+      if (q.length && need > 0) q[0].rem -= need;                   // carry the overrun into the next input
+    }
+    s.input = inp;
+    const e = s.entity;
     const t = e.body.translation();
     let mx = inp.x || 0, mz = inp.z || 0;
     const ml = Math.hypot(mx, mz);
@@ -445,17 +481,17 @@ function stepPlayers() {
       const g = entities.get(e.grabbing);
       if (g && g.mass) speed *= Math.max(0.25, Math.min(1, 60 / g.mass)); // heavy things slow you down
     }
-    e.vy += GRAVITY * dt;
-    const desired = { x: mx * speed * dt, y: e.vy * dt, z: mz * speed * dt };
-    controller.computeColliderMovement(e.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC);
+    e.vy += GRAVITY * step;
+    const desired = { x: mx * speed * step, y: e.vy * step, z: mz * speed * step };
+    controller.computeColliderMovement(e.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC | RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC);
     const mv = controller.computedMovement();
     const grounded = controller.computedGrounded();
-    if (grounded) { e.vy = inp.jump ? JUMP : 0; }
+    if (grounded) { e.vy = inp.jump ? JUMP : Math.min(e.vy, 0) * 0; }
     if (typeof inp.yaw === 'number') e.facing = inp.yaw;
     else if (ml > 0.01) e.facing = Math.atan2(mx, mz);
     e.body.setNextKinematicTranslation({ x: t.x + mv.x, y: t.y + mv.y, z: t.z + mv.z });
     const p = e.player;
-    p.x = t.x; p.y = t.y; p.z = t.z;
+    p.x = t.x + mv.x; p.y = t.y + mv.y; p.z = t.z + mv.z;
   }
 }
 
@@ -493,9 +529,16 @@ function snapshotRows(all) {
   return rows;
 }
 function sendSnapshot(all, ws) {
-  const msg = JSON.stringify({ t: 's', b: snapshotRows(all) });
+  const msg = JSON.stringify({ t: 's', ts: Date.now(), b: snapshotRows(all) });
   if (ws) return ws.send(msg);
-  for (const s of sessions.values()) if (s.ws.readyState === 1) s.ws.send(msg);
+  for (const s of sessions.values()) {
+    if (s.ws.readyState !== 1) continue;
+    s.ws.send(msg);
+    // Tell each player where the server has them after their latest input, so the
+    // client can correct its own prediction gently instead of snapping.
+    const p = s.entity.player;
+    s.ws.send(JSON.stringify({ t: 'a', seq: s.ackSeq || 0, p: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)] }));
+  }
 }
 function metaPayload() {
   const now = Date.now();
@@ -504,6 +547,7 @@ function metaPayload() {
     const st = e.state || {};
     const o = {};
     if ((st.fireUntil || 0) > now) o.fire = 1;
+    else if ((st.burntUntil || 0) > now) o.burnt = 1;
     if ((st.brokenUntil || 0) > now) o.broken = 1;
     if (st.braking) o.brake = 1;
     if (Object.keys(o).length) objects[e.id] = o;
@@ -544,11 +588,22 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/jav
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/healthz') { res.writeHead(200); return res.end('ok'); }
-  if (url.pathname === '/vendor/three.module.js' || url.pathname === '/vendor/three.core.js') {
-    res.writeHead(200, { 'content-type': MIME['.js'] });
-    return fs.createReadStream(path.join(__dirname, 'node_modules', 'three', 'build', path.basename(url.pathname))).pipe(res);
+  // Libraries come from node_modules so the game never depends on a CDN.
+  if (url.pathname === '/vendor/cannon-es.js') {
+    res.writeHead(200, { 'content-type': MIME['.js'], 'cache-control': 'public, max-age=86400' });
+    return fs.createReadStream(path.join(__dirname, 'node_modules', 'cannon-es', 'dist', 'cannon-es.js')).pipe(res);
   }
-  if (url.pathname === '/map.json') { res.writeHead(200, { 'content-type': MIME['.json'] }); return res.end(JSON.stringify(MAP)); }
+  if (url.pathname.startsWith('/vendor/three/')) {
+    const root = path.join(__dirname, 'node_modules', 'three');
+    const f = path.join(root, path.normalize(url.pathname.slice('/vendor/three/'.length)));
+    if (!f.startsWith(root + path.sep) || !/^(build|examples)$/.test(path.relative(root, f).split(path.sep)[0])) { res.writeHead(403); return res.end(); }
+    return fs.readFile(f, (err, buf) => {
+      if (err) { res.writeHead(404); return res.end('not found'); }
+      res.writeHead(200, { 'content-type': MIME[path.extname(f)] || 'application/octet-stream', 'cache-control': 'public, max-age=86400' });
+      res.end(buf);
+    });
+  }
+  if (url.pathname === '/town.json') { res.writeHead(200, { 'content-type': MIME['.json'] }); return res.end(JSON.stringify(MAP)); }
   const file = path.join(__dirname, 'public', url.pathname === '/' ? 'index.html' : path.normalize(url.pathname).replace(/^([/\\])+/, ''));
   if (!file.startsWith(path.join(__dirname, 'public'))) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, buf) => {
@@ -579,7 +634,7 @@ wss.on('connection', ws => {
         const name = String(m.name || 'Vagrant').replace(/[^\w \-']/g, '').slice(0, 16) || 'Vagrant';
         save.accounts[hashToken(token)] = acct = { pid: id, created: now };
         const spawnJitter = () => (Math.random() - 0.5) * 6;
-        save.players[id] = { id, name, color: COLORS[Object.keys(save.players).length % COLORS.length], x: MAP.spawn.x + spawnJitter(), y: 1, z: MAP.spawn.z + spawnJitter(), damage: 0, cash: 0, asleep: false };
+        save.players[id] = { id, name, color: COLORS[Object.keys(save.players).length % COLORS.length], ...(() => { const sp = MAP.spawnPoints[Object.keys(save.players).length % MAP.spawnPoints.length]; return { x: sp[0] + spawnJitter() * 0.3, y: 1, z: sp[1] + spawnJitter() * 0.3 }; })(), damage: 0, cash: 0, asleep: false };
       }
       pid = acct.pid;
       const p = save.players[pid];
@@ -598,7 +653,11 @@ wss.on('connection', ws => {
     }
     const s = pid && sessions.get(pid);
     if (!s || s.ws !== ws) return;
-    if (m.t === 'in') s.input = { x: +m.x || 0, z: +m.z || 0, jump: !!m.jump, run: !!m.run, yaw: Number.isFinite(+m.yaw) ? +m.yaw : undefined };
+    if (m.t === 'in') {
+      const q = s.queue || (s.queue = []);
+      if (q.length < 40) q.push({ x: +m.x || 0, z: +m.z || 0, jump: !!m.jump, run: !!m.run, yaw: Number.isFinite(+m.yaw) ? +m.yaw : undefined,
+        seq: m.seq >>> 0, rem: Math.min(0.1, Math.max(0, +m.dt || 1 / 30)) });
+    }
     else if (m.t === 'act') interact(s);
     else if (m.t === 'throw' && m.dir) throwBottle(s, { x: +m.dir.x || 0, y: +m.dir.y || 0, z: +m.dir.z || 0 });
     else if (m.t === 'grab') grab(s);
@@ -606,7 +665,7 @@ wss.on('connection', ws => {
   ws.on('close', () => {
     const s = pid && sessions.get(pid);
     if (!s || s.ws !== ws) return;
-    s.input = {};
+    s.input = {}; s.queue = [];
     releaseGrab(s.entity);
     // Wait a moment for a reconnect before the vagrant lies down.
     s.graceTimer = setTimeout(() => { if (sessions.get(pid) === s) lieDown(pid); }, GRACE_MS);
