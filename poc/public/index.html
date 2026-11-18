@@ -135,6 +135,30 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 .pop.honk{color:#E8343F;font-size:30px}
 @media (pointer:coarse){ #help{display:none} }
 @media (max-width:640px){ #board{display:none} #zone{top:calc(64px + env(safe-area-inset-top,0px))} }
+#gear{position:fixed;z-index:8;right:max(12px,env(safe-area-inset-right,0px));top:calc(64px + env(safe-area-inset-top,0px));width:40px;height:40px;padding:0;font-size:20px;line-height:40px;background:rgba(255,255,255,.92);box-shadow:0 3px 0 rgba(20,60,140,.25)}
+#fpsMeter{position:fixed;z-index:8;right:max(12px,env(safe-area-inset-right,0px));top:calc(112px + env(safe-area-inset-top,0px));background:rgba(255,255,255,.85);border-radius:10px;padding:2px 8px;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;display:none;pointer-events:none}
+#settings{position:fixed;inset:0;z-index:28;display:none;place-items:center;background:rgba(46,35,80,.35);backdrop-filter:blur(3px)}
+#settings .card{background:#fff;border-radius:24px;padding:20px 22px 16px;box-shadow:0 6px 0 rgba(20,60,140,.3);width:min(460px,calc(100vw - 32px));max-height:calc(100vh - 48px);display:grid;grid-template-rows:auto auto 1fr auto;gap:12px;overflow:hidden}
+#settings h2{margin:0;font-family:var(--display);font-weight:700;font-size:26px;color:var(--candy)}
+#settings .stabs{display:flex;gap:6px;flex-wrap:wrap}
+#settings .stabs button.on{background:var(--candy);color:#fff}
+#settings .swrap{overflow-y:auto;min-height:0}
+#settings .spane{display:grid;gap:10px;align-content:start;padding:2px 4px 2px 0;min-height:200px}
+#settings .spane[hidden]{display:none}
+#settings .srow{display:grid;grid-template-columns:1fr 64px;gap:2px 10px;align-items:center;font-weight:700;font-size:14px}
+#settings .srow label{grid-column:1/-1}
+#settings .srow input[type=range]{width:100%;accent-color:#FF6E9E}
+#settings .srow output{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
+#settings .srow select{grid-column:1/-1;font:inherit;padding:6px 10px;border-radius:12px;border:2px solid var(--pill-2);color:var(--ink);background:#fff}
+#settings .srow.chk{grid-template-columns:1fr}
+#settings .srow.chk input{accent-color:#FF6E9E;width:18px;height:18px;vertical-align:-3px;margin:0 6px 0 0}
+#settings .binds h4{margin:6px 0 4px;font-family:var(--display);font-weight:600;font-size:15px}
+#settings .binds h4 small{font-family:var(--body);font-weight:700;font-size:11.5px;color:var(--ink-soft)}
+#settings .brow{display:flex;align-items:center;justify-content:space-between;font-weight:700;font-size:14px;padding:3px 0}
+#settings .brow button{min-width:110px}
+#settings .brow button.wait{background:#FFC93C}
+#settings .sfoot{display:flex;gap:8px;justify-content:space-between}
+#settings #sResume{background:var(--candy);color:#fff;font-size:16px;padding:9px 22px}
 </style>
 <div class="hud chip" id="zone"><b id="zoneName">Sunnyside</b><span id="zoneOwner">nobody owns this turf</span></div>
 <div id="board"><h3>Vagrants</h3><div id="rows"></div></div>
@@ -142,6 +166,14 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 <div id="help">Click to look around · <kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump<br>Click throws a bottle · <kbd>E</kbd> do the thing · <kbd>G</kbd> grab or drag<br>Close the tab and your vagrant lies down right where you are.</div>
 <div id="status"></div>
 <div id="login"><div class="card"><h1>Turf War</h1><p>Pick a name, vagrant.</p><input id="nameInput" maxlength="16" placeholder="Sunny Steve" autocomplete="off"><button type="button" id="go">Wake up</button></div></div>
+<button type="button" id="gear" title="Settings (Esc)" aria-label="Settings">⚙</button>
+<div id="fpsMeter"></div>
+<div id="settings" role="dialog" aria-label="Settings"><div class="card">
+<h2>Settings</h2>
+<div class="stabs"><button type="button" class="on" data-t="controls">Controls</button><button type="button" data-t="video">Video</button><button type="button" data-t="audio">Audio</button><button type="button" data-t="hud">HUD</button></div>
+<div class="swrap"><div class="spane" id="sp_controls"></div><div class="spane" id="sp_video" hidden></div><div class="spane" id="sp_audio" hidden></div><div class="spane" id="sp_hud" hidden></div></div>
+<div class="sfoot"><button type="button" id="sReset">Reset to defaults</button><button type="button" id="sResume">Back to the streets</button></div>
+</div></div>
 
 <button type="button" id="act" hidden>Light the trash <kbd>F</kbd></button>
 <div id="err">The 3D view couldn't start in this browser. WebGL needs to be turned on.</div>
@@ -937,7 +969,7 @@ function updateAct(){ NET.updatePrompt(actEl); }
 actEl.addEventListener('click',()=>NET.act());
 let drag=null;
 canvas.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,id:e.pointerId,moved:0}; canvas.setPointerCapture(e.pointerId); });
-canvas.addEventListener('pointermove',e=>{ if(!drag||drag.id!==e.pointerId) return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY; drag.moved+=Math.abs(dx)+Math.abs(dy); const k=e.pointerType==='touch'?.006:.004; yaw-=dx*k; pitch=Math.max(-1.2,Math.min(1.2,pitch-dy*k)); });
+canvas.addEventListener('pointermove',e=>{ if(!drag||drag.id!==e.pointerId) return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY; drag.moved+=Math.abs(dx)+Math.abs(dy); SET.lookDrag(dx,dy,e.pointerType==='touch'); });
 const ray=new THREE.Raycaster();
 canvas.addEventListener('pointerup',e=>{ if(!drag) return; if(drag.moved<8){ const nx=(e.clientX/innerWidth)*2-1, ny=-(e.clientY/innerHeight)*2+1; ray.setFromCamera({x:nx,y:ny},camera); NET.throwDir(ray.ray.direction.clone()); } drag=null; });
 // touch joystick
@@ -1131,12 +1163,12 @@ let bobT=0;
 function tick(){
   const dt=Math.min(clock.getDelta(),1/20); const t=clock.elapsedTime;
   // movement
-  let mx=0,mz=0; if(keys.has('KeyW')||keys.has('ArrowUp')) mz+=1; if(keys.has('KeyS')||keys.has('ArrowDown')) mz-=1; if(keys.has('KeyA')||keys.has('ArrowLeft')) mx-=1; if(keys.has('KeyD')||keys.has('ArrowRight')) mx+=1;
+  let mx=0,mz=0; if(SET.down('fwd')) mz+=1; if(SET.down('back')) mz-=1; if(SET.down('left')) mx-=1; if(SET.down('right')) mx+=1;
   mx+=jv.x; mz-=jv.y; const ml=Math.hypot(mx,mz); if(ml>1){mx/=ml;mz/=ml;}
-  const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?8:4.6)*NET.speedScale();
+  const speed=(SET.running()?8:4.6)*NET.speedScale();
   fwd.set(-Math.sin(yaw),0,-Math.cos(yaw)); right.set(Math.cos(yaw),0,-Math.sin(yaw));
   player.velocity.x=(fwd.x*mz+right.x*mx)*speed; player.velocity.z=(fwd.z*mz+right.z*mx)*speed;
-  if(keys.has('Space') && player.position.y<.4){ player.velocity.y=6.5; }
+  if(SET.down('jump') && player.position.y<.4){ player.velocity.y=6.5; }
   NET.beforeStep(dt, mx, mz, speed);
   if(ml>0) player.wakeUp();
   world.step(1/90,dt,6);
@@ -1150,10 +1182,10 @@ function tick(){
   NET.frame(dt, t);
   // camera
   bobT+=dt*(ml>0?speed*2.2:0);
-  camera.position.set(player.position.x, player.position.y+1.25+Math.sin(bobT)*.04, player.position.z);
+  camera.position.set(player.position.x, player.position.y+1.25+Math.sin(bobT)*.04*SET.bob(), player.position.z);
   camera.rotation.set(pitch,yaw,0,'YXZ');
   // viewmodel
-  handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008,-.17+Math.abs(Math.sin(bobT*.5))*.01-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6;
+  handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6;
   // ambient life
   updateFX(dt,t);
   for(const b of bubbles){ b.position.y+=b.userData.v*dt; b.position.x+=Math.sin(t*.6+b.userData.ph)*dt*.4; if(b.position.y>26){ b.position.y=1; } }
@@ -1169,6 +1201,189 @@ function tick(){
 }
 scene.traverse(o=>{ if(o.isMesh && o.userData.c!==undefined){ o.castShadow=o.castShadow!==false; } });
 window.__tw={ info:()=>{ let m=0,t=0,sh=0; scene.traverse(o=>{ if(o.isMesh&&o.visible){ m++; const g=o.geometry; const n=g.index?g.index.count:g.attributes.position.count; t+=n/3; if(o.castShadow) sh+=n/3; } }); return {meshes:m,tris:Math.round(t),shadowTris:Math.round(sh),geos:renderer.info.memory.geometries,tex:renderer.info.memory.textures}; }, throwAt:(x,y,z)=>{ const d=new THREE.Vector3(x,y,z).sub(camera.position).normalize(); throwBottle(d); }, goSpot, applyPreset, setMatBtn, setMix, lightAll:()=>piles.forEach(lightPile), dbg:()=>({b:bottles.map(e=>[e.b.position.x.toFixed(1),e.b.position.y.toFixed(1),e.b.position.z.toFixed(1)]),cam:camera.position.toArray().map(v=>v.toFixed(1))}), look:(y,p)=>{yaw=y;pitch=p;}, pos:(x,z)=>{player.position.set(x,.35,z);}, get damage(){return damage;} };
+// ===================== player settings (GAME-79) =====================
+// Esc (or the gear button) opens the menu. Everything is saved per browser in localStorage.
+// Runs inside the look-test module before NET, so tick() and NET can read SET.
+const SET = (() => {
+  const KEY = 'tw_settings';
+  const BIND_ACTIONS = [
+    ['fwd', 'Walk forward', 'KeyW'], ['back', 'Walk back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
+    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'],
+  ];
+  // Arrow keys and the right-hand Shift always work too, whatever the bindings say.
+  const ALT = { fwd: 'ArrowUp', back: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', run: 'ShiftRight' };
+  const DEFAULTS = {
+    sens: 1, invertY: false, touchSens: 1, toggleRun: false,
+    fov: 72, bob: 1, quality: 'high', scale: 1, bloom: true, fps: false,
+    vol: .8,
+    help: true, board: true, xhair: true, tags: true,
+    binds: Object.fromEntries(BIND_ACTIONS.map(([k, , c]) => [k, c])),
+  };
+  const s = structuredClone(DEFAULTS);
+  try { const saved = JSON.parse(localStorage.getItem(KEY) || '{}'); Object.assign(s, saved, { binds: { ...DEFAULTS.binds, ...(saved.binds || {}) } }); } catch {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
+
+  const el = id => document.getElementById(id);
+  const keyName = c => !c ? '(none)' : c.startsWith('Key') ? c.slice(3) : c.startsWith('Digit') ? c.slice(5)
+    : ({ Space: 'Space', ShiftLeft: 'Left Shift', ShiftRight: 'Right Shift', ControlLeft: 'Left Ctrl', ControlRight: 'Right Ctrl', AltLeft: 'Left Alt', AltRight: 'Right Alt',
+      ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Backquote: '`', Tab: 'Tab', CapsLock: 'Caps Lock' })[c] || c;
+
+  // ---------- applying ----------
+  const dpr0 = Math.min(devicePixelRatio, 2);
+  let runLatched = false;
+  function applyVideo() {
+    camera.fov = s.fov; camera.updateProjectionMatrix();
+    const pr = dpr0 * s.scale * (s.quality === 'low' ? .75 : 1);
+    if (Math.abs(renderer.getPixelRatio() - pr) > 1e-3) {
+      renderer.setPixelRatio(pr); stylePass.uniforms.dpr.value = pr;
+      dispatchEvent(new Event('resize'));            // resizes the composer and the ink buffer
+    }
+    const shadows = s.quality !== 'low', size = s.quality === 'high' ? 2048 : 1024;
+    if (sunLight.castShadow !== shadows || sunLight.shadow.mapSize.x !== size) {
+      sunLight.castShadow = shadows; renderer.shadowMap.enabled = shadows;
+      sunLight.shadow.mapSize.set(size, size); if (sunLight.shadow.map) { sunLight.shadow.map.dispose(); sunLight.shadow.map = null; }
+      scene.traverse(o => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.needsUpdate = true; }); });
+    }
+    bloom.enabled = s.bloom && bloom.strength > .005;
+    el('fpsMeter').style.display = s.fps ? 'block' : 'none';
+  }
+  function applyHud() {
+    const show = (id, on) => { const e = el(id); if (e) e.style.visibility = on ? '' : 'hidden'; };
+    show('help', s.help); show('board', s.board); show('xh', s.xhair);
+    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
+  }
+  function applyAll() { applyVideo(); applyHud(); }
+
+  // ---------- input helpers used by tick() and NET ----------
+  const down = a => keys.has(s.binds[a]) || (ALT[a] ? keys.has(ALT[a]) : false);
+  const running = () => s.toggleRun ? runLatched : down('run');
+  const isBind = (a, code) => code === s.binds[a] || code === ALT[a];
+  const lookMouse = (dx, dy) => { const k = .0022 * s.sens; yaw -= dx * k; pitch = Math.max(-1.45, Math.min(1.45, pitch - dy * k * (s.invertY ? -1 : 1))); };
+  const lookDrag = (dx, dy, touch) => { const k = (touch ? .006 * s.touchSens : .004 * s.sens); yaw -= dx * k; pitch = Math.max(-1.2, Math.min(1.2, pitch - dy * k * (s.invertY ? -1 : 1))); };
+  const bob = () => s.bob;
+  const vol = () => s.vol;
+  const tags = () => s.tags;
+
+  // ---------- menu ----------
+  const menu = el('settings');
+  let open = false, rebinding = null, openedAt = 0;
+  const isOpen = () => open;
+  function openMenu() {
+    if (open) return; open = true; openedAt = performance.now(); keys.clear(); runLatched = false;
+    menu.style.display = 'grid'; el('gear').style.display = 'none';
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+  function closeMenu(relock) {
+    if (!open) return; open = false; rebinding = null; renderBinds();
+    menu.style.display = 'none'; el('gear').style.display = '';
+    if (relock && matchMedia('(pointer:fine)').matches && getComputedStyle(el('login')).display === 'none') { const p = canvas.requestPointerLock?.(); p?.catch?.(() => {}); }
+  }
+  // Esc while playing: the browser drops pointer lock and swallows the key, so open on lock loss.
+  let lockedAt = 0;
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement === canvas) lockedAt = performance.now();
+    else if (!open && lockedAt) openMenu();
+  });
+  // Runs before the game's own key handlers (capture phase on window).
+  addEventListener('keydown', e => {
+    if (rebinding) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (e.code !== 'Escape') {
+        for (const k in s.binds) if (s.binds[k] === e.code) s.binds[k] = s.binds[rebinding];   // swap on clash
+        s.binds[rebinding] = e.code; save(); applyHud();
+      }
+      rebinding = null; renderBinds(); return;
+    }
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      if (!open) openMenu(); else if (performance.now() - openedAt > 300) closeMenu(true);   // same Esc that dropped the lock
+      return;
+    }
+    if (open) { if (e.target.tagName !== 'INPUT') e.stopImmediatePropagation(); return; }
+    if (s.toggleRun && !e.repeat && isBind('run', e.code)) runLatched = !runLatched;
+  }, true);
+
+  // ---------- building the panel ----------
+  const TABS = {
+    controls: [
+      ['range', 'sens', 'Mouse sensitivity', .1, 4, .05, v => v.toFixed(2) + '×'],
+      ['check', 'invertY', 'Invert mouse Y'],
+      ['range', 'touchSens', 'Touch look sensitivity', .2, 3, .05, v => v.toFixed(2) + '×'],
+      ['check', 'toggleRun', 'Run is a toggle (tap to run, tap to walk)'],
+      ['binds'],
+    ],
+    video: [
+      ['range', 'fov', 'Field of view', 55, 110, 1, v => v + '°'],
+      ['select', 'quality', 'Graphics quality', [['high', 'High'], ['medium', 'Medium (smaller shadows)'], ['low', 'Low (no shadows, lower res)']]],
+      ['range', 'scale', 'Render resolution', .5, 1, .05, v => Math.round(v * 100) + '%'],
+      ['check', 'bloom', 'Glow (bloom)'],
+      ['range', 'bob', 'Head bob', 0, 1.5, .05, v => Math.round(v * 100) + '%'],
+      ['check', 'fps', 'Show FPS'],
+    ],
+    audio: [
+      ['range', 'vol', 'Volume', 0, 1, .01, v => Math.round(v * 100) + '%'],
+    ],
+    hud: [
+      ['check', 'xhair', 'Crosshair'], ['check', 'tags', 'Name tags over vagrants'],
+      ['check', 'board', 'Vagrants scoreboard'], ['check', 'help', 'Controls hint'],
+    ],
+  };
+  function row(spec) {
+    const [type, k, label] = spec, d = document.createElement('div'); d.className = 'srow';
+    if (type === 'range') {
+      const [, , , min, max, step, fmt] = spec;
+      d.innerHTML = `<label for="s_${k}">${label}</label><input type="range" id="s_${k}" min="${min}" max="${max}" step="${step}"><output></output>`;
+      const i = d.querySelector('input'), o = d.querySelector('output');
+      const show = () => { o.textContent = fmt(+i.value); };
+      i.value = s[k]; show();
+      i.oninput = () => { s[k] = +i.value; show(); save(); applyAll(); };
+      d.sync = () => { i.value = s[k]; show(); };
+    } else if (type === 'check') {
+      d.classList.add('chk'); d.innerHTML = `<label><input type="checkbox" id="s_${k}"> ${label}</label>`;
+      const i = d.querySelector('input'); i.checked = s[k];
+      i.onchange = () => { s[k] = i.checked; save(); applyAll(); };
+      d.sync = () => { i.checked = s[k]; };
+    } else if (type === 'select') {
+      d.innerHTML = `<label for="s_${k}">${label}</label><select id="s_${k}">${spec[3].map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select>`;
+      const i = d.querySelector('select'); i.value = s[k];
+      i.onchange = () => { s[k] = i.value; save(); applyAll(); };
+      d.sync = () => { i.value = s[k]; };
+    } else if (type === 'binds') {
+      d.className = 'binds'; d.id = 'bindList';
+    }
+    return d;
+  }
+  function renderBinds() {
+    const box = el('bindList'); if (!box) return;
+    box.innerHTML = '<h4>Keys <small>click one, then press the new key (Esc cancels)</small></h4>' + BIND_ACTIONS.map(([k, label]) =>
+      `<div class="brow"><span>${label}</span><button type="button" data-b="${k}" class="${rebinding === k ? 'wait' : ''}">${rebinding === k ? 'press a key…' : keyName(s.binds[k])}</button></div>`).join('');
+    box.querySelectorAll('button').forEach(b => { b.onclick = () => { rebinding = rebinding === b.dataset.b ? null : b.dataset.b; renderBinds(); }; });
+  }
+  const rows = [];
+  for (const [tab, specs] of Object.entries(TABS)) {
+    const pane = el('sp_' + tab);
+    for (const spec of specs) { const r = row(spec); pane.appendChild(r); rows.push(r); }
+  }
+  renderBinds();
+  menu.querySelectorAll('.stabs button').forEach(b => b.onclick = () => {
+    menu.querySelectorAll('.stabs button').forEach(x => x.classList.toggle('on', x === b));
+    menu.querySelectorAll('.spane').forEach(p => p.hidden = p.id !== 'sp_' + b.dataset.t);
+  });
+  el('sResume').onclick = () => closeMenu(true);
+  el('sReset').onclick = () => { const binds = { ...DEFAULTS.binds }; Object.assign(s, structuredClone(DEFAULTS), { binds }); save(); rows.forEach(r => r.sync?.()); renderBinds(); applyAll(); };
+  el('gear').onclick = e => { e.stopPropagation(); openMenu(); };
+  el('gear').addEventListener('pointerdown', e => e.stopPropagation());
+  menu.addEventListener('pointerdown', e => { e.stopPropagation(); if (e.target === menu) closeMenu(false); });
+
+  // ---------- FPS meter ----------
+  let fN = 0, fT = performance.now();
+  (function fpsLoop() { fN++; const n = performance.now(); if (n - fT > 500) { el('fpsMeter').textContent = Math.round(fN * 1000 / (n - fT)) + ' fps'; fN = 0; fT = n; } requestAnimationFrame(fpsLoop); })();
+
+  applyAll();
+  window.__set = { s, open: openMenu, close: closeMenu, get look() { return [+yaw.toFixed(3), +pitch.toFixed(3)]; } };
+  return { down, running, isBind, lookMouse, lookDrag, bob, vol, tags, isOpen };
+})();
+
 // ===================== multiplayer client (GAME-77) =====================
 // Runs inside the look-test module, so it reuses its scene, shader and asset builders.
 // The server owns the world; this file draws it, predicts your own vagrant, and
@@ -1305,7 +1520,7 @@ const NET = (() => {
     if (ws && ws.readyState === 1 && me && haveAck && sendAcc >= 1 / 30) {
       const span = Math.min(sendAcc, 0.1); sendAcc = 0; seq = (seq + 1) >>> 0;
       ws.send(JSON.stringify({ t: 'in', seq, dt: +span.toFixed(4), x: +lastIn.x.toFixed(3), z: +lastIn.z.toFixed(3), yaw: +Math.atan2(-Math.sin(yaw), -Math.cos(yaw)).toFixed(3),
-        jump: keys.has('Space'), run: keys.has('ShiftLeft') || keys.has('ShiftRight') }));
+        jump: SET.down('jump'), run: SET.running() }));
       hist.push({ seq, x: player.position.x + corr.x, y: player.position.y + 0.55, z: player.position.z + corr.z });
       if (hist.length > 120) hist.shift();
     }
@@ -1368,7 +1583,7 @@ const NET = (() => {
   function honkSound(long, at) {
     const d = camera.position.distanceTo(new THREE.Vector3(...at)); if (d > 40) return;
     try { actx ||= new AudioContext(); } catch { return; }
-    const g = actx.createGain(); g.gain.value = .06 * (1 - d / 40); g.connect(actx.destination);
+    const g = actx.createGain(); g.gain.value = .06 * (1 - d / 40) * SET.vol(); if (g.gain.value <= 0) return; g.connect(actx.destination);
     for (const fq of [392, 494]) { const o = actx.createOscillator(); o.type = 'square'; o.frequency.value = fq; o.connect(g); o.start(); o.stop(actx.currentTime + (long ? .9 : .28)); }
   }
   function onFx(m) {
@@ -1382,7 +1597,7 @@ const NET = (() => {
     else if (m.kind === 'crate') splinters(m.at, m.s, m.hex, m.v || [0, 0, 0]);
     else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
-    else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. G to let go.' : 'You let go.'); } }
+    else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
   function onMeta(m) {
@@ -1404,9 +1619,10 @@ const NET = (() => {
   // ---------- per-frame ----------
   const cur = new THREE.Vector3();
   function frame(dt, t) {
-    const rt = serverNow() - INTERP_MS;
+    const rt = serverNow() - INTERP_MS, showTags = SET.tags();
     for (const v of ents.values()) {
       if (!v.obj) continue;
+      if (v.tag) v.tag.visible = showTags;
       const s = sampleBuf(v, rt); if (!s) continue;
       if (v.kind === 'vagrant') {
         cur.copy(v.obj.position); v.obj.position.copy(s.p);
@@ -1444,7 +1660,7 @@ const NET = (() => {
   }
   function updatePrompt(btn) {
     const f = nearestAction(); btn.hidden = !f;
-    if (f) { const html = `${esc(MAP.actions[f.type].verb)} <kbd>E</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
+    if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
   }
   const act = () => { if (ws && ws.readyState === 1) ws.send('{"t":"act"}'); };
   let lastPointer = 'mouse';
@@ -1457,12 +1673,12 @@ const NET = (() => {
   }
   addEventListener('mousemove', e => {
     if (document.pointerLockElement !== canvas) return;
-    yaw -= e.movementX * .0022; pitch = Math.max(-1.45, Math.min(1.45, pitch - e.movementY * .0022));
+    SET.lookMouse(e.movementX, e.movementY);
   });
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (e.code === 'KeyE' || e.code === 'KeyF') act();
-    if (e.code === 'KeyG' && ws && ws.readyState === 1) ws.send('{"t":"grab"}');
+    if (SET.isBind('act', e.code) || e.code === 'KeyF') act();
+    if (SET.isBind('grab', e.code) && ws && ws.readyState === 1) ws.send('{"t":"grab"}');
   });
 
   // ---------- connection ----------

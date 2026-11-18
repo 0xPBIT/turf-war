@@ -134,7 +134,7 @@ const NET = (() => {
     if (ws && ws.readyState === 1 && me && haveAck && sendAcc >= 1 / 30) {
       const span = Math.min(sendAcc, 0.1); sendAcc = 0; seq = (seq + 1) >>> 0;
       ws.send(JSON.stringify({ t: 'in', seq, dt: +span.toFixed(4), x: +lastIn.x.toFixed(3), z: +lastIn.z.toFixed(3), yaw: +Math.atan2(-Math.sin(yaw), -Math.cos(yaw)).toFixed(3),
-        jump: keys.has('Space'), run: keys.has('ShiftLeft') || keys.has('ShiftRight') }));
+        jump: SET.down('jump'), run: SET.running() }));
       hist.push({ seq, x: player.position.x + corr.x, y: player.position.y + 0.55, z: player.position.z + corr.z });
       if (hist.length > 120) hist.shift();
     }
@@ -197,7 +197,7 @@ const NET = (() => {
   function honkSound(long, at) {
     const d = camera.position.distanceTo(new THREE.Vector3(...at)); if (d > 40) return;
     try { actx ||= new AudioContext(); } catch { return; }
-    const g = actx.createGain(); g.gain.value = .06 * (1 - d / 40); g.connect(actx.destination);
+    const g = actx.createGain(); g.gain.value = .06 * (1 - d / 40) * SET.vol(); if (g.gain.value <= 0) return; g.connect(actx.destination);
     for (const fq of [392, 494]) { const o = actx.createOscillator(); o.type = 'square'; o.frequency.value = fq; o.connect(g); o.start(); o.stop(actx.currentTime + (long ? .9 : .28)); }
   }
   function onFx(m) {
@@ -211,7 +211,7 @@ const NET = (() => {
     else if (m.kind === 'crate') splinters(m.at, m.s, m.hex, m.v || [0, 0, 0]);
     else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
-    else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. G to let go.' : 'You let go.'); } }
+    else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
   function onMeta(m) {
@@ -233,9 +233,10 @@ const NET = (() => {
   // ---------- per-frame ----------
   const cur = new THREE.Vector3();
   function frame(dt, t) {
-    const rt = serverNow() - INTERP_MS;
+    const rt = serverNow() - INTERP_MS, showTags = SET.tags();
     for (const v of ents.values()) {
       if (!v.obj) continue;
+      if (v.tag) v.tag.visible = showTags;
       const s = sampleBuf(v, rt); if (!s) continue;
       if (v.kind === 'vagrant') {
         cur.copy(v.obj.position); v.obj.position.copy(s.p);
@@ -273,7 +274,7 @@ const NET = (() => {
   }
   function updatePrompt(btn) {
     const f = nearestAction(); btn.hidden = !f;
-    if (f) { const html = `${esc(MAP.actions[f.type].verb)} <kbd>E</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
+    if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
   }
   const act = () => { if (ws && ws.readyState === 1) ws.send('{"t":"act"}'); };
   let lastPointer = 'mouse';
@@ -286,12 +287,12 @@ const NET = (() => {
   }
   addEventListener('mousemove', e => {
     if (document.pointerLockElement !== canvas) return;
-    yaw -= e.movementX * .0022; pitch = Math.max(-1.45, Math.min(1.45, pitch - e.movementY * .0022));
+    SET.lookMouse(e.movementX, e.movementY);
   });
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (e.code === 'KeyE' || e.code === 'KeyF') act();
-    if (e.code === 'KeyG' && ws && ws.readyState === 1) ws.send('{"t":"grab"}');
+    if (SET.isBind('act', e.code) || e.code === 'KeyF') act();
+    if (SET.isBind('grab', e.code) && ws && ws.readyState === 1) ws.send('{"t":"grab"}');
   });
 
   // ---------- connection ----------
