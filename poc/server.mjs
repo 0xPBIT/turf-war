@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { ITEM_TYPES, ITEM_RULES, POCKET_TYPES, itemSpots, pickWeighted, dumpsterFind } from './items.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -62,7 +63,7 @@ const sessions = new Map(); // playerId -> { ws, entity, input, lastAct, graceTi
 // Every synced thing is an entity with an id, a kind and (usually) a rigid body.
 const entities = new Map();      // id -> entity
 const byCollider = new Map();    // collider handle -> entity
-let nextBottle = 1;
+let nextItem = 1;
 
 function addEntity(e) {
   entities.set(e.id, e);
@@ -82,7 +83,7 @@ function removeEntity(id) {
 }
 function describe(e) {
   const d = { id: e.id, kind: e.kind, type: e.type };
-  if (e.player) Object.assign(d, { name: e.player.name, color: e.player.color, pid: e.player.id });
+  if (e.player) Object.assign(d, { name: e.player.name, color: e.player.color, pid: e.player.id, held: e.player.held || null });
   if (e.fixedPos) d.pos = e.fixedPos;
   if (e.color) d.color = e.color;
   if (e.index !== undefined) d.index = e.index;
@@ -232,13 +233,15 @@ function nearest(e, radius, filter) {
 }
 
 const HIT_ONLY = new Set(['window', 'car', 'crate', 'cone']);
-function interact(s) {
+// E does the fixture's main thing (dumpsters: dig for junk); F lights anything that burns.
+function interact(s, light) {
   const e = s.entity, p = e.player;
   const now = Date.now();
   if (now - (s.lastAct || 0) < 600) return;
   s.lastAct = now;
-  const target = nearest(e, 3, o => o.kind === 'fixture' && ACTIONS[o.type] && !HIT_ONLY.has(o.type));
+  const target = nearest(e, 3, o => o.kind === 'fixture' && ACTIONS[o.type] && !HIT_ONLY.has(o.type) && (!light || o.type === 'pile' || o.type === 'dumpster'));
   if (!target) return;
+  if ((target.type === 'dumpster' || target.type === 'pile') && !light) return rummage(s, target, now);
   const a = ACTIONS[target.type];
   const busyUntil = target.state.busyUntil || 0;
   if (now < busyUntil) return;
@@ -252,57 +255,158 @@ function interact(s) {
   addDamage(p, a.cost, posOf(target), a.verb);
 }
 
-function throwBottle(s, dir) {
-  const now = Date.now();
-  if (now - (s.lastThrow || 0) < 450) return;
+// ---------- throwable items (GAME-82) ----------
+// Junk lies around as dynamic bodies. Pick one up and it lives in your hand (p.held),
+// click to throw it. Bottles smash; rocks, cans and bricks land and can be reused.
+function spawnItem(type, pos, opts = {}) {
+  const T = ITEM_TYPES[type];
+  const desc = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos[0], pos[1], pos[2])
+    .setLinearDamping(0.15).setAngularDamping(0.4).setCcdEnabled(true);
+  if (opts.vel) desc.setLinvel(...opts.vel);
+  if (opts.spin) desc.setAngvel(opts.spin);
+  if (opts.rot) desc.setRotation(opts.rot);
+  const body = world.createRigidBody(desc);
+  const collider = world.createCollider(T.shape(RAPIER).setMass(T.mass).setFriction(0.7).setRestitution(type === 'can' ? 0.35 : 0.15), body);
+  return addEntity({ id: 'i:' + nextItem++, kind: 'item', type, body, collider, mass: T.mass, born: Date.now(), spot: opts.spot ?? null, state: {} });
+}
+const spots = itemSpots(MAP).map(sp => ({ ...sp, item: null, nextAt: 0 }));
+console.log(`[town] ${spots.length} junk spots`);
+const randomUpright = () => { const a = Math.random() * Math.PI; return { x: 0, y: Math.sin(a), z: 0, w: Math.cos(a) }; };
+const lyingDown = () => { const a = Math.random() * Math.PI; return { x: Math.SQRT1_2 * Math.cos(a), y: 0, z: Math.SQRT1_2 * Math.sin(a), w: Math.SQRT1_2 }; };
+function stepItems(now) {
+  for (const sp of spots) {
+    const it = sp.item && entities.get(sp.item);
+    if (it) {                                     // knocked or kicked away from its spot: the spot frees up
+      const t = it.body.translation();
+      if ((t.x - sp.x) ** 2 + (t.z - sp.z) ** 2 > 4) { it.spot = null; sp.item = null; sp.nextAt = now + respawnMs(); }
+      continue;
+    }
+    if (sp.item) { sp.item = null; sp.nextAt = now + respawnMs(); continue; }
+    if (now < sp.nextAt) continue;
+    const types = sp.types || null;
+    const type = types ? types[Math.floor(Math.random() * types.length)] : pickWeighted('ground');
+    const e = spawnItem(type, [sp.x, 0.25, sp.z], { rot: type === 'bottle' || type === 'can' ? (Math.random() < 0.6 ? lyingDown() : randomUpright()) : randomUpright(), spot: sp });
+    sp.item = e.id;
+  }
+  // Tidy up: loose junk beyond the cap goes, oldest first. Anything that fell out of town goes too.
+  const loose = [...entities.values()].filter(e => e.kind === 'item' && !e.spot && !e.live);
+  for (const e of loose) if (e.body.translation().y < -5) removeEntity(e.id);
+  if (loose.length > ITEM_RULES.maxLoose) loose.sort((a, b) => a.born - b.born).slice(0, loose.length - ITEM_RULES.maxLoose).forEach(e => removeEntity(e.id));
+}
+const respawnMs = () => (ITEM_RULES.respawnMinS + Math.random() * (ITEM_RULES.respawnMaxS - ITEM_RULES.respawnMinS)) * 1000;
+
+function setHeld(e, type) {
+  e.player.held = type || null;
+  saveDirty = true;
+  broadcast({ t: 'fx', kind: 'held', id: e.id, item: e.player.held });
+}
+// Drop what you hold just in front of you (used when swapping or when a dumpster find won't fit).
+function dropHeld(e, at) {
+  const type = e.player.held; if (!type) return;
+  const t = e.body.translation(), f = e.facing || 0;
+  spawnItem(type, at || [t.x + Math.sin(f) * 0.5, t.y + 0.2, t.z + Math.cos(f) * 0.5], { rot: randomUpright() });
+  setHeld(e, null);
+}
+function pickup(s, id) {
+  const e = s.entity, now = Date.now();
+  if (now - (s.lastPick || 0) < 250) return;
+  const it = typeof id === 'string' ? entities.get(id) : nearest(e, ITEM_RULES.pickupReach, o => o.kind === 'item');
+  if (!it || it.kind !== 'item') return;
+  const a = e.body.translation(), b = it.body.translation(), v = it.body.linvel();
+  if (Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) > ITEM_RULES.pickupReach + 0.4) return;
+  if (it.live && Math.hypot(v.x, v.y, v.z) > 4) return;          // can't snatch it out of the air
+  s.lastPick = now;
+  const swap = e.player.held, at = [b.x, b.y + 0.05, b.z];
+  if (it.spot) { it.spot.item = null; it.spot.nextAt = now + respawnMs(); }
+  removeEntity(it.id);
+  if (swap) { e.player.held = null; spawnItem(swap, at, { rot: randomUpright() }); }
+  setHeld(e, it.type);
+}
+// Pocket items live on the player (p.items) and persist with them.
+// lighter: { fuel } (lighting fires spends fuel, GAME-86); cigarettes: a count.
+function pocketItem(e, key) {
+  const items = e.player.items ||= {};
+  if (key === 'lighter') items.lighter = { fuel: Math.max(10, items.lighter?.fuel || 0) };
+  else if (key === 'pliers') items.pliers = true;
+  else items[key] = (items[key] || 0) + 1;
+  saveDirty = true;
+  broadcast({ t: 'fx', kind: 'pocket', id: e.id, key, name: POCKET_TYPES[key]?.name || key });
+}
+function rummage(s, dump, now) {
+  const e = s.entity, st = dump.state;
+  if ((st.fireUntil || 0) > now || (st.burntUntil || 0) > now) return broadcast({ t: 'fx', kind: 'say', id: e.id, text: (st.fireUntil || 0) > now ? 'Too hot to dig in there' : 'Nothing left but ash' });
+  // stock refills slowly; a picked-clean dumpster needs a while
+  if (st.stock === undefined) { st.stock = ITEM_RULES.dumpsterStock; st.refillAt = now; }
+  const refill = Math.floor((now - st.refillAt) / (ITEM_RULES.dumpsterRefillS * 1000));
+  if (refill > 0) { st.stock = Math.min(ITEM_RULES.dumpsterStock, st.stock + refill); st.refillAt += refill * ITEM_RULES.dumpsterRefillS * 1000; }
+  if (st.stock >= ITEM_RULES.dumpsterStock) st.refillAt = now;
+  if (st.stock <= 0) return broadcast({ t: 'fx', kind: 'say', id: e.id, text: 'Picked clean. Check back later' });
+  st.stock--;
+  const find = dumpsterFind(), type = find.key;
+  broadcast({ t: 'fx', kind: 'rummage', id: dump.id, by: e.id, item: type, at: dump.fixedPos });
+  if (find.pocket) return pocketItem(e, type);
+  if (!e.player.held) return setHeld(e, type);
+  // Hands full: the find gets tossed out of the dumpster toward you.
+  const d = dump.fixedPos, t = e.body.translation(), dx = t.x - d[0], dz = t.z - d[2], n = Math.hypot(dx, dz) || 1;
+  spawnItem(type, [d[0] + dx / n * 0.6, 2.0, d[2] + dz / n * 0.6], { vel: [dx / n * 2.5, 2.5, dz / n * 2.5], spin: { x: 4, y: 2, z: 1 } });
+}
+
+function throwHeld(s, dir) {
+  const now = Date.now(), e = s.entity, type = e.player.held;
+  if (!type || now - (s.lastThrow || 0) < 350) return;
   s.lastThrow = now;
-  const e = s.entity;
+  const T = ITEM_TYPES[type];
   // First person: throw along the look direction, from eye height.
   const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
   const dx = dir.x / len, dy = Math.max(-0.6, Math.min(0.9, dir.y / len)), dz = dir.z / len;
   const t = e.body.translation();
-  const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(t.x + dx * 0.6, t.y + 0.55 + dy * 0.6, t.z + dz * 0.6)
-    .setLinvel(dx * 22, dy * 22 + 3, dz * 22).setAngvel({ x: 8, y: 0, z: 3 }).setCcdEnabled(true));
-  const collider = world.createCollider(RAPIER.ColliderDesc.capsule(0.12, 0.07).setMass(0.4)
-    .setRestitution(0.2).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
-  addEntity({ id: 'b:' + nextBottle++, kind: 'bottle', body, collider, thrower: e.player, born: now, state: {} });
+  const it = spawnItem(type, [t.x + dx * 0.6, t.y + 0.55 + dy * 0.6, t.z + dz * 0.6], {
+    vel: [dx * T.speed, dy * T.speed + 3, dz * T.speed], spin: type === 'can' ? { x: 14, y: 2, z: 4 } : { x: 8, y: 0, z: 3 } });
+  it.live = { thrower: e.player, until: now + 6000 };
+  broadcast({ t: 'fx', kind: 'throw', id: e.id });
+  it.collider.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+  setHeld(e, null);
 }
+function endLive(it) { it.live = null; it.collider.setActiveEvents(RAPIER.ActiveEvents.NONE); }
 
-function onBottleHit(bottle, other) {
-  if (bottle.state.smashed) return;
-  if (other && other.player === bottle.thrower && other.kind === 'vagrant') return;
-  bottle.state.smashed = true;
-  const at = posOf(bottle);
-  const p = bottle.thrower;
-  const now = Date.now();
-  const vel = bottle.body.linvel();
-  if (other && (other.type === 'window' || other.type === 'car')) {
+function onItemHit(it, other) {
+  const live = it.live;
+  if (!live) return;
+  if (other && other.player === live.thrower && other.kind === 'vagrant') return;
+  if (other && other.kind === 'item') return;                      // junk clacking into junk is free
+  const T = ITEM_TYPES[it.type], p = live.thrower, now = Date.now();
+  const at = posOf(it), vel = it.body.linvel(), v = [vel.x, vel.y, vel.z], speed = Math.hypot(vel.x, vel.y, vel.z);
+  endLive(it);
+  const hard = speed > 4;
+  if (other && (other.type === 'window' || other.type === 'car') && hard) {
     const a = ACTIONS[other.type];
-    if (now >= (other.state.brokenUntil || 0)) {
+    if (!T.breaks) addDamage(p, ITEM_RULES.pelt, posOf(other), other.type === 'car' ? `Pelted a car with a ${T.name}` : `Bonked a window with a ${T.name}`);
+    else if (now >= (other.state.brokenUntil || 0)) {
       other.state.brokenUntil = now + a.repairSec * 1000;
-      addDamage(p, other.value || a.cost, posOf(other), a.verb);
-      broadcast({ t: 'fx', kind: 'break', id: other.id, at, v: [vel.x, vel.y, vel.z] });
+      addDamage(p, other.value || a.cost, posOf(other), other.type === 'car' && it.type !== 'bottle' ? `${T.name === 'rock' ? 'Rocked' : 'Bricked'} a windshield` : a.verb);
+      broadcast({ t: 'fx', kind: 'break', id: other.id, at, v });
     } else addDamage(p, 15, at, 'More glass');
-  } else if (other && other.type === 'crate') {
+  } else if (other && other.type === 'crate' && hard && T.mass >= 0.4) {
     const a = ACTIONS.crate, spec = other.spec, cp = posOf(other);
     removeEntity(other.id);
     save.objects['o:' + spec.id.slice(2)] = undefined;
-    broadcast({ t: 'fx', kind: 'crate', at: cp, s: spec.s, hex: spec.hex, v: [vel.x, vel.y, vel.z] });
+    broadcast({ t: 'fx', kind: 'crate', at: cp, s: spec.s, hex: spec.hex, v });
     addDamage(p, a.cost, cp, a.verb);
     setTimeout(() => { if (!entities.has(spec.id)) spawnProp(spec, true); }, a.repairSec * 1000);
-  } else if (other && other.type === 'cone') {
+  } else if (other && other.type === 'cone' && hard) {
     if (now >= (other.state.hitUntil || 0)) { other.state.hitUntil = now + ACTIONS.cone.repairSec * 1000; addDamage(p, ACTIONS.cone.cost, posOf(other), ACTIONS.cone.verb); }
-  } else addDamage(p, 3, at, 'Broken bottle');
-  broadcast({ t: 'fx', kind: 'smash', at, v: [vel.x, vel.y, vel.z] });
-  setTimeout(() => removeEntity(bottle.id), 30);
+  } else if (T.shatters && hard) addDamage(p, 3, at, 'Broken bottle');
+  if (T.shatters && hard) {
+    broadcast({ t: 'fx', kind: 'smash', at, v });
+    setTimeout(() => removeEntity(it.id), 30);
+  } else if (hard) broadcast({ t: 'fx', kind: 'thud', at, item: it.type, v });
 }
 
 // Grabbing joins your hands to the object with a ball joint the server owns.
 function grab(s) {
   const e = s.entity;
   if (e.grabbing) return releaseGrab(e);
-  const target = nearest(e, 2.6, o => (o.kind === 'prop' || o.kind === 'sleeper' || o.kind === 'bottle') && o.body);
+  const target = nearest(e, 2.6, o => (o.kind === 'prop' || o.kind === 'sleeper') && o.body);
   if (!target) return;
   const a = e.body.translation(), b = target.body.translation();
   const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1;
@@ -503,13 +607,12 @@ function physicsTick() {
   events.drainCollisionEvents((h1, h2, started) => {
     if (!started) return;
     const a = byCollider.get(h1), b = byCollider.get(h2);
-    if (a && a.kind === 'bottle') onBottleHit(a, b);
-    else if (b && b.kind === 'bottle') onBottleHit(b, a);
+    if (a && a.kind === 'item') onItemHit(a, b);
+    else if (b && b.kind === 'item') onItemHit(b, a);
   });
   const now = Date.now();
-  for (const e of entities.values()) {
-    if (e.kind === 'bottle' && now - e.born > 6000) removeEntity(e.id);
-  }
+  for (const e of entities.values()) if (e.live && now > e.live.until) endLive(e);
+  if (tick % 30 === 0) stepItems(now);
   tick++;
   if (tick % (PHYSICS_HZ / SNAPSHOT_HZ) === 0) sendSnapshot(false);
   if (tick % (PHYSICS_HZ / META_HZ) === 0) sendMeta();
@@ -658,8 +761,10 @@ wss.on('connection', ws => {
       if (q.length < 40) q.push({ x: +m.x || 0, z: +m.z || 0, jump: !!m.jump, run: !!m.run, yaw: Number.isFinite(+m.yaw) ? +m.yaw : undefined,
         seq: m.seq >>> 0, rem: Math.min(0.1, Math.max(0, +m.dt || 1 / 30)) });
     }
-    else if (m.t === 'act') interact(s);
-    else if (m.t === 'throw' && m.dir) throwBottle(s, { x: +m.dir.x || 0, y: +m.dir.y || 0, z: +m.dir.z || 0 });
+    else if (m.t === 'act') interact(s, !!m.light);
+    else if (m.t === 'pickup') pickup(s, typeof m.id === 'string' ? m.id : null);
+    else if (m.t === 'drop') dropHeld(s.entity);
+    else if (m.t === 'throw' && m.dir) throwHeld(s, { x: +m.dir.x || 0, y: +m.dir.y || 0, z: +m.dir.z || 0 });
     else if (m.t === 'grab') grab(s);
   });
   ws.on('close', () => {

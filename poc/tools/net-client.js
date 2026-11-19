@@ -71,7 +71,7 @@ const NET = (() => {
   function spawn(e) {
     if (ents.has(e.id)) despawn(e.id);
     if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
-    if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); return; }
+    if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); setMyHeld(e.held); return; }
     let obj, extra = {};
     if (e.kind === 'vagrant' || e.kind === 'sleeper') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
@@ -80,12 +80,87 @@ const NET = (() => {
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
     } else if (e.kind === 'traffic') obj = buildCar(e.color);
     else if (e.kind === 'prop') obj = buildProp(e);
-    else if (e.kind === 'bottle') obj = bottleMesh();
+    else if (e.kind === 'item') obj = ITEMS.mesh(e.type, hash(e.id));
     else return;
     scene.add(obj);
-    ents.set(e.id, { ...e, obj, buf: [], ...extra });
+    const v = { ...e, obj, buf: [], ...extra };
+    ents.set(e.id, v);
+    if (v.model) setRemoteHeld(v, e.held);
   }
   function despawn(id) { const v = ents.get(id); if (v && v.obj) scene.remove(v.obj); ents.delete(id); fixtures.delete(id); }
+
+  // ---------- held junk (GAME-82) ----------
+  // Your hand only comes up when it holds something; the item sits where the look test's
+  // bottle sat, inside the gloved grip. Other vagrants carry theirs in the right hand.
+  let myHeld = null, raise = 0, itemTarget = null, lastThrowAt = 0, lastHint = 0;
+  heldBottle.visible = false;
+  const heldSlot = new THREE.Group(); heldSlot.position.copy(heldBottle.position); vm.add(heldSlot);
+  function setMyHeld(type) {
+    type = type || null;
+    if (type === myHeld && heldSlot.children.length === (type ? 1 : 0)) return;
+    myHeld = type; heldSlot.clear();
+    if (type) { const m = ITEMS.mesh(type, 1); m.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } }); heldSlot.add(m); }
+  }
+  // Other vagrants: a lean (pick up, dig) or an arm swing (throw) played on their model.
+  function remoteAnim(id, kind) { const v = ents.get(id); if (v && v.model) v.ranim = { kind, t: 0, dur: ANIM_DUR[kind] * 1.3 }; }
+  function stepRemoteAnim(v, dt) {
+    const a = v.ranim; if (!a) return;
+    a.t += dt; const k = Math.min(1, a.t / a.dur), g = v.model.g;
+    if (a.kind === 'throw') { g.rotation.x = -bump(k, 0, .35) * .25 + bump(k, .35, .7) * .3; if (v.heldObj) v.heldObj.position.y = .64 + bump(k, 0, .35) * .9; }
+    else { g.rotation.x = bump(k, 0, a.kind === 'dig' ? .2 : .4) * (a.kind === 'dig' ? .45 : .8); if (a.kind === 'dig') g.rotation.z = Math.sin(a.t * 16) * .05 * bump(k, 0, .2); }
+    if (k >= 1) { v.ranim = null; g.rotation.x = 0; if (v.heldObj) v.heldObj.position.y = .64; }
+  }
+  function setRemoteHeld(v, type) {
+    if (v.heldObj) { v.model.g.remove(v.heldObj); v.heldObj = null; }
+    if (!type || v.kind !== 'vagrant') return;
+    v.heldObj = ITEMS.mesh(type, hash(v.id)); v.heldObj.position.set(-.31, .64, .14); v.heldObj.rotation.x = .25; v.model.g.add(v.heldObj);
+  }
+  // Interaction animations: 'reach' bends down to grab junk, 'dig' rummages in a bin,
+  // 'throw' winds up and lets go. They layer on top of the look test's bob and kick.
+  let anim = null;                                   // { kind, t, dur }
+  const ANIM_DUR = { reach: .5, dig: .9, throw: .32 };
+  function playAnim(kind) { anim = { kind, t: 0, dur: ANIM_DUR[kind] }; }
+  const ease = x => x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x);
+  const bump = (x, a, b) => ease((x - a) / (b - a)) * (1 - ease((x - b) / (1 - b + 1e-6)));
+  const handDrop = () => (1 - Math.max(raise, anim && anim.kind !== 'throw' ? 1 : 0)) * .32;
+  const heldVisible = kick => { heldSlot.visible = kick < .6 && !(anim && anim.kind === 'reach' && anim.t / anim.dur < .45); handG.visible = raise > .02 || !!anim; };
+  function vmAnim(dt) {
+    if (!anim) return;
+    anim.t += dt; const k = anim.t / anim.dur;
+    if (k >= 1) { anim = null; return; }
+    if (anim.kind === 'reach') {                       // dip the view, hand sweeps down and forward, scoops, comes back up
+      const down = bump(k, 0, .4);
+      camera.rotation.x -= down * .42;
+      vm.position.y -= down * .1; vm.position.z -= down * .12; vm.position.x -= down * .05;
+      vm.rotation.x += down * .9; vm.rotation.z += Math.sin(k * Math.PI) * .25;
+    } else if (anim.kind === 'dig') {                  // lean in over the lid and root around
+      const lean = bump(k, 0, .2);
+      camera.rotation.x -= lean * .3; camera.position.y -= lean * .08;
+      vm.position.z -= lean * .14; vm.position.y += lean * .02;
+      vm.position.x += Math.sin(anim.t * 22) * .03 * lean; vm.rotation.z += Math.sin(anim.t * 17) * .3 * lean; vm.rotation.x += lean * .5;
+    } else if (anim.kind === 'throw') {               // wind back over the shoulder, then snap forward
+      const back = bump(k, 0, .35);
+      vm.position.y += back * .1; vm.position.z += back * .08; vm.rotation.x -= back * -.9;
+      camera.rotation.z += back * .03;
+    }
+  }
+  const _ld = new THREE.Vector3(), _to = new THREE.Vector3();
+  function findItemTarget() {
+    camera.getWorldDirection(_ld);
+    const eye = camera.getWorldPosition(new THREE.Vector3());
+    let best = null, bs = Infinity;
+    for (const v of ents.values()) {
+      if (v.kind !== 'item' || !v.obj) continue;
+      _to.copy(v.obj.position).sub(eye);
+      const flat = Math.hypot(v.obj.position.x - player.position.x, v.obj.position.z - player.position.z);
+      if (flat > 2.4 || _to.y < -2.2 || _to.y > 1) continue;
+      const d = _to.length(), dot = _to.divideScalar(d || 1).dot(_ld);
+      if (dot < .55 && flat > .9) continue;                 // not looking at it, and not at your feet
+      const score = d * (1.6 - dot);
+      if (score < bs) { bs = score; best = v; }
+    }
+    return best;
+  }
 
   // ---------- snapshots and interpolation ----------
   const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0);
@@ -211,6 +286,14 @@ const NET = (() => {
     else if (m.kind === 'crate') splinters(m.at, m.s, m.hex, m.v || [0, 0, 0]);
     else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
+    else if (m.kind === 'held') {
+      if (m.id === me) { const had = myHeld; setMyHeld(m.item); if (m.item && m.item !== had) feed(`Got a <b>${esc(ITEMS.name(m.item))}</b>. Click to throw it.`); }
+      else { const v = ents.get(m.id); if (v && v.model) { if (m.item && !v.held2) remoteAnim(m.id, 'reach'); v.held2 = m.item; setRemoteHeld(v, m.item); } }
+    }
+    else if (m.kind === 'throw') { if (m.id !== me) remoteAnim(m.id, 'throw'); }
+    else if (m.kind === 'pocket') { if (m.id === me) feed(`You flip the lid and dig around... found <b>${esc(m.name)}</b>. Pocketed.`); }
+    else if (m.kind === 'thud') { const p = new THREE.Vector3(...m.at); dust(p, m.item === 'brick' || m.item === 'rock' ? 3 : 1, 0xd8d2c4); }
+    else if (m.kind === 'rummage') { const p = new THREE.Vector3(m.at[0], 1.9, m.at[2]); dust(p, 4, 0xb9b09a); if (m.by !== me) { remoteAnim(m.by, 'dig'); const v = ents.get(m.by); if (v && v.obj) popText('*rummage*', [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z], 'say'); } }
     else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
@@ -234,6 +317,10 @@ const NET = (() => {
   const cur = new THREE.Vector3();
   function frame(dt, t) {
     const rt = serverNow() - INTERP_MS, showTags = SET.tags();
+    raise += ((myHeld ? 1 : 0) - raise) * (1 - Math.exp(-dt * 12));
+    if (itemTarget && itemTarget.obj) itemTarget.obj.scale.setScalar(1);
+    itemTarget = findItemTarget();
+    if (itemTarget) itemTarget.obj.scale.setScalar(1 + .12 * (.5 + .5 * Math.sin(t * 8)));
     for (const v of ents.values()) {
       if (!v.obj) continue;
       if (v.tag) v.tag.visible = showTags;
@@ -246,6 +333,7 @@ const NET = (() => {
         v.model.g.position.y = -0.9 + (moving ? Math.abs(Math.sin(v.walk)) * .05 : 0);
         v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
         v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
+        stepRemoteAnim(v, dt);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
@@ -272,18 +360,41 @@ const NET = (() => {
     }
     return best;
   }
+  const keyLabel = a => { const k = __set.s.binds[a]; return esc(k.startsWith('Key') ? k.slice(3) : k); };
   function updatePrompt(btn) {
-    const f = nearestAction(); btn.hidden = !f;
-    if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
+    let html = '';
+    if (itemTarget) html = `${myHeld ? 'Swap for' : 'Pick up'} the ${esc(ITEMS.name(itemTarget.type))} <kbd>${keyLabel('act')}</kbd>`;
+    else {
+      const f = nearestAction();
+      if (f && (f.type === 'dumpster' || f.type === 'pile')) html = `Dig through the ${f.type === 'pile' ? 'trash' : 'dumpster'} <kbd>${keyLabel('act')}</kbd> &nbsp;Light it <kbd>${keyLabel('light')}</kbd>`;
+      else if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel('act')}</kbd>`;
+    }
+    btn.hidden = !html;
+    if (html && btn.innerHTML !== html) btn.innerHTML = html;
   }
-  const act = () => { if (ws && ws.readyState === 1) ws.send('{"t":"act"}'); };
+  const send = m => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+  let lastActAt = 0;
+  const act = () => {
+    const now = performance.now(); if (now - lastActAt < 600) return; lastActAt = now;
+    if (itemTarget) { send({ t: 'pickup', id: itemTarget.id }); playAnim('reach'); return; }
+    const f = nearestAction(); send({ t: 'act' });
+    if (f && (f.type === 'dumpster' || f.type === 'pile')) playAnim('dig');
+  };
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   function throwDir(dir) {
     if (lastPointer === 'mouse' && document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
     if (document.pointerLockElement === canvas) camera.getWorldDirection(dir);
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'throw', dir: { x: dir.x, y: dir.y, z: dir.z } }));
-    handKick = 1;
+    if (!myHeld) {
+      const now = performance.now();
+      if (now - lastHint > 2500) { lastHint = now; feed('Your hands are empty. Look for rocks, bottles and cans on the ground, or dig through a dumpster.'); }
+      return;
+    }
+    if (performance.now() - lastThrowAt < 380) return;
+    lastThrowAt = performance.now();
+    const d = { x: dir.x, y: dir.y, z: dir.z };
+    playAnim('throw');                                   // wind up, then release at the top of the swing
+    setTimeout(() => { send({ t: 'throw', dir: d }); handKick = 1; }, 110); setTimeout(() => { if (handKick < .3) setMyHeld(null); }, 400);   // the server confirms with a 'held' fx
   }
   addEventListener('mousemove', e => {
     if (document.pointerLockElement !== canvas) return;
@@ -291,7 +402,9 @@ const NET = (() => {
   });
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (SET.isBind('act', e.code) || e.code === 'KeyF') act();
+    if (SET.isBind('act', e.code)) act();
+    if (SET.isBind('light', e.code)) send({ t: 'act', light: 1 });
+    if (SET.isBind('drop', e.code) && myHeld) send({ t: 'drop' });
     if (SET.isBind('grab', e.code) && ws && ws.readyState === 1) ws.send('{"t":"grab"}');
   });
 
@@ -331,6 +444,7 @@ const NET = (() => {
     el('login').addEventListener('pointerdown', e => e.stopPropagation());
     setTimeout(() => el('nameInput').focus(), 50);
   }
-  window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir };
+  window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get held() { return myHeld; }, get target() { return itemTarget && itemTarget.id; }, send,
+    lookAt(x, z, p = -.5) { yaw = Math.atan2(-(x - player.position.x), -(z - player.position.z)); pitch = p; } };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim };
 })();
