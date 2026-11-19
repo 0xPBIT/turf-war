@@ -5,6 +5,9 @@
 (function prewarm() {
   const g = new THREE.Group(), geo = new THREE.PlaneGeometry(1, 1);
   for (const m of [shardMat, bottleShardMat, brokenGlassMat, glassMat, woodMat]) { const o = new THREE.Mesh(geo, m); o.castShadow = o.receiveShadow = true; g.add(o); }
+  // Procedural glass (GAME-84); the cracked pane uses RGBA vertex colours, a separate program.
+  const rgba = new THREE.PlaneGeometry(1, 1); rgba.setAttribute('color', new THREE.Float32BufferAttribute(new Array(16).fill(1), 4));
+  for (const [m, vc] of GLASS.materials) { const o = new THREE.Mesh(vc ? rgba : geo, m); o.castShadow = o.receiveShadow = true; g.add(o); }
   const st = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: stainTex, transparent: true, depthWrite: false })); g.add(st);
   for (const [map, blending] of [[flameTex, THREE.AdditiveBlending], [smokeTex, THREE.NormalBlending]])
     g.add(new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, blending })));
