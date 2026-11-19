@@ -206,7 +206,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 <div id="board"><h3>Vagrants</h3><div id="rows"></div></div>
 <div id="feed"></div>
 <div id="inv" hidden></div>
-<div id="help">Click to look around · <kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump<br>Click throws a bottle · <kbd>E</kbd> do the thing · <kbd>G</kbd> grab or drag<br>Close the tab and your vagrant lies down right where you are.</div>
+<div id="help">Click to look around · <kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump<br><kbd>E</kbd> pick up junk or do the thing · click throws it · <kbd>Q</kbd> drop · <kbd>F</kbd> light it · <kbd>G</kbd> drag<br>Close the tab and your vagrant lies down right where you are.</div>
 <div id="status"></div>
 <div id="login"><div class="card"><h1>Turf War</h1><p>Pick a name, vagrant.</p><input id="nameInput" maxlength="16" placeholder="Sunny Steve" autocomplete="off"><button type="button" id="go">Wake up</button></div></div>
 <div id="mini" title="Your turf (M for the big map)"><canvas id="miniMap"></canvas><div id="miniN">N</div><div id="miniKey"><kbd>M</kbd> map</div></div>
@@ -1317,7 +1317,7 @@ function tick(){
   FIGHT.afterCamera(dt, t);
   NET.knockedCamera(dt);
   // viewmodel
-  handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6; NET.vmPose(dt,ml>0); COPPER.viewmodel(dt,t);
+  handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1-NET.handDrop(),-.45+handKick*.06); vm.rotation.x=-handKick*.9; NET.heldVisible(handKick); NET.vmPose(dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);
   // ambient life
   updateFX(dt,t);
   for(const p of people){ p.wob=Math.max(0,p.wob-dt*1.4); const w=Math.sin(t*18)*p.wob*.25; p.g.rotation.z=w; p.g.scale.set(1+Math.sin(t*20)*p.wob*.08,1-Math.sin(t*20)*p.wob*.08,1); p.head.rotation.z=Math.sin(t*1.3+p.ph)*.08; p.head.position.y=p.hy+Math.sin(t*2+p.ph)*.015; }
@@ -1339,7 +1339,8 @@ const SET = (() => {
   const KEY = 'tw_settings';
   const BIND_ACTIONS = [
     ['fwd', 'Walk forward', 'KeyW'], ['back', 'Walk back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
-    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'], ['punch', 'Punch', 'KeyV'],
+    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Pick up / do the thing', 'KeyE'], ['light', 'Light it on fire', 'KeyF'],
+    ['drop', 'Drop what you hold', 'KeyQ'], ['grab', 'Grab or drag', 'KeyG'], ['punch', 'Punch', 'KeyV'],
     ['map', 'Big town map', 'KeyM'],
   ];
   // Arrow keys and the right-hand Shift always work too, whatever the bindings say.
@@ -1382,7 +1383,7 @@ const SET = (() => {
   function applyHud() {
     const show = (id, on) => { const e = el(id); if (e) e.style.visibility = on ? '' : 'hidden'; };
     show('help', s.help); show('board', s.board); show('xh', s.xhair);
-    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle (punches with empty hands) · <kbd>${keyName(s.binds.punch)}</kbd> punch · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
+    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br><kbd>${keyName(s.binds.act)}</kbd> pick up junk or do the thing · click throws it (punches with empty hands) · <kbd>${keyName(s.binds.punch)}</kbd> punch · <kbd>${keyName(s.binds.drop)}</kbd> drop · <kbd>${keyName(s.binds.light)}</kbd> light it · <kbd>${keyName(s.binds.grab)}</kbd> drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
   }
   function applyAll() { applyVideo(); applyHud(); }
 
@@ -2156,6 +2157,63 @@ const GLASS = (() => {
   return { shatter, board, restore, update, state, fracture, materials, get flying() { return flying.length; } };
 })();
 
+// ===================== throwable junk meshes (GAME-82) =====================
+// Runs inside the look-test module, so it reuses its materials and helpers (put, B, CYL,
+// lumpy, bottleMesh, getMat). One builder per item type in items.mjs; each is centred on
+// the point the hand grips, long axis up, at world scale.
+const ITEMS = (() => {
+  const CAN_COLS = [0xE8343F, 0x3FA8E8, 0x26D3A0, 0xF2C230, 0x8F6BFF, 0xFF7B54];
+  const canLabel = {};
+  function canMat(hex) {
+    if (canLabel[hex]) return canLabel[hex];
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128; const g = cv.getContext('2d');
+    const c = '#' + new THREE.Color(hex).getHexString();
+    g.fillStyle = c; g.fillRect(0, 0, 256, 128);
+    g.fillStyle = 'rgba(255,255,255,.92)'; g.fillRect(0, 50, 256, 30);                  // white band
+    g.fillStyle = c; g.font = '900 26px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('FIZZ  POP  FIZZ', 128, 66);
+    for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(60,40,30,${Math.random() * .18})`; g.fillRect(Math.random() * 256, Math.random() * 128, 2 + Math.random() * 6, 1 + Math.random() * 3); } // scuffs
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+    return (canLabel[hex] = new THREE.MeshPhysicalMaterial({ map: t, roughness: .32, metalness: .35, clearcoat: .6 }));
+  }
+  const BUILD = {
+    bottle: () => bottleMesh(),
+    can: (seed) => {
+      const g = new THREE.Group(), hex = CAN_COLS[seed % CAN_COLS.length];
+      const body = new THREE.Mesh(CYL(.066, .066, .17, 18), canMat(hex)); g.add(body);
+      put(CYL(.058, .066, .02, 18), 0xC9CED8, g, 0, .095, 0); put(CYL(.066, .058, .02, 18), 0xC9CED8, g, 0, -.095, 0);   // shoulders
+      put(CYL(.056, .056, .006, 18), 0xB4BAC6, g, 0, .106, 0);                                                        // lid
+      put(B(.03, .004, .016, .002), 0xDDE1E8, g, .012, .11, 0);                                                     // ring pull
+      if (seed % 3 === 0) { g.scale.set(1, .82, 1); g.rotation.z = .12; }                                             // stomped flat-ish
+      return g;
+    },
+    rock: (seed) => {
+      const g = new THREE.Group();
+      const m = put(lumpy(.09, seed % 7 + 1), 'tx:conc|' + [0x9A948A, 0x8E8A84, 0xA89A86][seed % 3], g, 0, 0, 0);
+      m.scale.set(1, .85, 1.1);
+      return g;
+    },
+    brick: (seed) => {
+      const g = new THREE.Group(), base = [0xB4553C, 0xA84C36, 0xC0644A][seed % 3];
+      put(B(.12, .26, .084, .012), base, g, 0, 0, 0);
+      for (const [x, y, z] of [[.061, .06, 0], [.061, -.07, .02], [-.061, .02, -.01]]) put(B(.004, .03, .022, .002), 0x5C2A1E, g, x, y, z);   // chips
+      put(B(.124, .02, .088, .004), 0xCFC6B4, g, 0, .12, 0, { ns: true });                                  // old mortar crust
+      return g;
+    },
+  };
+  function mesh(type, seed = 0) {
+    const g = (BUILD[type] || BUILD.rock)(seed);
+    g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    return g;
+  }
+  const NAMES = { bottle: 'bottle', can: 'can', rock: 'rock', brick: 'brick' };
+  // In the first-person fist: the grip was modelled round a bottle, so smaller things sit
+  // up out of the fingers where you can see them.
+  const HAND = { rock: { y: .1, s: 1.25 }, can: { y: .04, s: 1 }, brick: { y: .05, s: 1 }, bottle: { y: 0, s: 1 } };
+  function inHand(m, type) { const h = HAND[type] || HAND.rock; m.position.y += h.y; m.scale.multiplyScalar(h.s); return m; }
+  return { mesh, inHand, name: t => NAMES[t] || t };
+})();
+
 // ===================== multiplayer client (GAME-77) =====================
 // Runs inside the look-test module, so it reuses its scene, shader and asset builders.
 // The server owns the world; this file draws it, predicts your own vagrant, and
@@ -2350,7 +2408,7 @@ const NET = (() => {
   function spawn(e) {
     if (ents.has(e.id)) despawn(e.id);
     if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
-    if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); return; }
+    if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); setMyHeld(e.held); return; }
     let obj, extra = {};
     if (e.kind === 'vagrant' || e.kind === 'sleeper' || e.kind === 'npc') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
@@ -2366,16 +2424,91 @@ const NET = (() => {
       b.position.set(0, -50, 0); world.addBody(b); extra = { body: b };
     }
     else if (e.kind === 'prop') obj = buildProp(e);
-    else if (e.kind === 'bottle') obj = bottleMesh();
+    else if (e.kind === 'item') obj = ITEMS.mesh(e.type, hash(e.id));
     else return;
     scene.add(obj);
-    ents.set(e.id, { ...e, obj, buf: [], ...extra });
+    const v = { ...e, obj, buf: [], ...extra };
+    ents.set(e.id, v);
+    if (v.model) setRemoteHeld(v, e.held);
   }
   function despawn(id) {
     const v = ents.get(id);
     if (v) { if (v.obj) scene.remove(v.obj); if (v.body) world.removeBody(v.body); if (v.rag) removeRagBodies(v.rag); }
     if (id === me && ownRag) { scene.remove(ownRag.obj); removeRagBodies(ownRag.rag); ownRag = null; }
     ents.delete(id); fixtures.delete(id);
+  }
+
+  // ---------- held junk (GAME-82) ----------
+  // Your hand only comes up when it holds something; the item sits where the look test's
+  // bottle sat, inside the gloved grip. Other vagrants carry theirs in the right hand.
+  let myHeld = null, raise = 0, itemTarget = null, lastThrowAt = 0, lastHint = 0;
+  heldBottle.visible = false;
+  const heldSlot = new THREE.Group(); heldSlot.position.copy(heldBottle.position); vm.add(heldSlot);
+  function setMyHeld(type) {
+    type = type || null;
+    if (type === myHeld && heldSlot.children.length === (type ? 1 : 0)) return;
+    myHeld = type; heldSlot.clear();
+    if (type) { const m = ITEMS.mesh(type, 1); ITEMS.inHand(m, type); m.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } }); heldSlot.add(m); }
+  }
+  // Other vagrants: a lean (pick up, dig) or an arm swing (throw) played on their model.
+  function remoteAnim(id, kind) { const v = ents.get(id); if (v && v.model) v.ranim = { kind, t: 0, dur: ANIM_DUR[kind] * 1.3 }; }
+  function stepRemoteAnim(v, dt) {
+    const a = v.ranim; if (!a) return;
+    a.t += dt; const k = Math.min(1, a.t / a.dur), g = v.model.g;
+    if (a.kind === 'throw') { g.rotation.x = -bump(k, 0, .35) * .25 + bump(k, .35, .7) * .3; if (v.heldObj) v.heldObj.position.y = .64 + bump(k, 0, .35) * .9; }
+    else { g.rotation.x = bump(k, 0, a.kind === 'dig' ? .2 : .4) * (a.kind === 'dig' ? .45 : .8); if (a.kind === 'dig') g.rotation.z = Math.sin(a.t * 16) * .05 * bump(k, 0, .2); }
+    if (k >= 1) { v.ranim = null; g.rotation.x = 0; if (v.heldObj) v.heldObj.position.y = .64; }
+  }
+  function setRemoteHeld(v, type) {
+    if (v.heldObj) { v.model.g.remove(v.heldObj); v.heldObj = null; }
+    if (!type || v.kind !== 'vagrant') return;
+    v.heldObj = ITEMS.mesh(type, hash(v.id)); v.heldObj.position.set(-.31, .64, .14); v.heldObj.rotation.x = .25; v.model.g.add(v.heldObj);
+  }
+  // Interaction animations: 'reach' bends down to grab junk, 'dig' rummages in a bin,
+  // 'throw' winds up and lets go. They layer on top of the look test's bob and kick.
+  let anim = null;                                   // { kind, t, dur }
+  const ANIM_DUR = { reach: .5, dig: .9, throw: .32 };
+  function playAnim(kind) { anim = { kind, t: 0, dur: ANIM_DUR[kind] }; }
+  const ease = x => x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x);
+  const bump = (x, a, b) => ease((x - a) / (b - a)) * (1 - ease((x - b) / (1 - b + 1e-6)));
+  const handDrop = () => (1 - Math.max(raise, anim && anim.kind !== 'throw' ? 1 : 0)) * .32;
+  const heldVisible = kick => { heldSlot.visible = kick < .6 && !(anim && anim.kind === 'reach' && anim.t / anim.dur < .45); handG.visible = raise > .02 || !!anim; };
+  function vmAnim(dt) {
+    if (!anim) return;
+    anim.t += dt; const k = anim.t / anim.dur;
+    if (k >= 1) { anim = null; return; }
+    if (anim.kind === 'reach') {                       // dip the view, hand sweeps down and forward, scoops, comes back up
+      const down = bump(k, 0, .4);
+      camera.rotation.x -= down * .42;
+      vm.position.y -= down * .1; vm.position.z -= down * .12; vm.position.x -= down * .05;
+      vm.rotation.x += down * .9; vm.rotation.z += Math.sin(k * Math.PI) * .25;
+    } else if (anim.kind === 'dig') {                  // lean in over the lid and root around
+      const lean = bump(k, 0, .2);
+      camera.rotation.x -= lean * .3; camera.position.y -= lean * .08;
+      vm.position.z -= lean * .14; vm.position.y += lean * .02;
+      vm.position.x += Math.sin(anim.t * 22) * .03 * lean; vm.rotation.z += Math.sin(anim.t * 17) * .3 * lean; vm.rotation.x += lean * .5;
+    } else if (anim.kind === 'throw') {               // wind back over the shoulder, then snap forward
+      const back = bump(k, 0, .35);
+      vm.position.y += back * .1; vm.position.z += back * .08; vm.rotation.x -= back * -.9;
+      camera.rotation.z += back * .03;
+    }
+  }
+  const _ld = new THREE.Vector3(), _to = new THREE.Vector3();
+  function findItemTarget() {
+    camera.getWorldDirection(_ld);
+    const eye = camera.getWorldPosition(new THREE.Vector3());
+    let best = null, bs = Infinity;
+    for (const v of ents.values()) {
+      if (v.kind !== 'item' || !v.obj) continue;
+      _to.copy(v.obj.position).sub(eye);
+      const flat = Math.hypot(v.obj.position.x - player.position.x, v.obj.position.z - player.position.z);
+      if (flat > 2.4 || _to.y < -2.2 || _to.y > 1) continue;
+      const d = _to.length(), dot = _to.divideScalar(d || 1).dot(_ld);
+      if (dot < .55 && flat > .9) continue;                 // not looking at it, and not at your feet
+      const score = d * (1.6 - dot);
+      if (score < bs) { bs = score; best = v; }
+    }
+    return best;
   }
 
   // ---------- snapshots and interpolation ----------
@@ -2506,6 +2639,14 @@ const NET = (() => {
       if (m.target === me) feed(m.rage ? 'The driver has had enough of you. <b>Move!</b>' : 'A car is honking at you. Get out of the street!');
     }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
+    else if (m.kind === 'held') {
+      if (m.id === me) { const had = myHeld; setMyHeld(m.item); if (m.item && m.item !== had) feed(`Got a <b>${esc(ITEMS.name(m.item))}</b>. Click to throw it.`); }
+      else { const v = ents.get(m.id); if (v && v.model) { if (m.item && !v.held2) remoteAnim(m.id, 'reach'); v.held2 = m.item; setRemoteHeld(v, m.item); } }
+    }
+    else if (m.kind === 'throw') { if (m.id !== me) remoteAnim(m.id, 'throw'); }
+    else if (m.kind === 'pocket') { if (m.id === me) feed(`You flip the lid and dig around... found <b>${esc(m.name)}</b>. Pocketed.`); }
+    else if (m.kind === 'thud') { const p = new THREE.Vector3(...m.at); dust(p, m.item === 'brick' || m.item === 'rock' ? 3 : 1, 0xd8d2c4); }
+    else if (m.kind === 'rummage') { const p = new THREE.Vector3(m.at[0], 1.9, m.at[2]); dust(p, 4, 0xb9b09a); if (m.by !== me) { remoteAnim(m.by, 'dig'); const v = ents.get(m.by); if (v && v.obj) popText('*rummage*', [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z], 'say'); } }
     else if (m.kind === 'grab') {
       if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
@@ -2650,7 +2791,7 @@ const NET = (() => {
     vm.position.z += -.16 * g - .12 * l;
     vm.rotation.x += .5 * g - .25 * l;
     vm.rotation.z = -.6 * g + Math.sin(vmT * 23) * .02 * strain;
-    if (g > .25) heldBottle.visible = false;
+    if (g > .25) heldSlot.visible = false;
   }
 
   // ---------- per-frame ----------
@@ -2658,6 +2799,10 @@ const NET = (() => {
   function frame(dt, t) {
     GLASS.update(dt);
     const rt = serverNow() - INTERP_MS, showTags = SET.tags();
+    raise += ((myHeld || grabbing ? 1 : 0) - raise) * (1 - Math.exp(-dt * 12));
+    if (itemTarget && itemTarget.obj) itemTarget.obj.scale.setScalar(1);
+    itemTarget = findItemTarget();
+    if (itemTarget) itemTarget.obj.scale.setScalar(1 + .12 * (.5 + .5 * Math.sin(t * 8)));
     for (const v of ents.values()) {
       if (!v.obj) continue;
       if (v.tag) v.tag.visible = showTags;
@@ -2670,6 +2815,7 @@ const NET = (() => {
         v.model.g.position.y = -0.9 + (moving ? Math.abs(Math.sin(v.walk)) * .05 : 0);
         v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
         v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
+        stepRemoteAnim(v, dt);
         animateArms(v, dt, moving);
         FIGHT.pose(v, dt, t);
       } else if (v.kind === 'sleeper') {
@@ -2725,15 +2871,29 @@ const NET = (() => {
   const keyLabel = k => esc(k.startsWith('Key') ? k.slice(3) : k);
   let promptMode = null;
   function updatePrompt(btn) {
-    const f = COPPER.busy() ? null : nearestAction(), g = !f && !COPPER.busy() && (grabbing ? ents.get(grabbing) : nearestGrabbable());
-    promptMode = f ? 'act' : g ? 'grab' : null; btn.hidden = !promptMode;
-    let html = '';
-    if (f) html = `${esc(COPPER.verb(f.type, FIRE.verb(f.type, MAP.actions[f.type].verb)))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
-    else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
+    let html = ''; promptMode = null;
+    if (COPPER.busy()) { /* stripping copper: the progress bar replaces the prompt */ }
+    else if (itemTarget) { promptMode = 'pickup'; html = `${myHeld ? 'Swap for' : 'Pick up'} the ${esc(ITEMS.name(itemTarget.type))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`; }
+    else {
+      const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
+      promptMode = f ? 'act' : g ? 'grab' : null;
+      if (f && (f.type === 'dumpster' || f.type === 'pile')) html = `Dig through the ${f.type === 'pile' ? 'trash' : 'dumpster'} <kbd>${keyLabel(__set.s.binds.act)}</kbd> &nbsp;${esc(FIRE.verb(f.type, 'Light it'))} <kbd>${keyLabel(__set.s.binds.light)}</kbd>`;
+      else if (f) html = `${esc(COPPER.verb(f.type, FIRE.verb(f.type, MAP.actions[f.type].verb)))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+      else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
+    }
+    btn.hidden = !html;
     if (html && btn.innerHTML !== html) btn.innerHTML = html;
   }
-  const sendAct = () => { if (ws && ws.readyState === 1 && !ownRag) ws.send('{"t":"act"}'); };
-  const sendGrab = () => { if (ws && ws.readyState === 1 && !ownRag) ws.send('{"t":"grab"}'); };
+  const send = m => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+  const sendGrab = () => { if (!ownRag) send({ t: 'grab' }); };
+  let lastActAt = 0;
+  const sendAct = () => {
+    if (ownRag) return;
+    const now = performance.now(); if (now - lastActAt < 600) return; lastActAt = now;
+    if (itemTarget) { send({ t: 'pickup', id: itemTarget.id }); playAnim('reach'); return; }
+    const f = nearestAction(); send({ t: 'act' });
+    if (f && (f.type === 'dumpster' || f.type === 'pile')) playAnim('dig');
+  };
   const act = () => (promptMode === 'grab' ? sendGrab : sendAct)();   // the on-screen button does whatever it says
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
@@ -2741,9 +2901,12 @@ const NET = (() => {
     if (ownRag) return;
     if (lastPointer === 'mouse' && document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
     if (document.pointerLockElement === canvas) camera.getWorldDirection(dir);
-    if (!FIGHT.holding()) return FIGHT.punch(dir);   // empty hands: punch (GAME-85)
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'throw', dir: { x: dir.x, y: dir.y, z: dir.z } }));
-    handKick = 1;
+    if (!myHeld) return FIGHT.punch(dir);                // empty hands: punch (GAME-85)
+    if (performance.now() - lastThrowAt < 380) return;
+    lastThrowAt = performance.now();
+    const d = { x: dir.x, y: dir.y, z: dir.z };
+    playAnim('throw');                                   // wind up, then release at the top of the swing
+    setTimeout(() => { send({ t: 'throw', dir: d }); handKick = 1; }, 110); setTimeout(() => { if (handKick < .3) setMyHeld(null); }, 400);   // the server confirms with a 'held' fx
   }
   addEventListener('mousemove', e => {
     if (document.pointerLockElement !== canvas) return;
@@ -2751,7 +2914,9 @@ const NET = (() => {
   });
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (SET.isBind('act', e.code) || e.code === 'KeyF') sendAct();
+    if (SET.isBind('act', e.code)) sendAct();
+    if (SET.isBind('light', e.code)) send({ t: 'act', light: 1 });
+    if (SET.isBind('drop', e.code) && myHeld) send({ t: 'drop' });
     if (SET.isBind('grab', e.code)) sendGrab();
     if (SET.isBind('punch', e.code)) FIGHT.punch(camera.getWorldDirection(new THREE.Vector3()));
   });
@@ -2794,13 +2959,16 @@ const NET = (() => {
     setTimeout(() => el('nameInput').focus(), 50);
   }
   window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
+    get held() { return myHeld; }, get busy() { return !!anim || COPPER.busy(); }, get target() { return itemTarget && itemTarget.id; }, send,
+    previewHeld(t) { setMyHeld(t); },
+    throwNow() { lastPointer = 'touch'; throwDir(camera.getWorldDirection(new THREE.Vector3())); },
+    lookAt(x, z, p = -.5) { yaw = Math.atan2(-(x - player.position.x), -(z - player.position.z)); pitch = p; },
     // Debug: ragdoll someone locally without the server (vel/spin as in fx 'hit').
     ragdoll(id, vel = [6, 4, 0], spin = [0, 0, -8]) { const v = ents.get(id); if (v && v.model) { startRagdoll(v, vel, spin); v.rag.noPull = true; } },
     getUp(id) { const v = ents.get(id); if (v && v.rag) getUpRagdoll(v); } };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
 })();
 
 // ===================== copper wire theft (GAME-91) =====================
@@ -2929,11 +3097,14 @@ const COPPER = (() => {
     const k = strip ? Math.min(1, (performance.now() - strip.t0) / strip.ms) : 0;
     crouch += ((strip ? 1 : 0) - crouch) * Math.min(1, dt * 9);
     if (crouch < .01) { if (fpPliers.visible) { fpPliers.visible = false; vm.rotation.z = 0; } return; }
+    for (const c of vm.children) if (c !== handG && c !== fpPliers) c.visible = false;   // pocket the held junk; it comes back next frame
+    handG.visible = true;
     camera.position.y -= crouch * .55;                              // squat down at the pole base
     heldBottle.visible = false; fpPliers.visible = true;
     // reach in, then a rhythm of snip, twist and yank as the wire comes out
     const cyc = (t * 2.6) % 1, yank = strip && cyc > .7 ? Math.sin((cyc - .7) / .3 * Math.PI) : 0;
     snip(fpPliers, strip ? (cyc < .35 ? Math.sin(cyc / .35 * Math.PI) : 0) : 0);
+    vm.position.y += NET.handDrop() * crouch;                       // empty hands sit out of view (GAME-82): bring the glove up
     vm.position.x -= crouch * .04; vm.position.y += crouch * (.015 - yank * .03); vm.position.z -= crouch * (.05 - yank * .05);
     vm.rotation.x += crouch * (-.12 + yank * .22); vm.rotation.z = crouch * (.08 + Math.sin(t * 9) * .025 * (strip ? 1 : 0));
     if (strip) bar.querySelector('u').style.width = (k * 100).toFixed(1) + '%';
@@ -3065,7 +3236,7 @@ const FIGHT = (() => {
   const HIT = { L: new THREE.Vector3(-.04, -.09, -.66), R: new THREE.Vector3(.04, -.09, -.66) };
   const _v = new THREE.Vector3();
 
-  // Until items can be put down (GAME-82), the bottle is always in hand.
+  // Empty hands (GAME-82 window.__net.held is null) mean fists.
   const holding = () => (window.__net && 'held' in window.__net) ? window.__net.held != null : true;
   const isDown = () => now() < own.downUntil;
 
@@ -3197,7 +3368,7 @@ const FIGHT = (() => {
     const empty = !holding(), pk = own.punchT > 0 ? Math.sin((1 - own.punchT) * Math.PI) : 0;
     for (const h of ['L', 'R']) {
       const f = fists[h], active = own.punchT > 0 && own.hand === h;
-      f.visible = !down && (empty || active);
+      f.visible = !down && (empty || active) && !(window.__net && window.__net.busy);   // GAME-82 reach/dig uses the gloved hand
       if (!f.visible) continue;
       const k = active ? pk : 0;
       _v.copy(REST[h]).lerp(HIT[h], k);

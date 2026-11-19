@@ -124,11 +124,14 @@ const COPPER = (() => {
     const k = strip ? Math.min(1, (performance.now() - strip.t0) / strip.ms) : 0;
     crouch += ((strip ? 1 : 0) - crouch) * Math.min(1, dt * 9);
     if (crouch < .01) { if (fpPliers.visible) { fpPliers.visible = false; vm.rotation.z = 0; } return; }
+    for (const c of vm.children) if (c !== handG && c !== fpPliers) c.visible = false;   // pocket the held junk; it comes back next frame
+    handG.visible = true;
     camera.position.y -= crouch * .55;                              // squat down at the pole base
     heldBottle.visible = false; fpPliers.visible = true;
     // reach in, then a rhythm of snip, twist and yank as the wire comes out
     const cyc = (t * 2.6) % 1, yank = strip && cyc > .7 ? Math.sin((cyc - .7) / .3 * Math.PI) : 0;
     snip(fpPliers, strip ? (cyc < .35 ? Math.sin(cyc / .35 * Math.PI) : 0) : 0);
+    vm.position.y += NET.handDrop() * crouch;                       // empty hands sit out of view (GAME-82): bring the glove up
     vm.position.x -= crouch * .04; vm.position.y += crouch * (.015 - yank * .03); vm.position.z -= crouch * (.05 - yank * .05);
     vm.rotation.x += crouch * (-.12 + yank * .22); vm.rotation.z = crouch * (.08 + Math.sin(t * 9) * .025 * (strip ? 1 : 0));
     if (strip) bar.querySelector('u').style.width = (k * 100).toFixed(1) + '%';
