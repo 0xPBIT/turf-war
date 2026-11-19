@@ -10,6 +10,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { ITEM_TYPES, ITEM_RULES, POCKET_TYPES, itemSpots, pickWeighted, dumpsterFind } from './items.mjs';
 import { createCombat } from './combat.mjs';
 import { initCopper } from './copper.mjs';
+import { TERRAIN } from './terrain.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -50,7 +51,15 @@ const fixed = (x, y, z, hx, hy, hz) => {
   return world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.8), b);
 };
 const { minX, maxX, minZ, maxZ } = MAP.bounds;
-fixed((minX + maxX) / 2, -0.5, (minZ + maxZ) / 2, (maxX - minX) / 2 + 2, 0.5, (maxZ - minZ) / 2 + 2); // ground
+fixed((minX + maxX) / 2, -0.5, (minZ + maxZ) / 2, (maxX - minX) / 2 + 2, 0.5, (maxZ - minZ) / 2 + 2); // flat ground under everything
+// Hills (GAME-96): a 1 m heightfield over the part of the map that isn't flat, from the same
+// TERRAIN.h the client builds its ground from. Heights never go below 0, so the slab above still
+// catches anything that slips through.
+{ const A = TERRAIN.AREA, nc = A.maxX - A.minX, nr = A.maxZ - A.minZ, hs = new Float32Array((nr + 1) * (nc + 1));
+  for (let i = 0; i <= nr; i++) for (let j = 0; j <= nc; j++) hs[i + j * (nr + 1)] = TERRAIN.h(A.minX + j, A.minZ + i);   // rows run along z, columns along x
+  const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation((A.minX + A.maxX) / 2, 0, (A.minZ + A.maxZ) / 2));
+  world.createCollider(RAPIER.ColliderDesc.heightfield(nr, nc, hs, { x: nc, y: 1, z: nr }).setFriction(0.8), b); }
+const groundY = (x, z) => TERRAIN.h(x, z);
 { const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, hx = (maxX - minX) / 2 + 1, hz = (maxZ - minZ) / 2 + 1;
   fixed(minX - 0.5, 5, cz, 0.5, 10, hz); fixed(maxX + 0.5, 5, cz, 0.5, 10, hz);
   fixed(cx, 5, minZ - 0.5, hx, 10, 0.5); fixed(cx, 5, maxZ + 0.5, hx, 10, 0.5); }
@@ -128,7 +137,7 @@ MAP.colliders.forEach((c, i) => {
     // Parked cars: same hood + cabin shape as traffic, so you can climb onto them.
     // c.ry is the model's yaw from the look test; the car shape's nose points along +z.
     const yaw = c.ry !== undefined ? c.ry - Math.PI / 2 : (c.box[0] > c.box[2] ? Math.PI / 2 : 0);
-    const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], 0, c.p[2]).setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }));
+    const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], groundY(c.p[0], c.p[2]), c.p[2]).setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }));
     [collider, ...extraColliders] = carColliders(b, 0, c.ry !== undefined ? CAR_CABIN_Z : 0);
     // Not enumerable: MAP is sent to clients as /town.json, and a physics body can't be serialised.
     Object.defineProperty(c, 'carBody', { value: b, enumerable: false, writable: true, configurable: true });
@@ -140,7 +149,7 @@ MAP.colliders.forEach((c, i) => {
 });
 // Extra fire hydrants (GAME-94): the client builds their models from the same list.
 (MAP.hydrants || []).forEach((h, i) => {
-  const p = [h.p[0], 0.35, h.p[1]];
+  const p = [h.p[0], groundY(h.p[0], h.p[1]) + 0.35, h.p[1]];
   const collider = colliderFor({ p, cyl: [0.17, 0.7] });
   addEntity({ id: 'f:hydrantx' + (i + 1), kind: 'fixture', type: 'hydrant', collider, fixedPos: p, dir: h.dir || 0, state: {} });
 });
@@ -207,11 +216,17 @@ function propCollider(cat) {
   return desc.setFriction(cat.friction).setRestitution(cat.restitution);
 }
 const savedKey = pr => 'o:' + pr.id.slice(2);
+// Props in town.json sit on flat ground (y from 0); lift them onto the hills, and never restore a
+// saved prop below the ground (saves from before the hills existed).
+function propStart(pr, saved) {
+  if (saved) return [saved.p[0], Math.max(saved.p[1], groundY(saved.p[0], saved.p[2]) + 0.15), saved.p[2]];
+  return [pr.p[0], pr.p[1] + groundY(pr.p[0], pr.p[2]), pr.p[2]];
+}
 function spawnProp(pr, fresh) {
   const cat = propType(pr);
   const saved = !fresh && save.objects[savedKey(pr)];
   const desc = RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(...(saved ? saved.p : pr.p))
+    .setTranslation(...propStart(pr, saved))
     .setRotation(saved ? { x: saved.q[0], y: saved.q[1], z: saved.q[2], w: saved.q[3] } : propRotation(pr))
     .setLinearDamping(cat.linDamp ?? 0.3).setAngularDamping(cat.angDamp ?? 0.5)
     .setCcdEnabled(!!cat.ccd);
@@ -243,7 +258,7 @@ function rescueLostProps() {
     const t = e.body.translation();
     if (t.y > -5 && t.x > minX - 5 && t.x < maxX + 5 && t.z > minZ - 5 && t.z < maxZ + 5) continue;
     const pr = e.spec;
-    e.body.setTranslation({ x: pr.p[0], y: pr.p[1], z: pr.p[2] }, true);
+    e.body.setTranslation({ x: pr.p[0], y: pr.p[1] + groundY(pr.p[0], pr.p[2]), z: pr.p[2] }, true);
     e.body.setRotation(propRotation(pr), true);
     e.body.setLinvel({ x: 0, y: 0, z: 0 }, true); e.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
@@ -264,7 +279,7 @@ const COLORS = ['#ff5fa2', '#46c6ff', '#ffb627', '#7ae582', '#b388ff', '#ff7b54'
 function vagrantId(pid) { return 'p:' + pid; }
 
 function spawnAwake(p) {
-  const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, Math.max(p.y, CAP_HALF + CAP_R) + 0.05, p.z));
+  const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, Math.max(p.y, groundY(p.x, p.z) + CAP_HALF + CAP_R) + 0.05, p.z));
   const collider = world.createCollider(RAPIER.ColliderDesc.capsule(CAP_HALF, CAP_R).setFriction(0.5), body);
   return addEntity({ id: vagrantId(p.id), kind: 'vagrant', player: p, body, collider, vy: 0, grabbing: null, state: {} });
 }
@@ -272,7 +287,7 @@ function spawnAwake(p) {
 // A logged-out vagrant lies down where they stood: a dynamic, draggable body.
 function spawnSleeper(p) {
   const desc = RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(p.x, Math.max(p.y, 0.45), p.z)
+    .setTranslation(p.x, Math.max(p.y, groundY(p.x, p.z) + 0.45), p.z)
     .setRotation(p.q ? { x: p.q[0], y: p.q[1], z: p.q[2], w: p.q[3] } : { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 })
     .setLinearDamping(1.5).setAngularDamping(2.0);
   const body = world.createRigidBody(desc);
@@ -503,7 +518,7 @@ function stepItems(now) {
     if (now < sp.nextAt) continue;
     const types = sp.types || null;
     const type = types ? types[Math.floor(Math.random() * types.length)] : pickWeighted('ground');
-    const e = spawnItem(type, [sp.x, 0.25, sp.z], { rot: type === 'bottle' || type === 'can' ? (Math.random() < 0.6 ? lyingDown() : randomUpright()) : randomUpright(), spot: sp });
+    const e = spawnItem(type, [sp.x, groundY(sp.x, sp.z) + 0.25, sp.z], { rot: type === 'bottle' || type === 'can' ? (Math.random() < 0.6 ? lyingDown() : randomUpright()) : randomUpright(), spot: sp });
     sp.item = e.id;
   }
   // Tidy up: loose junk beyond the cap goes, oldest first. Anything that fell out of town goes too.
@@ -696,10 +711,10 @@ function stepHydrants(now) {
     for (const o of entities.values()) {
       // Loose things get shoved down the jet and lifted a little; heavy things barely slide.
       if (o.body && o.body.isDynamic()) {
-        const t = o.body.translation(); if (t.y > 2.2) continue;
+        const t = o.body.translation(), gy = groundY(t.x, t.z); if (t.y - gy > 2.2) continue;
         const k = inJet(j, t.x, t.z); if (k === null) continue;
         const m = o.body.mass(), accel = Math.min(28, 160 / Math.max(m, 0.5)) * (0.3 + 0.7 * k);
-        o.body.applyImpulse({ x: j.dx * accel * m * dt, y: (t.y < 0.6 ? 6 : 0) * Math.min(m, 3) * k * dt, z: j.dz * accel * m * dt }, true);
+        o.body.applyImpulse({ x: j.dx * accel * m * dt, y: (t.y - gy < 0.6 ? 6 : 0) * Math.min(m, 3) * k * dt, z: j.dz * accel * m * dt }, true);
       }
       // Fire goes out where the water lands.
       if ((o.state?.fireUntil || 0) > now) {
@@ -768,8 +783,8 @@ function getUp(e) {
   const t = e.body.translation();
   // Stand on whatever is under the body (ground, a car roof), never inside it.
   const hit = world.castRay(new RAPIER.Ray({ x: t.x, y: t.y + 1.2, z: t.z }, { x: 0, y: -1, z: 0 }), 6, true, undefined, undefined, e.collider, e.body);
-  const floor = hit ? t.y + 1.2 - hit.timeOfImpact : 0;
-  const y = Math.max(floor, 0) + CAP_HALF + CAP_R + 0.02;
+  const gy = groundY(t.x, t.z), floor = hit ? t.y + 1.2 - hit.timeOfImpact : gy;
+  const y = Math.max(floor, gy) + CAP_HALF + CAP_R + 0.02;
   e.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
   e.body.setLinvel({ x: 0, y: 0, z: 0 }, false); e.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
   e.body.enableCcd(false);
@@ -927,6 +942,16 @@ function carYaw(car) {
   return prev + dy * (0.5 + 0.5 * car.s / 4);
 }
 const yawQuat = (yaw) => ({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) });
+// Ground under a car: the Skyway deck for routes with a height, else the hills (GAME-96).
+const carBase = (car, p) => car.route.y > 0 ? car.route.y : groundY(p.x, p.z);
+// Yaw plus nose-up pitch from the slope along the heading, so cars climb the hills nose first.
+function carQuat(car, p, yaw) {
+  if (car.route.y > 0) return yawQuat(yaw);
+  const fx = Math.sin(yaw), fz = Math.cos(yaw), L = 1.9;
+  const pitch = Math.atan2(groundY(p.x + fx * L, p.z + fz * L) - groundY(p.x - fx * L, p.z - fz * L), 2 * L);
+  const sy = Math.sin(yaw / 2), cy = Math.cos(yaw / 2), sx = Math.sin(-pitch / 2), cx = Math.cos(-pitch / 2);
+  return { x: cy * sx, y: sy * cx, z: -sy * sx, w: cy * cx };
+}
 function placeAt(car, dist) {
   car.seg = 0; car.s = dist;
   while (car.seg < car.route.segs.length - 1 && car.s > car.route.segs[car.seg].len) { car.s -= car.route.segs[car.seg].len; car.seg++; }
@@ -939,8 +964,8 @@ function spawnCars() {
     const car = { id: 'c:' + i, route, seg: 0, s: 0, v: CRUISE * 0.5, stopState: {}, lastHonk: 0, blockedSince: 0 };
     placeAt(car, route.total * ((0.12 + 0.41 * k + 0.13 * (i % 3)) % 0.95));
     const p = carPos(car);
-    car.rot = yawQuat(carYaw(car));
-    const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, route.y + 0.7, p.z).setRotation(car.rot));
+    car.rot = carQuat(car, p, carYaw(car));
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, carBase(car, p) + 0.7, p.z).setRotation(car.rot));
     const [collider, ...extraColliders] = carColliders(body, 0.7);
     car.entity = addEntity({ id: car.id, kind: 'traffic', type: 'car', body, collider, extraColliders, state: {}, color: CAR_COLORS[i % CAR_COLORS.length] });
     cars.push(car);
@@ -949,7 +974,7 @@ function spawnCars() {
 // Distance along our heading to the first thing in our path (vagrants, sleepers, cars).
 // ignorePeople: a raging driver (GAME-83); skipSleepers: shoving a sleeper out of the road.
 function obstacleAhead(car, look, ignorePeople = false, skipSleepers = false) {
-  const g = car.route.segs[car.seg], p = carPos(car), y = car.route.y + 0.7;
+  const g = car.route.segs[car.seg], p = carPos(car), y = carBase(car, p) + 0.7;
   let best = Infinity, vagrant = null;
   for (const e of entities.values()) {
     if (e === car.entity || !e.body) continue;
@@ -957,7 +982,7 @@ function obstacleAhead(car, look, ignorePeople = false, skipSleepers = false) {
     if (ignorePeople && e.kind !== 'traffic') continue;
     if (skipSleepers && e.kind === 'sleeper') continue;
     const t = e.body.translation();
-    if (Math.abs(t.y - y) > 2.5 && (e.kind === 'traffic' || car.route.y > 2 || t.y > 3.4)) continue; // the Skyway and the street below ignore each other; people up on a roof are not in the road
+    if (Math.abs(t.y - y) > 2.5 && (e.kind === 'traffic' || car.route.y > 2 || t.y > y + 2.7)) continue; // the Skyway and the street below ignore each other; people up on a roof are not in the road
     const rx = t.x - p.x, rz = t.z - p.z;
     const along = rx * g.d.dx + rz * g.d.dz, side = rx * -g.d.dz + rz * g.d.dx;
     // Someone standing on this car: it won't drive off with them, it sits and honks.
@@ -976,7 +1001,7 @@ function obstacleAhead(car, look, ignorePeople = false, skipSleepers = false) {
 const HIT_SPEED = 2.5, RAGE_MS = 8000, EBRAKE = BRAKE * 1.5, REACT_MS = 350;
 function carHits(car, now) {
   if (Math.abs(car.v) < HIT_SPEED) return false;
-  const g = car.route.segs[car.seg], sgn = Math.sign(car.v), p = carPos(car), cy = car.route.y;
+  const g = car.route.segs[car.seg], sgn = Math.sign(car.v), p = carPos(car), cy = carBase(car, p);
   const f = { x: g.d.dx * sgn, z: g.d.dz * sgn };
   let any = false;
   for (const s of sessions.values()) {
@@ -1051,15 +1076,15 @@ function stepTraffic(now) {
       if (now - car.blockedSince > 900 && now - car.lastHonk > 2200) {
         car.lastHonk = now;
         const long = now - car.blockedSince > 5000, p = carPos(car);
-        broadcast({ t: 'fx', kind: 'honk', id: car.id, long, at: [p.x, car.route.y + 1, p.z], target: ob.vagrant.id });
+        broadcast({ t: 'fx', kind: 'honk', id: car.id, long, at: [p.x, carBase(car, p) + 1, p.z], target: ob.vagrant.id });
       }
       // Fed up: back up a few metres, then floor it.
       const tgt = ob.vagrant;
-      if (now - car.blockedSince > RAGE_MS && tgt.kind === 'vagrant' && !tgt.down && ob.gap > -0.5 && tgt.body.translation().y < car.route.y + CAR_HOOD_TOP + 0.5) {
+      if (now - car.blockedSince > RAGE_MS && tgt.kind === 'vagrant' && !tgt.down && ob.gap > -0.5 && tgt.body.translation().y < carBase(car, p) + CAR_HOOD_TOP + 0.5) {
         const p = carPos(car);
         car.rage = { phase: 'back', until: now + 1000 };
         car.blockedSince = 0; car.lastHonk = now;
-        broadcast({ t: 'fx', kind: 'honk', id: car.id, long: true, rage: true, at: [p.x, car.route.y + 1, p.z], target: tgt.id });
+        broadcast({ t: 'fx', kind: 'honk', id: car.id, long: true, rage: true, at: [p.x, carBase(car, p) + 1, p.z], target: tgt.id });
       }
     } else if (!rage && !shoving) car.blockedSince = 0;
     // hits happen at the speed the car arrives with
@@ -1093,8 +1118,8 @@ function stepTraffic(now) {
       }
     }
     const p = carPos(car);
-    car.entity.body.setNextKinematicTranslation({ x: p.x, y: car.route.y + 0.7, z: p.z });
-    car.entity.body.setNextKinematicRotation(yawQuat(carYaw(car)));
+    car.entity.body.setNextKinematicTranslation({ x: p.x, y: carBase(car, p) + 0.7, z: p.z });
+    car.entity.body.setNextKinematicRotation(carQuat(car, p, carYaw(car)));
     car.entity.state.braking = car.v < want - 0.05 || car.v < 0.1;
   }
 }
@@ -1343,7 +1368,8 @@ wss.on('connection', ws => {
     else if (m.t === 'grab') grab(s);
     else if (m.t === 'tp' && process.env.DEV_TP) {        // local testing only: jump to a spot
       const e = s.entity, x = +m.x || 0, z = +m.z || 0;
-      e.body.setTranslation({ x, y: CAP_HALF + CAP_R + 0.05, z }, true); Object.assign(e.player, { x, y: CAP_HALF + CAP_R + 0.05, z }); s.queue = [];
+      const y = groundY(x, z) + CAP_HALF + CAP_R + 0.05;
+      e.body.setTranslation({ x, y, z }, true); Object.assign(e.player, { x, y, z }); s.queue = [];
     }
     else if (m.t === 'punch' && m.dir) combat.punch(s.entity, { x: +m.dir.x || 0, z: +m.dir.z || 0 });
   });

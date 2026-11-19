@@ -1,3 +1,4 @@
+import { TERRAIN } from './terrain.mjs';
 // GAME-85: hit reactions, fist fights and townsfolk who fight back.
 // Everyone who can be hurt (awake vagrants and townsfolk NPCs) carries e.fight:
 //   { hp, downUntil, staggerUntil, kb: {x,z}, lastHit, lastPunch }
@@ -150,7 +151,7 @@ export function createCombat(ctx) {
   const npcs = [];
   function spawnNpcs() {
     (ctx.NPCS || MAP.npcs || []).forEach((n, i) => {
-      const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(n.x, CAP_HALF + CAP_R + 0.05, n.z));
+      const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(n.x, TERRAIN.h(n.x, n.z) + CAP_HALF + CAP_R + 0.05, n.z));
       const collider = world.createCollider(RAPIER.ColliderDesc.capsule(CAP_HALF, CAP_R).setFriction(0.5), body);
       const e = addEntity({ id: 'n:' + i, kind: 'npc', name: n.name || 'Local', look: n.look || {}, body, collider, vy: 0, facing: n.ry || 0, state: {},
         ai: { mode: 'idle', home: { x: n.x, z: n.z, ry: n.ry || 0 }, target: null, angryUntil: 0, nextAct: 0, throws: 0, wanderAt: 0, temper: n.temper ?? Math.random() } });

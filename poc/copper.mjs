@@ -20,7 +20,7 @@ export function initCopper(ctx) {
   const lamps = [];
 
   for (const l of MAP.lampposts || []) {
-    lamps.push(addEntity({ id: l.id, kind: 'fixture', type: 'lamppost', fixedPos: [l.p[0], 0.9, l.p[2]], state: {} }));
+    lamps.push(addEntity({ id: l.id, kind: 'fixture', type: 'lamppost', fixedPos: [l.p[0], (l.p[1] || 0) + 0.9, l.p[2]], state: {} }));
   }
 
   // ---------- tools ----------
