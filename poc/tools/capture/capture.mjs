@@ -93,7 +93,11 @@ async function startTarget(ref) {
 function inject(html) {
   let s = html;
   const camAnchor = "camera.rotation.set(pitch,yaw,0,'YXZ');";
-  if (s.includes(camAnchor)) s = s.replace(camAnchor, camAnchor + ' CAP.frame();');
+  // After the knocked-down camera (GAME-83) too: the Camera player can get hit by a car
+  // while the shot waits, and that camera would otherwise override the shot's pose.
+  const knockAnchor = '  NET.knockedCamera(dt);';
+  if (s.includes(knockAnchor)) s = s.replace(knockAnchor, knockAnchor + ' CAP.frame();');
+  else if (s.includes(camAnchor)) s = s.replace(camAnchor, camAnchor + ' CAP.frame();');
   else if (s.includes('  if(STYLES[curStyle].norm)')) s = s.replace('  if(STYLES[curStyle].norm)', '  CAP.frame();\n  if(STYLES[curStyle].norm)');
   else throw new Error('capture hook: camera anchor not found in index.html (update inject() in capture.mjs)');
   const m = [...s.matchAll(/\ntick\(\);\s*<\/script>/g)].pop();

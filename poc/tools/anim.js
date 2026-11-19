@@ -166,3 +166,11 @@ ANIM.define('dig', { dur: 1.2,
 ANIM.define('throw', { dur: .6,
   tp: k => { const s = ANIM.keys([[0, 0], [.3, 1], [.55, -.5], [1, 0]])(k);
     return { armR: [-1.6 - s * 1.3, 0, .1], turn: s * .3, lean: -s * .1, hideHeld: k > .3 && k < .95 }; } });
+// Crank a fire hydrant open with a pipe wrench (GAME-94): crouch at the valve nut, three hard
+// ratchet strokes (slow heave, quick return), the wrench stays in your fist.
+const WRENCH_STROKE = k => { const u = Math.max(0, Math.min(1, (k - .15) / .72)) * 3, ph = u % 1; return u >= 3 ? 0 : ph < .7 ? ANIM.ease(ph / .7) : 1 - ANIM.ease((ph - .7) / .3); };
+ANIM.define('wrench', { dur: 1.1,
+  fp: k => { const s = WRENCH_STROKE(k);
+    return { camY: -.42, camPitch: -.32 + s * .03, x: -.04 - s * .05, y: -.03, z: -.08, rx: .35, rz: s * 1.1 }; },
+  tp: k => { const s = WRENCH_STROKE(k);
+    return { y: -.18, lean: .3, armR: [-.9 - s * .55, 0, .2 - s * .3], armL: [-.7, 0, -.25], legR: [-.6, 0, 0], legL: [.3, 0, 0], head: [.35, 0, 0], tilt: -s * .05 }; } });

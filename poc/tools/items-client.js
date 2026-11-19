@@ -41,16 +41,27 @@ const ITEMS = (() => {
       put(B(.124, .02, .088, .004), 0xCFC6B4, g, 0, .12, 0, { ns: true });                                  // old mortar crust
       return g;
     },
+    wrench: () => {                                     // red pipe wrench (GAME-94); colours reuse town materials so nothing compiles mid-game
+      const g = new THREE.Group();
+      put(B(.034, .3, .024, .008), 0xE8343F, g, 0, -.04, 0);                                  // painted handle
+      for (let k = 0; k < 5; k++) put(B(.037, .008, .027, .002), 0x23202E, g, 0, -.16 + k * .03, 0);   // grip ridges
+      put(B(.044, .07, .03, .006), 0x8E95AE, g, .004, .14, 0);                                // steel body
+      put(B(.1, .028, .03, .006), 0xC8CDDD, g, .03, .19, 0);                                  // hook jaw
+      put(B(.07, .022, .03, .005), 0xC8CDDD, g, .028, .128, 0);                               // heel jaw
+      for (const y of [.18, .138]) for (let k = 0; k < 4; k++) put(B(.006, .006, .031), 0x23202E, g, .05 + k * .014, y + (y > .15 ? -.015 : .012), 0);   // teeth
+      put(CYL(.017, .017, .034, 10), 0x8E95AE, g, .0, .158, 0, { rx: Math.PI / 2 });           // adjusting nut
+      return g;
+    },
   };
   function mesh(type, seed = 0) {
     const g = (BUILD[type] || BUILD.rock)(seed);
     g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     return g;
   }
-  const NAMES = { bottle: 'bottle', can: 'can', rock: 'rock', brick: 'brick' };
+  const NAMES = { bottle: 'bottle', can: 'can', rock: 'rock', brick: 'brick', wrench: 'pipe wrench' };
   // In the first-person fist: the grip was modelled round a bottle, so smaller things sit
   // up out of the fingers where you can see them.
-  const HAND = { rock: { y: .1, s: 1.25 }, can: { y: .04, s: 1 }, brick: { y: .05, s: 1 }, bottle: { y: 0, s: 1 } };
+  const HAND = { rock: { y: .1, s: 1.25 }, can: { y: .04, s: 1 }, brick: { y: .05, s: 1 }, bottle: { y: 0, s: 1 }, wrench: { y: -.02, s: 1 } };
   function inHand(m, type) { const h = HAND[type] || HAND.rock; m.position.y += h.y; m.scale.multiplyScalar(h.s); return m; }
   return { mesh, inHand, name: t => NAMES[t] || t };
 })();
