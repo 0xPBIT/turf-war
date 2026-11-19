@@ -1080,7 +1080,7 @@ function stepTraffic(now) {
       }
       // Fed up: back up a few metres, then floor it.
       const tgt = ob.vagrant;
-      if (now - car.blockedSince > RAGE_MS && tgt.kind === 'vagrant' && !tgt.down && ob.gap > -0.5 && tgt.body.translation().y < carBase(car, p) + CAR_HOOD_TOP + 0.5) {
+      if (now - car.blockedSince > RAGE_MS && tgt.kind === 'vagrant' && !tgt.down && ob.gap > -0.5 && tgt.body.translation().y < carBase(car, carPos(car)) + CAR_HOOD_TOP + 0.5) {
         const p = carPos(car);
         car.rage = { phase: 'back', until: now + 1000 };
         car.blockedSince = 0; car.lastHonk = now;
