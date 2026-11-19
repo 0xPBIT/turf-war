@@ -247,6 +247,9 @@ rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAc
 rep("NET.vmPose(dt,ml>0);", "vm.rotation.y=0; vm.rotation.z=0; NET.vmPose(dt,ml>0); ANIM.applyFP(vm,heldBottle,dt,ml>0);")
 rep("player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()", "player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()+ANIM.camY()")
 rep("camera.rotation.set(pitch,yaw,0,'YXZ');", "camera.rotation.set(pitch+ANIM.camPitch(),yaw,0,'YXZ');")
+# GAME-98: the idle fists hide once the viewmodel modules have run, so an animation's own hand
+# pose is the only hand on screen, and nothing floats in front of the camera while ragdolled.
+rep("COPPER.viewmodel(dt,t);", "COPPER.viewmodel(dt,t); FIGHT.afterViewmodel();")
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')

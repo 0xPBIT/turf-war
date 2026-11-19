@@ -2577,7 +2577,7 @@ function tick(){
   TOWN.cam();
   NET.knockedCamera(dt);
   // viewmodel
-  handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1-NET.handDrop(),-.45+handKick*.06); vm.rotation.x=-handKick*.9; NET.heldVisible(handKick); vm.rotation.y=0; vm.rotation.z=0; NET.vmPose(dt,ml>0); ANIM.applyFP(vm,heldBottle,dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);
+  handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1-NET.handDrop(),-.45+handKick*.06); vm.rotation.x=-handKick*.9; NET.heldVisible(handKick); vm.rotation.y=0; vm.rotation.z=0; NET.vmPose(dt,ml>0); ANIM.applyFP(vm,heldBottle,dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t); FIGHT.afterViewmodel();
   // ambient life
   updateFX(dt,t);
   for(const p of people){ p.wob=Math.max(0,p.wob-dt*1.4); const w=Math.sin(t*18)*p.wob*.25; p.g.rotation.z=w; p.g.scale.set(1+Math.sin(t*20)*p.wob*.08,1-Math.sin(t*20)*p.wob*.08,1); p.head.rotation.z=Math.sin(t*1.3+p.ph)*.08; p.head.position.y=p.hy+Math.sin(t*2+p.ph)*.015; }
@@ -3221,7 +3221,7 @@ const FIRE = (() => {
 
   window.__look = (y, p) => { yaw = y; pitch = p; };   // test hooks for in-engine screenshots
   window.__burn = BURN;
-  return { update, onMeta, onInv, onFlick, verb, get lighter() { return lighter; } };
+  return { update, onMeta, onInv, onFlick, verb, get lighter() { return lighter; }, get flicking() { return flickT > 0; } };
 })();
 
 // ===================== procedural glass fracture (GAME-84) =====================
@@ -4523,7 +4523,7 @@ const NET = (() => {
   }
   // Third-person camera on your own ragdoll, mouse orbits it; eases back to your eyes as you get up.
   function knockedCamera(dt) {
-    if (!ownRag) { vm.visible = true; return; }
+    if (!ownRag) return;                                        // FIGHT.afterCamera sets vm.visible each frame (hidden while knocked out)
     const R = ownRag.v.rag;
     const target = R && !R.up && R.bodies ? new THREE.Vector3(R.bodies.torso.position.x, R.bodies.torso.position.y, R.bodies.torso.position.z) : ownRag.obj.position.clone();
     const want = target.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.4, 1.9, Math.cos(yaw) * 3.4));
@@ -4778,7 +4778,7 @@ const NET = (() => {
     getUp(id) { const v = ents.get(id); if (v && v.rag) getUpRagdoll(v); } };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
+  return { get ragdolled() { return !!ownRag; }, beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
 })();
 
 // ===================== copper wire theft (GAME-91) =====================
@@ -5188,9 +5188,21 @@ const FIGHT = (() => {
     }
   }
 
+  // Runs last, after every viewmodel module has posed the hand (GAME-98). The idle fists are
+  // the default empty-handed pose, so they step aside whenever something else owns the view:
+  // an interaction animation raising the gloved hand (ANIM, reach/dig, grab, copper, wrench),
+  // the lighter flick, a knockout, or your own ragdoll (both hide vm). A punch still shows.
+  function afterViewmodel() {
+    const other = handG.visible || FIRE.flicking;
+    for (const h of ['L', 'R']) {
+      const f = fists[h]; if (!f.visible) continue;
+      if (!vm.visible || NET.ragdolled || (other && !(own.punchT > 0 && own.hand === h))) f.visible = false;
+    }
+  }
+
   drawHp();
   window.__fight = { own, pose, onFx, send: o => NET.send(o) };
-  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, isDown };
+  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, afterViewmodel, isDown };
 })();
 
 // ===================== turf mini map (GAME-80) =====================
