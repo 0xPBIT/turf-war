@@ -342,6 +342,56 @@
     0.04
    ],
    "note": "under the Route 9 Skyway, north of Main St (GAME-81)"
+  },
+  "maple-mouth": {
+   "cam": [
+    26,
+    1.6,
+    -2,
+    -2.356,
+    -0.02
+   ],
+   "note": "GAME-97: where Maple Row meets Main St (a look-test lamppost used to stand in the lane mouth)"
+  },
+  "skyway-pole": {
+   "cam": [
+    13,
+    1.6,
+    2.5,
+    -0.93,
+    0.22
+   ],
+   "note": "GAME-97: Main St under the Skyway, north side power line (a pole used to run up through the deck)"
+  },
+  "cinema-front": {
+   "cam": [
+    -53,
+    1.6,
+    -0.6,
+    0.25,
+    -0.08
+   ],
+   "note": "GAME-97: Cinema front and the Main St sidewalk (a bench used to sit inside the wall)"
+  },
+  "bus-stop": {
+   "cam": [
+    -39,
+    1.6,
+    -0.8,
+    0.2,
+    -0.12
+   ],
+   "note": "GAME-97: downtown bus stop, mailbox and meters on Main St"
+  },
+  "bluebell-bins": {
+   "cam": [
+    110,
+    1.6,
+    119,
+    3.1416,
+    -0.15
+   ],
+   "note": "GAME-97: Bluebell Ct bulb (a curb bin used to sit on the asphalt)"
   }
  }
 }
