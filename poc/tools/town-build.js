@@ -18,19 +18,32 @@ function bakeLocal(root){
 }
 // Grid bake: static detail merged per material per cell, so chunks behind you or out of the
 // shadow camera get culled instead of drawing the whole town every frame.
+const VC_MATS=new Map();
+function vcMat(base){ if(!VC_MATS.has(base)){ const m=getMat(base==='vc'?0xffffff:base).clone(); m.vertexColors=true; VC_MATS.set(base,m); } return VC_MATS.get(base); }
 function bakeGrid(root,cell){
   for(const b of (BURN||[])) bakeLocal(b.g);
+  // Window interiors (flat planes behind the glass) merge per material and cell; the glass and its
+  // highlight stay separate so panes can still break one by one. Highlights skip the ink pass.
+  { const ints=new Map(), kill=[], c=new THREE.Vector3(); root.updateMatrixWorld(true);
+    root.traverse(o=>{ if(!o.isMesh || o.material!==glassMat) return; const par=o.parent;
+      for(const k of par.children){ if(k.isMesh && k!==o && k.geometry.type==='PlaneGeometry' && Math.abs(k.position.z-.03)<1e-4 && k.material.type==='MeshBasicMaterial' && !k.material.transparent){ const g=k.geometry.clone().applyMatrix4(k.matrixWorld); g.computeBoundingBox(); g.boundingBox.getCenter(c); const key=k.material.uuid+'@'+Math.floor(c.x/cell)+','+Math.floor(c.z/cell); if(!ints.has(key)) ints.set(key,{mat:k.material,list:[]}); ints.get(key).list.push(g); kill.push(k); }
+        else if(k.isMesh && k.material.transparent && k.material.type==='MeshBasicMaterial' && k.geometry.type==='PlaneGeometry') fxl(k); } });
+    for(const k of kill) k.parent.remove(k);
+    for(const {mat,list} of ints.values()){ const m=new THREE.Mesh(mergeGeometries(list,false),mat); m.userData.baked=1; root.add(m); } }
   root.updateMatrixWorld(true); const groups=new Map(), kill=[], c=new THREE.Vector3();
   const skip=o=>{ for(let q=o; q && q!==root; q=q.parent) if(q.userData.nobake) return true; return false; };
   root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined || o.userData.baked || skip(o)) return; let g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
     for(const k of Object.keys(g.attributes)) if(!['position','normal','uv'].includes(k)) g.deleteAttribute(k);
     if(!g.attributes.uv) g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(g.attributes.position.count*2),2));
     const key=o.userData.c; if(typeof key==='string'){ const t=TILE[key.slice(3).split('|')[0]]; if(t) worldUV(g,t); }
+    // Tints become vertex colours, so every plain colour (and every tint of one texture) shares a draw call.
+    const isS=typeof key==='string', base=typeof key==='number'?'vc':isS?key.split('|')[0]:key, tint=typeof key==='number'?key:(isS&&key.includes('|')?parseInt(key.split('|')[1]):0xffffff);
+    const col=new THREE.Color(tint), n=g.attributes.position.count, ca=new Float32Array(n*3); for(let i=0;i<n;i++){ ca[i*3]=col.r; ca[i*3+1]=col.g; ca[i*3+2]=col.b; } g.setAttribute('color',new THREE.BufferAttribute(ca,3));
     g.computeBoundingBox(); g.boundingBox.getCenter(c); const big=g.boundingBox.max.x-g.boundingBox.min.x>cell||g.boundingBox.max.z-g.boundingBox.min.z>cell;
-    const sk=key+(o.castShadow?'':'#ns')+'@'+(big?'big':Math.floor(c.x/cell)+','+Math.floor(c.z/cell));
-    if(!groups.has(sk)) groups.set(sk,{key,cast:o.castShadow,list:[]}); groups.get(sk).list.push(g); kill.push(o); });
+    const sk=(typeof base==='object'?'o'+(base.uuid||base.id||''):base)+(o.castShadow?'':'#ns')+'@'+(big?'big':Math.floor(c.x/cell)+','+Math.floor(c.z/cell));
+    if(!groups.has(sk)) groups.set(sk,{base,cast:o.castShadow,list:[]}); groups.get(sk).list.push(g); kill.push(o); });
   for(const o of kill) o.parent.remove(o);
-  for(const {key,cast,list} of groups.values()){ const m=new THREE.Mesh(mergeGeometries(list,false),getMat(key)); m.userData.c=key; m.userData.baked=1; m.castShadow=cast; m.receiveShadow=true; root.add(m); }
+  for(const {base,cast,list} of groups.values()){ const m=new THREE.Mesh(mergeGeometries(list,false),vcMat(base)); m.userData.baked=1; m.castShadow=cast; m.receiveShadow=true; root.add(m); }
 }
 
 const TOWN=(()=>{
@@ -742,7 +755,7 @@ function railYard(){
   const pts=[]; for(let i=0;i<=36;i++){ const t=i/36; pts.push(new THREE.Vector2(44+t*102, -150+Math.sin(t*6.5)*7+Math.sin(t*2.1)*4)); }
   const curve=new THREE.SplineCurve(pts); const sp=curve.getPoints(160);
   const left=[],right=[]; for(let i=0;i<sp.length;i++){ const a=sp[Math.max(0,i-1)], b=sp[Math.min(sp.length-1,i+1)]; const dx=b.x-a.x, dz=b.y-a.y, l=Math.hypot(dx,dz); const nx=-dz/l, nz=dx/l; left.push([sp[i].x+nx*3.2,sp[i].y+nz*3.2]); right.push([sp[i].x-nx*3.2,sp[i].y-nz*3.2]); }
-  const strip=(L1,R1,y,key,ns)=>{ const pos=[]; for(let i=0;i<L1.length-1;i++){ const a=L1[i],b=L1[i+1],c=R1[i],d=R1[i+1]; pos.push(a[0],y,a[1], c[0],y,c[1], b[0],y,b[1], b[0],y,b[1], c[0],y,c[1], d[0],y,d[1]); } const gg=new THREE.BufferGeometry(); gg.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); gg.computeVertexNormals(); const m=mesh(gg,key,city); m.castShadow=false; return m; };
+  const strip=(L1,R1,y,key,ns)=>{ const pos=[]; for(let i=0;i<L1.length-1;i++){ const a=L1[i],b=L1[i+1],c=R1[i],d=R1[i+1]; const up=((c[1]-a[1])*(b[0]-a[0])-(c[0]-a[0])*(b[1]-a[1]))>0; if(up) pos.push(a[0],y,a[1], c[0],y,c[1], b[0],y,b[1], b[0],y,b[1], c[0],y,c[1], d[0],y,d[1]); else pos.push(a[0],y,a[1], b[0],y,b[1], c[0],y,c[1], b[0],y,b[1], d[0],y,d[1], c[0],y,c[1]); } const gg=new THREE.BufferGeometry(); gg.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); gg.computeVertexNormals(); const m=mesh(gg,key,city); m.castShadow=false; return m; };
   const off=(arr,k)=>arr.map((p,i)=>{ const s=sp[i]; const dx=p[0]-s.x, dz=p[1]-s.y; return [s.x+dx*k, s.y+dz*k]; });
   strip(left,right,.03,'tx:water'); strip(off(left,1.6),left,.05,'tx:dirtPath'); strip(right,off(right,1.6),.05,'tx:dirtPath');
   for(let i=4;i<sp.length-4;i+=5){ for(const side of [left,right]){ const p=side[i]; if(rnd()<.5) put(lumpy(.35+rnd()*.3,rnd()*50),0xA9A4C8,city,p[0],.05,p[1],{s:[1,.5,1]}); else { const rg=grp(city,p[0],0,p[1]); for(let k=0;k<6;k++) put(B(.05,.9+rnd()*.5,.05),0x5FA83A,rg,(rnd()-.5)*.6,.5,(rnd()-.5)*.6,{rz:(rnd()-.5)*.3}); burnReg('plant',rg,p[0],p[1],.6); } } }
@@ -751,9 +764,68 @@ function railYard(){
   const bi=48, bp=sp[bi]; const fb=grp(city,bp.x,0,bp.y,0); put(B(1.8,.12,9,.03),'tx:woodPale',fb,0,.75,0); for(const s of [-1,1]){ for(let k=0;k<5;k++) put(B(.08,.9,.08),'tx:wood',fb,s*.85,1.1,-4+k*2); put(B(.08,.08,9),'tx:wood',fb,s*.85,1.5,0); } for(let k=0;k<4;k++) put(B(.2,.8,.2),'tx:wood',fb,(k%2?.7:-.7),.4,k<2?-3:3);
   // a quiet camp by the creek
   const cp=sp[110]; CAMP=[cp.x+1.6,cp.y-9]; const tt=grp(city,cp.x,0,cp.y-7,.5); const tarp=new THREE.BufferGeometry(); tarp.setAttribute('position',new THREE.Float32BufferAttribute([-1,0,-1.2, 0,1.2,-1.2, 0,1.2,1.2, -1,0,-1.2, 0,1.2,1.2, -1,0,1.2, 1,0,-1.2, 0,1.2,1.2, 0,1.2,-1.2, 1,0,-1.2, 1,0,1.2, 0,1.2,1.2],3)); tarp.computeVertexNormals(); mesh(tarp,0x8F6BFF,tt); solid(tt,0,.6,0,1,.6,1.2);
-  for(const [x,z] of [[60,-122],[80,-118],[100,-140],[124,-128],[140,-112],[120,-160],[90,-162],[70,-160],[132,-150],[104,-116],[50,-158],[142,-162]]) T(x,z,1+rnd()*.3);
-  for(let i=0;i<14;i++) Bu(46+rnd()*95,-112-rnd()*50,.7+rnd()*.5);
+  for(const [x,z] of [[100,-140],[120,-160],[90,-162],[70,-160],[132,-150],[50,-158],[142,-162],[78,-140],[110,-138],[58,-141]]) T(x,z,1+rnd()*.3);
+  for(let i=0;i<14;i++) Bu(46+rnd()*95,-141-rnd()*21,.7+rnd()*.5);
+  industrial();
   rect(META.lots,40.5,-81.7,143,-165,{kind:'park'});
+}
+
+// ---------- Fizzy Co. bottling plant, water tower, scrapyard and container stacks (rail yard) ----------
+function industrial(){
+  // bottling plant on Pine, loading docks out back
+  shop({x:95,z:-95,w:34,d:18,face:'+z',wall:'tx:ribTeal',base:'tx:conc',sign:'FIZZY CO. BOTTLING',signHex:0xFF6E9E,signBg:'#FF6E9E',signFg:'#FFFFFF',interior:INT.office,h:8,parapet:.6,doorAt:.15,name:'Fizzy Co. Bottling',
+    bays:[{t:'door',w:1.6},{t:'win',w:4},{t:'win',w:4},{t:'wall',w:14},{t:'win',w:4},{t:'win',w:4},{t:'door',w:1.6}],
+    extra:(g,{w,d,fz})=>{ txt(['EST. 1952','EVERY SIP A SUNNY DAY'],8,1.4,'#FFF6D0','#2E2350',g,0,6.4,fz+.03);
+      // big fake bottle on the roof
+      const bt=grp(g,w/2-4,8.6,0); put(CYL(1.2,1.2,3.4,16),0x5FE3B0,bt,0,1.7,0); put(CYL(.5,1.2,1.4,16),0x5FE3B0,bt,0,4.1,0); put(CYL(.45,.45,.9,16),0x5FE3B0,bt,0,5.2,0); put(CYL(.55,.55,.3,16),0xE8343F,bt,0,5.8,0); put(CYL(1.22,1.22,1.2,16),0xFFF6D0,bt,0,1.9,0); solid(g,w/2-4,10.5,0,1.2,2.5,1.2);
+      // silos on the side
+      for(const k of [0,1]){ const sx=-w/2-2.6, sz=-4+k*5.5; put(CYL(2.2,2.2,10,18),0xE8ECF6,g,sx,5.6,sz); put(new THREE.ConeGeometry(2.3,1.4,18),0xC8CDDD,g,sx,11.3,sz); put(CYL(.12,.12,11,6),0x8E95AE,g,sx+2.3,5.5,sz); solid(g,sx,5.6,sz,2.2,5.6,2.2); for(let r=0;r<5;r++) put(CYL(2.25,2.25,.08,18),0xB9BFD0,g,sx,1.6+r*2.1,sz); }
+    } });
+  bmeta(95,-95,17,9,0,'tx:ribTeal','tx:gravel','Fizzy Co. Bottling');
+  // back lot: dock doors, dock bumpers, box trucks, pallets of crates
+  slab(76,-104,114,-121,'tx:asphalt',.03); rect(META.lots,76,-104,114,-121,{kind:'lot'});
+  for(let k=0;k<5;k++){ const dx=82+k*6.5; const dg=grp(city,dx,0,-104.06,Math.PI); put(B(3.4,3.6,.08),0xD8DCE8,dg,0,1.8+.3,0); for(let r=0;r<10;r++) put(B(3.3,.04,.05),0xB9BFD0,dg,0,.5+r*.36,.06); put(B(3.8,.2,.25),0xFFC93C,dg,0,4.05,.1); for(const sx of [-1.6,1.6]) put(B(.25,.6,.3),0x2E2350,dg,sx,1.2,.18); put(B(3.6,1.1,1.6),'tx:conc',dg,0,.55,.8); }
+  staticBox(95,.55,-104.86,17,.55,.8);
+  const truck=(x,z,ry,cab,label)=>{ const g=grp(city,x,0,z,ry); put(B(2.4,2.8,6.2,.06),'tx:ribGrey',g,0,2.4,-1); put(B(2.3,1.9,1.9,.2),cab,g,0,1.75,3.2); put(B(2.1,.9,.08),glassMat,g,0,2.15,4.16); put(B(2.4,.3,8.4),0x2E2350,g,0,.75,0);
+    for(const zz of [-3,-1.8,3.2]) for(const s of [-1,1]) put(CYL(.48,.48,.32,14),INK,g,s*1.1,.48,zz,{rz:HP});
+    if(label) for(const s of [-1,1]) txt([label],5,.9,null,'#FF6E9E',g,s*1.22,2.6,-1,s*HP);
+    solid(g,0,1.6,0,1.25,1.6,4.3,'car'); bmeta(x,z,1.25,4.3,ry,cab,0xD8DCE8,'Box truck'); };
+  truck(82,-111,0,0xFF6E9E,'FIZZY CO.'); truck(101.5,-112,0,0x3FB8FF,'FIZZY CO.');
+  for(let i=0;i<4;i++){ const pg=grp(city,108+(i%2)*1.6,0,-108-(i>>1)*1.6); put(B(1.2,.14,1.2),'tx:wood',pg,0,.07,0); for(let k=0;k<6;k++) put(B(.55,.35,.38),k%2?0x5FE3B0:0xFF8A7A,pg,(k%2-.5)*.6,.33+(k>>1)*.36,0); }
+  solid(grp(city,108.8,0,-108.8),0,.6,0,1.6,.6,1.6);
+  dumpster(112.5,-116,HP); woodFence(76,-121.5,114,-121.5);
+  // water tower
+  const wt=grp(city,126,0,-96); for(const [lx,lz] of [[-2.4,-2.4],[2.4,-2.4],[2.4,2.4],[-2.4,2.4]]){ put(CYL(.18,.22,15,8),0xC8CDDD,wt,lx,7.5,lz); put(CYL(.5,.5,.5,8),'tx:conc',wt,lx,.25,lz); staticBox(126+lx,3,-96+lz,.25,3,.25); }
+  for(const y of [4,9]) for(const s of [-1,1]){ put(B(4.8,.1,.1),0xB9BFD0,wt,0,y,s*2.4); put(B(.1,.1,4.8),0xB9BFD0,wt,s*2.4,y,0); }
+  put(CYL(4,4,5,24),0x8FD3F4,wt,0,17.5,0); put(new THREE.ConeGeometry(4.3,2.2,24),0x3FB8FF,wt,0,21.1,0); put(new THREE.SphereGeometry(.3,10,8),0xFFFFFF,wt,0,22.3,0); put(CYL(4.25,4.25,.2,24),0xFFFFFF,wt,0,15.1,0);
+  put(new THREE.TorusGeometry(4.3,.06,4,32),0xFFFFFF,wt,0,15.2,0,{rx:HP}); for(let k=0;k<16;k++){ const a=k/16*Math.PI*2; put(CYL(.03,.03,1,4),0xFFFFFF,wt,Math.cos(a)*4.3,15.7,Math.sin(a)*4.3); }
+  for(const ry of [0,Math.PI]) txt(['PUDDLEWICK'],6.4,1.3,null,'#FFFFFF',grp(wt,0,0,0,ry),0,17.6,4.05);
+  put(B(.5,15,.12),0x8E95AE,wt,0,7.5,2.5); graffiti(126,2.6,-93.5,0,['GRUB','4EVA'],'#FF3D8B',1.6,.8);
+  // scrapyard behind a chain-link fence
+  slab(116,-106,144,-134,'tx:gravel',.025); rect(META.lots,116,-106,144,-134,{kind:'dirt'});
+  chainFence([[116,-112],[116,-106],[144,-106],[144,-134],[116,-134],[116,-118]],2.4);
+  const crushed=(x,z,ry,n)=>{ for(let k=0;k<n;k++){ const c=pick(CARS); const cg=grp(city,x+(rnd()-.5)*.3,0,z+(rnd()-.5)*.3,ry+(rnd()-.5)*.2); put(B(1.9,.85,4,.08),c,cg,0,.43+k*.86,0); put(B(1.6,.12,2.4),0x6C74C4,cg,0,.9+k*.86,.1); for(const s of [-1,1]) put(B(.05,.3,1.4),glassMat,cg,s*.96,.6+k*.86,.3); }
+    solid(grp(city,x,0,z,ry),0,n*.43,0,1,n*.43,2.05); bmeta(x,z,1,2.05,ry,0x8E95AE,0x6C74C4,'Scrap'); };
+  crushed(120,-110,0,3); crushed(123,-110,0,2); crushed(126,-110.5,.1,3); crushed(120,-130,HP,2); crushed(127,-130,HP,3);
+  const tires=(x,z,n)=>{ for(let k=0;k<n;k++) put(new THREE.TorusGeometry(.36,.15,6,14),0x2B2B33,city,x+(rnd()-.5)*.15,.15+k*.28,z+(rnd()-.5)*.15,{rx:HP}); solid(grp(city,x,0,z),0,n*.14,0,.5,n*.14,.5); };
+  for(const [x,z,n] of [[134,-110,5],[135.2,-111,3],[134.5,-112.3,6],[140,-128,4],[141,-130,6],[139,-130.2,2]]) tires(x,z,n);
+  for(let i=0;i<10;i++) put(new THREE.TorusGeometry(.36,.15,6,14),0x2B2B33,city,130+rnd()*10,.15,-118-rnd()*8,{rx:HP+(rnd()-.5)*.6,ry:rnd()*3});
+  // the crane that does the crushing
+  const cr=grp(city,133,0,-121,.6); put(B(3,1.6,4.4),0xFFC93C,cr,0,1.2,0); put(B(2.2,1.6,1.8),0xFFC93C,cr,0,2.8,1); put(B(2,.9,.06),glassMat,cr,0,3,1.92); for(const s of [-1,1]) put(B(.6,.8,5),0x2E2350,cr,s*1.5,.4,0);
+  const arm=grp(cr,0,3.2,-1,0); put(B(.5,.5,8),0xFFC93C,arm,0,2.1,-3.4,{rx:.55}); put(B(.4,.4,5),0xFFC93C,arm,0,3.4,-8.6,{rx:-.7}); put(CYL(.03,.03,3,4),0x2E2350,arm,0,2.2,-9.2); put(new THREE.TorusGeometry(.6,.1,6,12,Math.PI),0x8E95AE,arm,0,.6,-9.2,{rz:Math.PI});
+  solid(cr,0,1.6,0,1.6,1.6,2.5); bmeta(133,-121,1.6,2.5,.6,0xFFC93C,0xFFC93C,'Crane');
+  shop({x:139,z:-120,w:5,d:8,face:'-x',wall:'tx:sidWhite',sign:'SCRAP OFFICE',signHex:0xFFC93C,signBg:'#FFC93C',signFg:'#2E2350',interior:INT.office,h:2.8,parapet:.2,name:'Scrap office',bays:[{t:'win',w:1.6},{t:'door',w:1.2},{t:'win',w:1.4}]});
+  txt(['WE BUY','COPPER $$$'],3,1.2,'#FFFFFF','#E8343F',city,116.06,1.6,-109,-HP);
+  // container stacks by the tracks
+  slab(44,-114,74,-136,'tx:gravel',.025); rect(META.lots,44,-114,74,-136,{kind:'dirt'});
+  const cont=(x,z,y,ry,tex,lab)=>{ const g=grp(city,x,y,z,ry); put(B(2.44,2.6,6.1,.05),tex,g,0,1.3,0); for(const s of [-1,1]) put(B(2.3,2.4,.06),0x4A4F66,g,0,1.3,s*3.06); for(let k=0;k<4;k++) put(B(.05,2.3,.05),0xC8CDDD,g,-.6+k*.4,1.3,3.1); if(lab) for(const s of [-1,1]) txt([lab],3.6,.7,null,'#FFFFFF',g,s*1.23,1.9,0,s*HP); };
+  const CT=['tx:ribRed','tx:ribBlue','tx:ribYel','tx:ribTeal','tx:ribMint','tx:ribGrey'], LB=['SUNNY LINE','PWR','FIZZY CO.','JUMBO','','MAERSKY'];
+  for(const [x,z,n,ry] of [[48,-119,3,0],[51,-119,2,0],[54,-119,1,0],[48,-130,2,0],[51,-130,3,0],[62,-118,2,HP],[62,-126,1,HP],[69,-126,2,HP],[64,-133,1,HP+.1]]){ for(let k=0;k<n;k++){ const i=((x*7+z*3+k)|0)%6; cont(x,z,k*2.6,ry,CT[(i+6)%6],LB[(i+6)%6]); } solid(grp(city,x,0,z,ry),0,n*1.3,0,1.22,n*1.3,3.05); bmeta(x,z,1.22,3.05,ry,CT[0],0x4A4F66,'Container'); }
+  graffiti(49.25,1.6,-119,HP,['SIDE','QUEST'],'#FFC93C',2.2,1.1); graffiti(52.25,1.4,-130,HP,['☺'],'#26D3A0',1.2,1);
+  // cable spools you can hide behind
+  for(const [x,z,r] of [[58,-131,1.1],[60.5,-131.5,.8],[70,-117,1.3]]){ const sg=grp(city,x,0,z,rnd()*3); for(const s of [-1,1]) put(CYL(r,r,.12,18),'tx:woodPale',sg,0,r,s*.55,{rx:HP}); put(CYL(r*.55,r*.55,1.1,14),0x3E8FD8,sg,0,r,0,{rx:HP}); solid(sg,0,r,0,r*.8,r,.65); }
+  for(const [x,z] of [[78,-88],[112,-88]]) lightPole(x,z,0);
+  for(const [x,z] of [[118,-104.5],[142,-104.5],[46,-112.5],[72,-112.5]]) lightPole(x,z,Math.PI);
 }
 
 // ---------- Puddle Park (north-west, west of Creek Rd) ----------
@@ -762,11 +834,11 @@ function puddlePark(){
   rect(META.lots,x0,z0,x1,z1,{kind:'park'});
   // pond with a soft shoreline, lily pads, ducks and a little island
   const shape=new THREE.Shape(); const pc=[-46,118]; for(let i=0;i<=40;i++){ const a=i/40*Math.PI*2; const r=16+Math.sin(a*3)*3+Math.cos(a*5)*1.5; const px=Math.cos(a)*r*1.25, pz=Math.sin(a)*r; if(i) shape.lineTo(px,pz); else shape.moveTo(px,pz); }
-  const pg=new THREE.ShapeGeometry(shape,24); pg.rotateX(HP); const pm=put(pg,'tx:water',city,pc[0],.04,pc[1],{ns:true});
-  const sg=new THREE.ShapeGeometry(shape,24); sg.rotateX(HP); put(sg,'tx:dirtPath',city,pc[0],.025,pc[1],{s:[1.1,1,1.12],ns:true});
+  const pg=new THREE.ShapeGeometry(shape,24); pg.rotateX(-HP); const pm=put(pg,'tx:water',city,pc[0],.04,pc[1],{ns:true});
+  const sg=new THREE.ShapeGeometry(shape,24); sg.rotateX(-HP); put(sg,'tx:dirtPath',city,pc[0],.025,pc[1],{s:[1.1,1,1.12],ns:true});
   for(let i=0;i<14;i++){ const a=rnd()*6.28, r=rnd()*11; put(CYL(.4,.4,.02,12),0x3FAE4A,city,pc[0]+Math.cos(a)*r*1.2,.06,pc[1]+Math.sin(a)*r,{ns:true}); }
   const ducks=[]; for(let i=0;i<6;i++){ const a=i*1.1, r=5+i; const dg=grp(city,pc[0]+Math.cos(a)*r,0,pc[1]+Math.sin(a)*r*.8,a); put(new THREE.SphereGeometry(.22,12,8),0xFFE14D,dg,0,.12,0,{s:[1.3,.8,1]}); put(new THREE.SphereGeometry(.13,10,8),0xFFE14D,dg,.22,.3,0); put(new THREE.ConeGeometry(.05,.12,6),0xFF9F1C,dg,.36,.29,0,{rz:-HP}); }
-  const isl=put(lumpy(3,7),'tx:grass',city,pc[0]+6,-1.6,pc[1]-2,{s:[1.4,.6,1]}); T(pc[0]+6,pc[1]-2,.9);
+  const isl=put(lumpy(3,7),'tx:grass',city,pc[0]+6,-1.1,pc[1]-2,{s:[1.4,.6,1]}); T(pc[0]+6,pc[1]-2,.9);
   // sit-out deck over the pond
   const dk=grp(city,pc[0]-4,0,pc[1]+15,0); put(B(4,.15,6),'tx:woodPale',dk,0,.4,-2); for(const s of [-1,1]) for(let k=0;k<4;k++) put(B(.12,1.1,.12),'tx:wood',dk,s*1.9,.55,-4.8+k*1.8); for(const s of [-1,1]) put(B(.1,.1,6),'tx:wood',dk,s*1.9,1.05,-2);
   // gazebo
@@ -786,8 +858,8 @@ function puddlePark(){
   for(const [x,z] of [[-24,94],[-52,102],[-71,130],[-36,141],[-14,117]]){ const lp=grp(city,x,0,z); put(CYL(.07,.09,3.6,10),0x2E2350,lp,0,1.8,0); put(new THREE.SphereGeometry(.28,14,10),0xFFF6D0,lp,0,3.75,0); put(CYL(.2,.12,.15,10),0x2E2350,lp,0,3.5,0); postBody(x,z,.09,3.6); trashCan(x+1,z+.6,0x2FAE6A); }
   // trees: a ring of big trees and a small grove
   const tz=[[-84,82],[-84,96],[-84,112],[-84,128],[-84,144],[-84,160],[-70,162],[-54,162],[-38,162],[-12,162],[-4,148],[-4,108],[-60,84],[-36,84],[-20,104],[-30,112],[-62,122],[-58,134],[-40,150],[-14,138],[-66,92],[-78,152],[-48,156],[-6,92]];
-  tz.forEach(([x,z],i)=>T(x,z,.95+((i*17)%5)*.08,i%3?'tx:leafA':'tx:leafB'));
-  for(let i=0;i<16;i++) Bu(-84+rnd()*80,82+rnd()*78,.8+rnd()*.5);
+  tz.filter(([x,z])=>((x+46)/24)**2+((z-118)/20)**2>1.15).forEach(([x,z],i)=>T(x,z,.95+((i*17)%5)*.08,i%3?'tx:leafA':'tx:leafB'));
+  for(let i=0;i<16;i++){ const bx=-84+rnd()*80, bz=82+rnd()*78, bs=.8+rnd()*.5; if(((bx+46)/24)**2+((bz-118)/20)**2>1.15) Bu(bx,bz,bs); }
   for(const [x,z,w,d] of [[-12,84,6,1.6],[-46,96,3,3],[-70,149,4,1.4]]) flowerBed(x,z,w,d);
   // park sign at Creek Rd and a low hedge along the street
   const ps=grp(city,-40,0,78.6,0); put(B(4.4,.7,.5),'tx:brickYel',ps,0,.35,0); put(B(4.2,1.1,.25),0x2E2350,ps,0,1.3,0); txt(['PUDDLE PARK'],3.9,.8,'#2E2350','#FFE27A',ps,0,1.3,-.13,Math.PI); staticBox(-40,.7,78.6,2.2,.7,.25);
@@ -856,8 +928,32 @@ function trafficSpec(){
 
 // ---------- per-frame: shadows follow the player, signal lamps follow the server ----------
 const sun0=new THREE.Vector3().copy(sunLight.position);
-function frame(){
-  const px=player.position.x, pz=player.position.z, snap=1.0;
+// Debug / screenshot camera: window.__townCam([x,y,z],[tx,ty,tz]) flies the camera; __townCam() hands it back.
+let camOv=null, far0=0;
+let fog0=null; window.__townCam=(p,t,clear)=>{ if(!far0){ far0=camera.far; fog0=[scene.fog.near,scene.fog.far]; } camOv=p?{p,t,clear}:null; cullT=0; camera.far=p?1200:far0; camera.updateProjectionMatrix(); scene.fog.near=p&&clear?900:fog0[0]; scene.fog.far=p&&clear?2000:fog0[1]; vm.visible=!p; };
+function cam(){ if(camOv){ camera.position.set(...camOv.p); camera.lookAt(...camOv.t); } }
+window.__townMeshes=()=>{ const burn=new Set(); for(const t of (BURN||[])) t.g.traverse(o=>burn.add(o)); const out={}; scene.traverse(o=>{ if(!o.isMesh&&!o.isSprite) return; let k=o.userData.baked?'baked':burn.has(o)?'tree':o.material===glassMat?'glass':(o.material&&o.material.type)+(o.userData.c!==undefined?':c':''); out[k]=(out[k]||0)+1; }); return out; };
+window.__townFrustum=()=>{ const f=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse)); const out={}; let n=0,sh=0; scene.traverse(o=>{ if(!(o.isMesh)||!o.layers.test(camera.layers)) return; let v=true; for(let q=o;q;q=q.parent) if(!q.visible){ v=false; break; } if(!v) return; if(!f.intersectsObject(o)) return; n++; if(o.castShadow) sh++; const k=o.userData.baked?'baked':o.material===glassMat?'glass':(o.material&&o.material.type); out[k]=(out[k]||0)+1; }); out.total=n; out.cast=sh; return out; };
+window.__townDbg=()=>({sunLight,renderer,scene,camera,city,DET,THREE});
+window.__townStats=()=>{ const r=renderer.info.render; return {calls:r.calls,tris:r.triangles}; };
+// Distance culling for small static detail (signs, window interiors, glass, street clutter, trees):
+// they move to an unused layer when far away, so .visible stays the game's to use.
+let DET=null, cullT=0; const CULL_LAYER=1<<6;
+function buildCull(){
+  DET=[]; city.updateMatrixWorld(true); const sp=new THREE.Sphere(), burn=new Set(); for(const t of (BURN||[])) t.g.traverse(o=>burn.add(o));
+  city.traverse(o=>{ if(!(o.isMesh||o.isSprite)) return; const isTree=burn.has(o); if(o.userData.baked && !isTree) return;
+    if(o.isMesh){ if(!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); sp.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld); } else { sp.center.setFromMatrixPosition(o.matrixWorld); sp.radius=1; }
+    const r=sp.radius; if(r>9) return; const d=isTree?190:r<1.2?80:r<4?135:175; DET.push({o,x:sp.center.x,z:sp.center.z,r2:d*d,off:false,m:0}); });
+}
+function cull(dt){
+  if(!DET || (cullT-=dt)>0) return; cullT=.25; const cx=camera.position.x, cz=camera.position.z, all=camOv&&camOv.clear;
+  for(const d of DET){ const off=!all && (d.x-cx)**2+(d.z-cz)**2>d.r2; if(off===d.off) continue; d.off=off;
+    if(off){ d.m=d.o.layers.mask; d.o.layers.mask=CULL_LAYER; } else d.o.layers.mask=d.m; }
+}
+function frame(dt){
+  cull(dt||0);
+  renderer.info.autoReset=false; renderer.info.reset();
+  const px=camOv?camOv.t[0]:player.position.x, pz=camOv?camOv.t[2]:player.position.z, snap=1.0;
   const cx=Math.round(px/snap)*snap, cz=Math.round(pz/snap)*snap;
   sunLight.position.set(cx+sun0.x, sun0.y, cz+sun0.z); sunLight.target.position.set(cx,0,cz); sunLight.target.updateMatrixWorld();
 }
@@ -876,7 +972,7 @@ function build(){
   // trees placed by the look test before the town: register them too
   sc.left=-48; sc.right=48; sc.top=48; sc.bottom=-48; sc.far=170; sunLight.shadow.camera.updateProjectionMatrix();
 }
-function afterPeople(){ extraPeople(); }
+function afterPeople(){ extraPeople(); buildCull(); }
 
 // Everything the server needs, read straight from what the client just built.
 function dump(){
@@ -912,5 +1008,5 @@ function dump(){
   };
 }
 window.__townDump=dump;
-return { build, frame, lights, afterPeople, dump, BOUNDS, ZONES, IX, SIGNALS };
+return { build, frame, cam, lights, afterPeople, dump, BOUNDS, ZONES, IX, SIGNALS };
 })();

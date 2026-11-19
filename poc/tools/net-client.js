@@ -10,7 +10,8 @@ const NET = (() => {
   const money = n => '$' + Math.round(n).toLocaleString('en-US');
 
   // The server has walls at the town edge; mirror them so prediction agrees.
-  for (const [x, z, hx, hz] of [[-60.5, 0, .5, 70], [60.5, 0, .5, 70], [0, -60.5, 70, .5], [0, 60.5, 70, .5]]) staticBox(x, 5, z, hx, 10, hz);
+  { const B = TOWN.BOUNDS, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2, hx = (B.maxX - B.minX) / 2 + 1, hz = (B.maxZ - B.minZ) / 2 + 1;
+    for (const [x, z, ex, ez] of [[B.minX - .5, cz, .5, hz], [B.maxX + .5, cz, .5, hz], [cx, B.minZ - .5, hx, .5], [cx, B.maxZ + .5, hx, .5]]) { const b = staticBox(x, 5, z, ex, 10, ez); if (b) b.twEdge = true; } }
 
   // ---------- entities ----------
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
@@ -33,7 +34,9 @@ const NET = (() => {
   }
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
   function buildVagrant(e) {
-    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e) });
+    const armRig = [];
+    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e), armRig });
+    p.arms = armRig;
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
     return p;
@@ -63,6 +66,7 @@ const NET = (() => {
     const w = new THREE.Group(); w.add(g); return w;
   }
   function buildProp(e) {
+    if (e.type !== 'crate' && e.type !== 'cone') return PROPS.build(e);   // GAME-87 movable props
     const n = dyn.length;
     if (e.type === 'crate') crate(0, 0, 0, e.s, e.hex); else cone(0, 0);
     const d = dyn.splice(n, 1)[0]; world.removeBody(d.b); d.m.position.set(0, 0, 0);
@@ -76,7 +80,7 @@ const NET = (() => {
     if (e.kind === 'vagrant' || e.kind === 'sleeper') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
       const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag);
-      extra = { model: v, tag };
+      extra = { model: v, tag, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
     } else if (e.kind === 'traffic') obj = buildCar(e.color);
     else if (e.kind === 'prop') obj = buildProp(e);
@@ -106,6 +110,7 @@ const NET = (() => {
       if (b[i].t <= t) {
         const a = b[i], c = b[i + 1];
         if (!c) return a;                                  // hold the last known state
+        if (a.p.distanceToSquared(c.p) > 900) return c;      // teleported: no glide across town
         const k = (t - a.t) / (c.t - a.t);
         const out = { p: a.p.clone().lerp(c.p, k), q: _q.copy(a.q).slerp(c.q, k).clone() };
         if (a.f !== undefined && c.f !== undefined) { let d = c.f - a.f; d = Math.atan2(Math.sin(d), Math.cos(d)); out.f = a.f + d * k; }
@@ -153,10 +158,10 @@ const NET = (() => {
       corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
     }
   }
-  const speedScale = () => { const g = grabbing && ents.get(grabbing); return g && g.kind === 'sleeper' ? 60 / 70 : 1; };
+  const speedScale = () => { const g = grabbing && ents.get(grabbing); return !g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1); };
 
   // ---------- fixtures and effects ----------
-  let dumpFire = null;
+  const dumpFires = new Map();       // fixture id -> emitter
   function paneFor(f) { return glassPanes[f.index]; }
   function breakPane(t, quiet) {
     if (!t || t.broken) return; t.broken = true;
@@ -174,7 +179,7 @@ const NET = (() => {
     const p = new THREE.Vector3(...at);
     for (let k = 0; k < 7; k++) {
       const len = s * (.5 + Math.random() * .5), wd = s * (.14 + Math.random() * .12);
-      const pm = new THREE.Mesh(new THREE.BoxGeometry(len, s * .07, wd), k % 3 === 0 ? getMat(hex) : woodMat); if (k % 3 === 0) pm.userData.c = hex; pm.castShadow = pm.receiveShadow = true;
+      const pm = new THREE.Mesh(new THREE.BoxGeometry(len, s * .07, wd), k % 3 === 0 ? getMat(hex) : woodMat); pm.userData.ownGeo = true; if (k % 3 === 0) pm.userData.c = hex; pm.castShadow = pm.receiveShadow = true;
       pm.position.set(p.x + (Math.random() - .5) * s, p.y + (Math.random() - .5) * s, p.z + (Math.random() - .5) * s);
       const pb = new CANNON.Body({ mass: .25, shape: new CANNON.Box(new CANNON.Vec3(len / 2, s * .035, wd / 2)) }); pb.position.set(pm.position.x, pm.position.y, pm.position.z);
       pb.quaternion.setFromEuler(Math.random() * 3, Math.random() * 3, Math.random() * 3);
@@ -211,11 +216,14 @@ const NET = (() => {
     else if (m.kind === 'crate') splinters(m.at, m.s, m.hex, m.v || [0, 0, 0]);
     else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
-    else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
+    else if (m.kind === 'grab') {
+      if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
+      const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
+    }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
   function onMeta(m) {
-    meta = m; damage = m.town;
+    meta = m; damage = m.town; TOWN.lights(m.lights);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
@@ -224,10 +232,44 @@ const NET = (() => {
       if (f.type === 'window') { const t = paneFor(f); if (st.broken) breakPane(t, true); else repairPane(t); }
       else if (f.type === 'pile') { const p = piles[f.index]; if (!p) continue; if (st.fire && p.state === 'idle') lightPile(p); if (!st.fire && !st.burnt && p.state !== 'idle') resetPile(p); }
       else if (f.type === 'dumpster') {
-        if (st.fire && !dumpFire) dumpFire = emitter(new THREE.Vector3(f.pos[0], 1.6, f.pos[2]), { radius: .9, fire: 1.2, smoke: 1.4 });
-        if (!st.fire && dumpFire) { dumpFire.fire = 0; dumpFire.smoke = 0; if (dumpFire.light) dumpFire.light.intensity = 0; emitters.splice(emitters.indexOf(dumpFire), 1); dumpFire = null; }
+        const df = dumpFires.get(id);
+        if (st.fire && !df) dumpFires.set(id, emitter(new THREE.Vector3(f.pos[0], 1.6, f.pos[2]), { radius: .9, fire: 1.2, smoke: 1.4 }));
+        if (!st.fire && df) { df.fire = 0; df.smoke = 0; if (df.light) df.light.intensity = 0; emitters.splice(emitters.indexOf(df), 1); dumpFires.delete(id); }
       }
     }
+  }
+
+  // ---------- grab / push / drag animation (GAME-87) ----------
+  // Other players: both arms swing up and forward to the thing they hold, with a quick
+  // lunge as they grab it; the body leans into it and the arms pump while they haul it.
+  function animateArms(v, dt, moving) {
+    const want = v.grabbing ? 1 : 0;
+    v.reach += (want - v.reach) * (1 - Math.exp(-dt * (want ? 10 : 6)));
+    v.lunge = Math.max(0, v.lunge - dt * 3.5);
+    const lunge = Math.sin(v.lunge * Math.PI) * .35;
+    const haul = v.grabbing && moving ? Math.sin(v.walk * 1.0) * .12 : 0;
+    const swing = !v.grabbing && moving ? Math.sin(v.walk) * .35 : 0;   // normal walk arm swing
+    v.model.arms.forEach((pv, i) => {
+      const side = i ? 1 : -1;
+      pv.rotation.x = -(1.25 + lunge) * v.reach + (haul * side) + swing * side * (1 - v.reach);
+      pv.rotation.z = side * .18 * v.reach;                            // hands come in toward the middle
+    });
+    v.model.g.rotation.x = (.16 + lunge * .3) * v.reach;                 // lean into it
+  }
+  // You (first person): the hand drops the bottle out of view, shoots forward to grab,
+  // then holds a tight grip that strains and shakes a little while you drag.
+  let vmGrab = 0, vmLunge = 0, vmT = 0;
+  function vmPose(dt, moving) {
+    vmGrab += ((grabbing ? 1 : 0) - vmGrab) * (1 - Math.exp(-dt * 9));
+    vmLunge = Math.max(0, vmLunge - dt * 3.2); vmT += dt;
+    const g = vmGrab, l = Math.sin(vmLunge * Math.PI);
+    const strain = grabbing && moving ? 1 : grabbing ? .3 : 0;
+    vm.position.x += -.06 * g + Math.sin(vmT * 31) * .003 * strain;
+    vm.position.y += -.05 * g + Math.sin(vmT * 7) * .012 * strain;
+    vm.position.z += -.16 * g - .12 * l;
+    vm.rotation.x += .5 * g - .25 * l;
+    vm.rotation.z = -.6 * g + Math.sin(vmT * 23) * .02 * strain;
+    if (g > .25) heldBottle.visible = false;
   }
 
   // ---------- per-frame ----------
@@ -246,6 +288,7 @@ const NET = (() => {
         v.model.g.position.y = -0.9 + (moving ? Math.abs(Math.sin(v.walk)) * .05 : 0);
         v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
         v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
+        animateArms(v, dt, moving);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
@@ -262,9 +305,14 @@ const NET = (() => {
   }
 
   // ---------- actions ----------
+  // Props can carry an action too (the couch); they are wherever they were left.
+  function* actionables() {
+    yield* fixtures.values();
+    for (const v of ents.values()) if (v.kind === 'prop' && v.obj) yield { id: v.id, type: v.type, pos: [v.obj.position.x, v.obj.position.y, v.obj.position.z] };
+  }
   function nearestAction() {
     if (!MAP) return null; let best = null, bd = 9;
-    for (const f of fixtures.values()) {
+    for (const f of actionables()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
       const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt)) continue;
@@ -272,11 +320,28 @@ const NET = (() => {
     }
     return best;
   }
-  function updatePrompt(btn) {
-    const f = nearestAction(); btn.hidden = !f;
-    if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
+  // Anything loose within reach can be grabbed and dragged (same reach as the server).
+  function nearestGrabbable() {
+    let best = null, bd = 2.6 * 2.6;
+    for (const v of ents.values()) {
+      if ((v.kind !== 'prop' && v.kind !== 'sleeper') || !v.obj) continue;
+      const d = (v.obj.position.x - player.position.x) ** 2 + (v.obj.position.z - player.position.z) ** 2; if (d < bd) { bd = d; best = v; }
+    }
+    return best;
   }
-  const act = () => { if (ws && ws.readyState === 1) ws.send('{"t":"act"}'); };
+  const keyLabel = k => esc(k.startsWith('Key') ? k.slice(3) : k);
+  let promptMode = null;
+  function updatePrompt(btn) {
+    const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
+    promptMode = f ? 'act' : g ? 'grab' : null; btn.hidden = !promptMode;
+    let html = '';
+    if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+    else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
+    if (html && btn.innerHTML !== html) btn.innerHTML = html;
+  }
+  const sendAct = () => { if (ws && ws.readyState === 1) ws.send('{"t":"act"}'); };
+  const sendGrab = () => { if (ws && ws.readyState === 1) ws.send('{"t":"grab"}'); };
+  const act = () => (promptMode === 'grab' ? sendGrab : sendAct)();   // the on-screen button does whatever it says
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   function throwDir(dir) {
@@ -291,8 +356,8 @@ const NET = (() => {
   });
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (SET.isBind('act', e.code) || e.code === 'KeyF') act();
-    if (SET.isBind('grab', e.code) && ws && ws.readyState === 1) ws.send('{"t":"grab"}');
+    if (SET.isBind('act', e.code) || e.code === 'KeyF') sendAct();
+    if (SET.isBind('grab', e.code)) sendGrab();
   });
 
   // ---------- connection ----------
@@ -332,5 +397,7 @@ const NET = (() => {
     setTimeout(() => el('nameInput').focus(), 50);
   }
   window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir };
+  // Read-only view of the networked world for the mini map (GAME-80).
+  const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view };
 })();
