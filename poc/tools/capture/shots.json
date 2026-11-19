@@ -173,6 +173,52 @@
    "optional": true,
    "note": "GAME-93: Big Dale and Old Gus at the underpass camp"
   },
+  "lamppost": {
+   "cam": [
+    1.2,
+    1.6,
+    3.6,
+    2.577,
+    -0.45
+   ],
+   "setup": "if(typeof COPPER!=='undefined'){ COPPER.meta=()=>{}; window.__copper.setStripped('lamp:2',true); }",
+   "wait": 1,
+   "note": "GAME-91: base of the Main St lamppost by the school (lamp:2), stripped in AFTER: hand hole pried open, wiring on the sidewalk"
+  },
+  "lamppost-head": {
+   "cam": [
+    4,
+    1.6,
+    -4.6,
+    2.69,
+    0.42
+   ],
+   "setup": "if(typeof COPPER!=='undefined'){ COPPER.meta=()=>{}; window.__copper.setStripped('lamp:2',true); }",
+   "wait": 1,
+   "note": "GAME-91: Main St lampposts from across the street; lamp:2 dark in AFTER, its neighbours still lit"
+  },
+  "car-damage": {
+   "cam": [
+    15.8,
+    1.7,
+    -8.4,
+    0.69,
+    -0.22
+   ],
+   "setup": "if (typeof CARDMG !== 'undefined') { const g = CAR_GROUPS.find(g => Math.abs(g.position.x - 13.3) < 1 && Math.abs(g.position.z + 11.6) < 1); CARDMG.applyAll(g, { dents: [[0.3,0.93,1.5,0,1,0,0.38],[-0.88,0.7,0.3,-1,0,0,0.32],[-0.88,0.62,-1.2,-1,0,0,0.26],[0.4,0.6,2.25,0,0,1,0.3],[-0.2,1.4,-0.3,0,1,0,0.36]], glass: { front: 1, left: 2 } }); }",
+   "note": "the parked car in the store lot, dented and with cracked glass in the after (GAME-83 car damage)"
+  },
+  "car-damage-side": {
+   "cam": [
+    9.6,
+    1.6,
+    -13.6,
+    -2.04,
+    -0.18
+   ],
+   "setup": "if (typeof CARDMG !== 'undefined') { const g = CAR_GROUPS.find(g => Math.abs(g.position.x - 13.3) < 1 && Math.abs(g.position.z + 11.6) < 1); CARDMG.applyAll(g, { dents: [[0.3,0.93,1.5,0,1,0,0.38],[-0.88,0.7,0.3,-1,0,0,0.32],[-0.88,0.62,-1.2,-1,0,0,0.26],[0.4,0.6,2.25,0,0,1,0.3],[-0.2,1.4,-0.3,0,1,0,0.36]], glass: { front: 1, left: 2 } }); }",
+   "note": "the same parked car from its left side (GAME-83 car damage)"
+  },
   "hydrant": {
    "cam": [
     -0.6,

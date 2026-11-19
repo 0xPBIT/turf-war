@@ -1899,6 +1899,21 @@
    "repairSec": 1,
    "price": 5
   },
+  "shop_pliers": {
+   "verb": "Buy pliers at Sunny Mart ($6)",
+   "cost": 0,
+   "repairSec": 1,
+   "price": 6
+  },
+  "lamppost": {
+   "verb": "Strip the copper wire",
+   "cost": 1200,
+   "repairSec": 180,
+   "cash": 25,
+   "holdSec": 2.6,
+   "needs": "pliers",
+   "label": "Stole copper wire"
+  },
   "hydrant": {
    "verb": "Cracked open a fire hydrant",
    "cost": 250,
@@ -2208,6 +2223,69 @@
    ],
    "item": "lighter",
    "price": 5
+  },
+  {
+   "id": "f:shop2",
+   "type": "shop_pliers",
+   "p": [
+    5.6,
+    0,
+    -5.6
+   ],
+   "item": "pliers",
+   "price": 6
+  }
+ ],
+ "lampposts": [
+  {
+   "id": "lamp:0",
+   "p": [
+    -34,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  },
+  {
+   "id": "lamp:1",
+   "p": [
+    -17,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  },
+  {
+   "id": "lamp:2",
+   "p": [
+    0,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  },
+  {
+   "id": "lamp:3",
+   "p": [
+    17,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  },
+  {
+   "id": "lamp:4",
+   "p": [
+    34,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
   }
  ],
  "hydrants": [

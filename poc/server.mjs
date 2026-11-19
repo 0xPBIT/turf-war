@@ -9,6 +9,7 @@ import { WebSocketServer } from 'ws';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { ITEM_TYPES, ITEM_RULES, POCKET_TYPES, itemSpots, pickWeighted, dumpsterFind } from './items.mjs';
 import { createCombat } from './combat.mjs';
+import { initCopper } from './copper.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -107,6 +108,7 @@ function describe(e) {
   if (e.cat) { d.half = e.cat.half; d.r = e.cat.r; d.hh = e.cat.hh; d.drag = e.cat.drag; d.label = e.cat.label; }
   if (e.kind === 'npc') Object.assign(d, combat.describeNpc(e));
   if (e.kind === 'vagrant' && combat && combat.isDown(e)) d.down = 1;
+  if (e.type === 'car' && e.state && e.state.dmg) d.dmg = e.state.dmg;   // dents and cracked glass (GAME-83)
   if (e.dir !== undefined) d.dir = e.dir;
   return d;
 }
@@ -125,11 +127,13 @@ MAP.colliders.forEach((c, i) => {
     const yaw = c.ry !== undefined ? c.ry - Math.PI / 2 : (c.box[0] > c.box[2] ? Math.PI / 2 : 0);
     const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], 0, c.p[2]).setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }));
     [collider, ...extraColliders] = carColliders(b, 0, c.ry !== undefined ? CAR_CABIN_Z : 0);
+    // Not enumerable: MAP is sent to clients as /town.json, and a physics body can't be serialised.
+    Object.defineProperty(c, 'carBody', { value: b, enumerable: false, writable: true, configurable: true });
   } else collider = colliderFor(c);
   if (!c.tag || c.tag === 'npc') return;
   const n = fixtureCount[c.tag] = (fixtureCount[c.tag] || 0) + 1;
   const id = c.tag === 'pile' ? 'pile:' + c.pile : `f:${c.tag}${n}`;
-  addEntity({ id, kind: 'fixture', type: c.tag, collider, extraColliders, fixedPos: c.p, index: c.pile, dir: c.dir, state: {} });
+  addEntity({ id, kind: 'fixture', type: c.tag, collider, extraColliders, carBody: c.carBody, fixedPos: c.p, index: c.pile, dir: c.dir, state: {} });
 });
 // Extra fire hydrants (GAME-94): the client builds their models from the same list.
 (MAP.hydrants || []).forEach((h, i) => {
@@ -344,6 +348,9 @@ function decayHeatAndOwners() {
   saveDirty = true;
 }
 
+// Copper wire theft (GAME-91): lampposts and pliers live in copper.mjs.
+const copper = initCopper({ MAP, ACTIONS, save, sessions, addEntity, addDamage, broadcast, posOf });
+
 function nearest(e, radius, filter) {
   const [x, , z] = posOf(e);
   let best = null, bd = radius * radius;
@@ -375,6 +382,7 @@ function giveLighter(s) {
 // Shops are fixtures of type 'shop_<item>'; SHOP_ITEMS says how each item lands in your pockets.
 const SHOP_ITEMS = {
   lighter: { name: 'a lighter', has: p => fuelOf(p) > 3, give: giveLighter },
+  pliers: { name: 'some pliers', has: p => copper.hasTool(p), give: s => { copper.giveTool(s.entity.player); saveDirty = true; } },
 };
 function buy(s, shop) {
   const p = s.entity.player, it = SHOP_ITEMS[shop.item];
@@ -414,6 +422,20 @@ function spreadFires() {
 setInterval(spreadFires, 1000);
 
 const HIT_ONLY = new Set(['window', 'car', 'crate', 'cone']);
+
+// ---------- player animations (GAME-92) ----------
+// playAnim(entity, clip, extra) shows a clip from tools/anim.js on that vagrant for everyone.
+// The player's own client plays it in first person right away and skips the echo.
+function playAnim(e, clip, extra) { broadcast({ t: 'fx', kind: 'anim', id: e.id, clip, ...(extra || {}) }); }
+// Which clip each E interaction plays (a map action can override it with "anim"). Digging in
+// dumpsters and piles, copper and lighting have their own animations in their modules.
+const ACTION_ANIM = { stop_sign: 'panhandle', fire_can: 'warm', couch: 'sit' };
+// Where you sit: the seat's centre, facing the way its front faces (local +z).
+const SEATS = new Set(['couch']);
+function seatOf(o) {
+  if (o.body) { const t = o.body.translation(), q = o.body.rotation(); return [t.x, t.z, Math.atan2(2 * (q.x * q.z + q.w * q.y), 1 - 2 * (q.x * q.x + q.y * q.y))]; }
+  return [o.fixedPos[0], o.fixedPos[2], 0];
+}
 // E does the fixture's main thing (dumpsters: dig for junk); F lights anything that burns.
 function interact(s, light) {
   const e = s.entity, p = e.player;
@@ -426,6 +448,7 @@ function interact(s, light) {
     || nearest(e, 3, o => (o.kind === 'fixture' || o.kind === 'prop') && ACTIONS[o.type] && !HIT_ONLY.has(o.type) && now >= ((o.state && o.state.busyUntil) || 0) && (!light || BURNABLE.has(o.type)));
   if (!target) return;
   if (target.type === 'hydrant') return hydrantAct(s, target, now);
+  if (target.type === 'lamppost') return copper.start(s, target);
   if ((target.type === 'dumpster' || target.type === 'pile') && !light) return rummage(s, target, now);
   const a = ACTIONS[target.type];
   if (target.type.startsWith('shop_')) return buy(s, target);
@@ -436,9 +459,12 @@ function interact(s, light) {
     if (fuel - 1 <= 0) { p.items.lighter = null; tell(s, 'Your lighter is out of fluid.'); }
     sendInv(s);
     broadcast({ t: 'fx', kind: 'flick', id: e.id });
+    playAnim(e, 'light', { tpOnly: true });      // others see you crouch and flick it (your own hand: fire-client)
     return ignite(target, p, now);
   }
   target.state.busyUntil = now + a.repairSec * 1000;
+  const clip = a.anim || ACTION_ANIM[target.type];
+  if (clip) playAnim(e, clip, SEATS.has(target.type) ? { seat: seatOf(target) } : undefined);
   if (a.cash) { p.cash = (p.cash || 0) + a.cash; broadcast({ t: 'fx', kind: 'say', id: e.id, text: `Spare change? (+$${a.cash})` }); }
   if (a.hangout) broadcast({ t: 'fx', kind: 'say', id: e.id, text: target.type === 'couch' ? 'comfy' : 'warming up' });
   addDamage(p, a.cost, posOf(target), a.verb);
@@ -521,6 +547,7 @@ function pocketItem(e, key) {
   saveDirty = true;
   broadcast({ t: 'fx', kind: 'pocket', id: e.id, key, name: POCKET_TYPES[key]?.name || key });
   if (key === 'lighter') sendInv(sessions.get(e.player.id));
+  if (key === 'pliers') copper.sendInv(e.player);
 }
 function rummage(s, dump, now) {
   const e = s.entity, st = dump.state;
@@ -594,13 +621,8 @@ function onItemHit(it, other) {
       addDamage(p, 15, at, 'More glass');
     }
   } else if (other && other.type === 'car' && hard) {
-    const a = ACTIONS[other.type];
-    if (!T.breaks) addDamage(p, ITEM_RULES.pelt, posOf(other), other.type === 'car' ? `Pelted a car with a ${T.name}` : `Bonked a window with a ${T.name}`);
-    else if (now >= (other.state.brokenUntil || 0)) {
-      other.state.brokenUntil = now + a.repairSec * 1000;
-      addDamage(p, other.value || a.cost, posOf(other), other.type === 'car' && it.type !== 'bottle' ? `${T.hitVerb || (T.name === 'rock' ? 'Rocked' : 'Bricked')} a windshield` : a.verb);
-      broadcast({ t: 'fx', kind: 'break', id: other.id, at, v });
-    } else addDamage(p, 15, at, 'More glass');
+    if (!T.breaks) addDamage(p, ITEM_RULES.pelt, posOf(other), `Pelted a car with a ${T.name}`);
+    else carDamage(other, at, v, 0.14 + Math.min(0.22, T.mass * 0.25), p, it.type);   // dents or cracked glass (GAME-83)
   } else if (other && other.type === 'crate' && hard && T.mass >= 0.4) {
     const a = ACTIONS.crate, spec = other.spec, cp = posOf(other);
     removeEntity(other.id);
@@ -648,12 +670,12 @@ function hydrantAct(s, h, now) {
   if (p.held !== 'wrench') return say(hydrantOpen(st, now) ? "It's gushing. You'd need a wrench to shut it" : "The valve nut won't budge. Need a wrench");
   if ((st.openAt || 0) > now) return;                                   // someone is already cranking it
   if (hydrantOpen(st, now)) {                                           // crank it shut again
-    broadcast({ t: 'fx', kind: 'wrench', id: e.id, hyd: h.id });
+    broadcast({ t: 'fx', kind: 'wrench', id: e.id, hyd: h.id }); playAnim(e, 'wrench');
     setTimeout(() => { st.openUntil = Date.now(); st.wetUntil = Date.now() + 40000; }, 900);
     return;
   }
   if ((st.cappedUntil || 0) > now) return say('The water dept. just capped this one. Give it a minute');
-  broadcast({ t: 'fx', kind: 'wrench', id: e.id, hyd: h.id });
+  broadcast({ t: 'fx', kind: 'wrench', id: e.id, hyd: h.id }); playAnim(e, 'wrench');
   // The water comes when the crank animation finishes.
   st.openAt = now + 900; st.openUntil = st.openAt + HYD.gushSec * 1000; st.by = p.id; st.flowAcc = 0;
   st.cappedUntil = st.openUntil + HYD.repairSec * 1000;
@@ -765,6 +787,75 @@ function downedStep(s) {
   if ((age > DOWN_MIN_MS && Math.hypot(v.x, v.y, v.z) < 0.6) || age > DOWN_MAX_MS || t.y < -5) getUp(e);
 }
 
+// ---------- car damage (GAME-83) ----------
+// Cars keep a list of dents and a crack level per pane (0 fine, 1 cracked, 2 smashed),
+// in the car's own frame: nose along +z, y from the ground. Bottles dent the body or
+// crack the glass, hitting someone dents the nose (and cracks the windshield when fast),
+// and landing hard on a car dents the hood or roof. Clients deform the body mesh.
+// A car that's left alone for CAR_REPAIR_MS gets fixed.
+const CAR_REPAIR_MS = 150000, MAX_DENTS = 16, STOMP_V = 3;
+const r2 = n => Math.round(n * 100) / 100;
+function carFrame(e) {
+  const b = e.body || e.carBody; if (!b) return null;
+  const t = b.translation(), q = b.rotation();
+  return { t, yaw: 2 * Math.atan2(q.y, q.w), bodyY: e.kind === 'traffic' ? 0.7 : 0 };
+}
+function carLocal(f, p, isDir) {
+  const dx = isDir ? p[0] : p[0] - f.t.x, dz = isDir ? p[2] : p[2] - f.t.z, c = Math.cos(f.yaw), s = Math.sin(f.yaw);
+  return [dx * c - dz * s, isDir ? p[1] : p[1] - f.t.y + f.bodyY, dx * s + dz * c];
+}
+function carZone([x, y, z]) {
+  if (y > 0.9 && y < 1.4 && z > 0.3 && z < 1.05 && Math.abs(x) < 0.85) return 'front';
+  if (y > 0.95 && y < 1.4 && z < -0.75 && z > -1.55 && Math.abs(x) < 0.85) return 'back';
+  if (y > 0.95 && y < 1.36 && z > -1.45 && z < 0.9 && Math.abs(x) > 0.6) return x < 0 ? 'left' : 'right';
+  return null;
+}
+// worldAt: where it hit; dir: which way it was going; size: dent radius in metres.
+function carDamage(e, worldAt, dir, size, byPlayer, cause) {
+  const f = carFrame(e); if (!f) return;
+  const now = Date.now();
+  const d = e.state.dmg || (e.state.dmg = { dents: [], glass: {} });
+  d.last = now;
+  const lp = carLocal(f, worldAt), ld = carLocal(f, dir, true);
+  const pane = carZone(lp);
+  const A = ACTIONS.car;
+  if (pane) {
+    const lvl = Math.min(2, (d.glass[pane] || 0) + 1);
+    if (lvl === (d.glass[pane] || 0)) { if (byPlayer) addDamage(byPlayer, 15, worldAt, 'More glass'); return; }
+    d.glass[pane] = lvl;
+    if (byPlayer) addDamage(byPlayer, lvl === 1 ? (pane === 'front' ? A.cost : 300) : 200, worldAt, lvl === 1 ? (pane === 'front' ? A.verb : 'Cracked a car window') : 'Smashed out a car window');
+    broadcast({ t: 'fx', kind: 'cardmg', id: e.id, glass: pane, level: lvl, at: lp.map(r2), cause });
+    return;
+  }
+  // Which way the panel faces decides which way it caves in.
+  const [x, y, z] = lp;
+  let n = y > 1.3 || (y > 0.8 && Math.abs(x) < 0.7 && Math.abs(z) < 2.0 && ld[1] < -0.5) ? [0, 1, 0]
+    : Math.abs(z) > 1.9 && Math.abs(x) < 0.8 ? [0, 0, Math.sign(z)] : [Math.sign(x) || 1, 0, 0];
+  const dent = [r2(x), r2(y), r2(z), n[0], n[1], n[2], r2(Math.min(0.5, size))];
+  d.dents.push(dent); if (d.dents.length > MAX_DENTS) d.dents.shift();
+  if (byPlayer) addDamage(byPlayer, cause === 'stomp' ? 40 : 60, worldAt, cause === 'stomp' ? 'Stomped on a car' : 'Dented a car');
+  broadcast({ t: 'fx', kind: 'cardmg', id: e.id, dent, cause });
+}
+// A player landed hard: if it's on a car, dent where their feet hit.
+function stompCar(e, t, mv, vy) {
+  const now = Date.now();
+  if (now - (e.lastStomp || 0) < 250) return;
+  const at = { x: t.x + mv.x, y: t.y + mv.y, z: t.z + mv.z };
+  const hit = world.castRay(new RAPIER.Ray(at, { x: 0, y: -1, z: 0 }), CAP_HALF + CAP_R + 0.3, true, undefined, undefined, e.collider, e.body);
+  if (!hit) return;
+  const car = byCollider.get(hit.collider.handle);
+  if (!car || car.type !== 'car') return;
+  e.lastStomp = now;
+  const foot = [at.x, at.y - hit.timeOfImpact, at.z];
+  carDamage(car, foot, [0, vy, 0], Math.min(0.42, 0.18 + (-vy - STOMP_V) * 0.04), e.player, 'stomp');
+}
+function repairCars(now) {
+  for (const e of entities.values()) {
+    const d = e.type === 'car' && e.state && e.state.dmg;
+    if (d && now - d.last > CAR_REPAIR_MS) { e.state.dmg = null; e.state.brokenUntil = 0; broadcast({ t: 'fx', kind: 'carfix', id: e.id }); }
+  }
+}
+
 // ---------- simulation ----------
 const dt = 1 / PHYSICS_HZ;
 world.timestep = dt;
@@ -867,6 +958,15 @@ function carHits(car, now) {
     if (knockDown(e, { vel, spin, cause: 'car', by: car.id })) {
       combat.hurt(e, Math.min(100, Math.round(25 + speed * 9)), { by: car.entity, cause: 'car' });   // no push: the ragdoll already flies
       car.lastHit = now; any = true;
+      // dent the nose where it met them
+      const nose = { x: carPos(car).x + f.x * CAR_HALF_LEN, y: 0.75, z: carPos(car).z + f.z * CAR_HALF_LEN };
+      if (l.axis === 'x') nose.z = t.z; else nose.x = t.x;
+      carDamage(car.entity, [nose.x, nose.y, nose.z], [f.x * speed, 0, f.z * speed], 0.2 + speed * 0.03, null, 'hit');
+      if (speed > 5) {   // they rolled up onto the windshield
+        const ws = { x: carPos(car).x + f.x * 0.65, y: 1.15, z: carPos(car).z + f.z * 0.65 };
+        if (l.axis === 'x') ws.z = t.z; else ws.x = t.x;
+        carDamage(car.entity, [ws.x, ws.y, ws.z], [f.x, -1, f.z], 0.3, null, 'hit');
+      }
       console.log(`[town] ${car.id} hit ${e.player.name} at ${speed.toFixed(1)} m/s`);
     }
   }
@@ -997,6 +1097,7 @@ function stepPlayers() {
     controller.computeColliderMovement(e.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC, undefined, notAVagrant);
     const mv = controller.computedMovement();
     const grounded = controller.computedGrounded();
+    if (grounded && e.vy < -STOMP_V) stompCar(e, t, mv, e.vy);   // landed hard on something: a car? (GAME-83)
     if (grounded) { e.vy = inp.jump && !mm.down ? JUMP : 0; }
     if (typeof inp.yaw === 'number') e.facing = inp.yaw;
     else if (ml > 0.01) e.facing = Math.atan2(mx, mz);
@@ -1010,6 +1111,7 @@ let tick = 0;
 function physicsTick() {
   stepPlayers();
   stepTraffic(Date.now());
+  copper.tick(Date.now());
   combat.stepNpcs(dt);
   world.step(events);
   events.drainCollisionEvents((h1, h2, started) => {
@@ -1023,7 +1125,7 @@ function physicsTick() {
   if (tick % 30 === 0) stepItems(now);
   stepHydrants(now);
   tick++;
-  if (tick % PHYSICS_HZ === 0) rescueLostProps();
+  if (tick % PHYSICS_HZ === 0) { rescueLostProps(); repairCars(now); }
   if (tick % (PHYSICS_HZ / SNAPSHOT_HZ) === 0) sendSnapshot(false);
   if (tick % (PHYSICS_HZ / META_HZ) === 0) sendMeta();
 }
@@ -1067,6 +1169,7 @@ function metaPayload() {
       if (st.glass) { o.g = st.glass; if (now >= st.boardAt) o.board = 1; }
     } else if (st.glass) { delete st.glass; delete save.windows[e.id]; }
     if (st.braking) o.brake = 1;
+    copper.meta(e, o);
     if (st.angry) o.angry = 1;
     if (st.down) o.down = 1;
     if (e.down) o.rag = 1;                            // ragdolled by a car (GAME-83)
@@ -1078,7 +1181,7 @@ function metaPayload() {
     const p = save.players[pid];
     if (p) owners[z] = { name: p.name, color: p.color };
   }
-  const players = Object.values(save.players).map(p => ({ id: p.id, name: p.name, color: p.color, damage: Math.round(p.damage || 0), cash: p.cash || 0, asleep: !sessions.has(p.id) }))
+  const players = Object.values(save.players).map(p => ({ id: p.id, name: p.name, color: p.color, damage: Math.round(p.damage || 0), cash: p.cash || 0, asleep: !sessions.has(p.id), ...copper.playerMeta(p) }))
     .sort((a, b) => b.damage - a.damage).slice(0, 12);
   return { t: 'm', lights: lightsPayload(), town: Math.round(save.town.damage), owners, objects, players, online: sessions.size };
 }
@@ -1169,6 +1272,7 @@ wss.on('connection', ws => {
       sendSnapshot(true, ws);
       ws.send(JSON.stringify(metaPayload()));
       sendInv(sessions.get(pid));
+      copper.sendInv(p);
       saveDirty = true;
       console.log(`[town] ${p.name} woke up (${sessions.size} online)`);
       return;
@@ -1196,6 +1300,7 @@ wss.on('connection', ws => {
     const s = pid && sessions.get(pid);
     if (!s || s.ws !== ws) return;
     s.input = {}; s.queue = [];
+    copper.cancel(s, 'left');
     releaseGrab(s.entity);
     // Wait a moment for a reconnect before the vagrant lies down.
     s.graceTimer = setTimeout(() => { if (sessions.get(pid) === s) lieDown(pid); }, GRACE_MS);
