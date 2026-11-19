@@ -17,6 +17,8 @@ NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
 ITEMS = (HERE / 'items-client.js').read_text()
+FIGHTJS = (HERE / 'fight-client.js').read_text()
+SKY = (HERE / 'sky.js').read_text()
 PROPS = (HERE / 'props.js').read_text()
 MINI = (HERE / 'minimap.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
@@ -42,6 +44,19 @@ rep('<div class="panel" id="dials">', '<div class="panel" id="dials" style="disp
 rep('<div class="panel" id="places">', '<div class="panel" id="places" style="display:none">')
 rep('<div class="hud" id="cap">', '<div class="hud" id="cap" style="display:none">')
 rep('<div id="joy"><span></span></div>', '<div id="joy"><span></span></div>\n' + HUD)
+
+# Sky (GAME-89): the sphere-clump clouds are replaced by clouds painted into the sky dome
+# (tools/sky.js); dome and sun follow the camera. The floating soap bubbles go too: under the
+# Blend shader they draw as flat pale discs hanging in the sky, which read as stray clouds.
+def cut(start, end, new):
+    global s
+    a = s.index(start); b = s.index(end, a)
+    s = s[:a] + new + s[b:]
+cut('// ---------- sky dome ----------', '// ---------- sun character ----------', SKY + '\n')
+cut('// ---------- clouds & bubbles ----------', '// ---------- physics ----------', '')
+rep("  for(const b of bubbles){ b.position.y+=b.userData.v*dt; b.position.x+=Math.sin(t*.6+b.userData.ph)*dt*.4; if(b.position.y>26){ b.position.y=1; } }\n", "")
+rep("  for(const c of clouds) c.position.x+=dt*.6;\n",
+    "  skyDome.position.copy(camera.position); skyDome.material.uniforms.time.value=t; sunGroup.position.copy(camera.position).add(SUN_OFFSET);\n")
 
 # No local props: the server owns crates and cones.
 rep('spawnProps();\nconst starTex', 'const starTex')
@@ -117,9 +132,23 @@ rep("const m=new THREE.Mesh(g,mat); m.castShadow=true;", "const m=new THREE.Mesh
 rep("if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); }",
     "if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); if(o.m.userData.ownGeo) o.m.geometry.dispose(); }")
 
+# GAME-85: the panhandler's arms get shoulder pivots too (so he can drop his sign and fight),
+# the sign is handed back on p.sign, and the knocked-out camera / fists run after the camera is placed.
+rep("""  if(o.sign){
+    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.27,1.08,.1], w=[s*.17,1.0,.33];""",
+"""  if(o.sign && o.armRig){
+    for(const [i,s] of [[0,-1],[1,1]]){ const pv=new THREE.Group(), rel=v=>[v[0]-sh[i][0],v[1]-sh[i][1],v[2]-sh[i][2]], e=rel([s*.27,1.08,.1]), w=rel([s*.17,1.0,.33]);
+      limb([0,0,0],e,.06,.065,'tx:canvas|'+o.coat,pv); limb(e,w,.05,.058,'tx:canvas|'+o.coat,pv); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,pv,...w); glove(pv,rel([s*.2,1.0,.39]),[0,1,.2],o,false);
+      bake(pv); pv.position.set(...sh[i]); o.armRig.push(pv); }
+    const sg=new THREE.Mesh(new THREE.BoxGeometry(.66,.42,.012),[0,0,0,0,new THREE.MeshLambertMaterial({map:labelTex(o.sign,512,330,'#D9A866','#3A2410',42)}),0].map(m=>m||new THREE.MeshLambertMaterial({color:0xB98A50}))); sg.position.set(0,1.02,.4); sg.rotation.set(-.15,0,-.05); g.add(sg); sg.castShadow=true; o._sign=sg;
+  } else if(o.sign){
+    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.27,1.08,.1], w=[s*.17,1.0,.33];""")
+rep("const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62};", "const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62,sign:o._sign||null};")
+rep("  camera.rotation.set(pitch,yaw,0,'YXZ');", "  camera.rotation.set(pitch,yaw,0,'YXZ');\n  FIGHT.afterCamera(dt, t);")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + ITEMS + '\n' + NET + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + ITEMS + '\n' + NET + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
