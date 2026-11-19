@@ -22,7 +22,9 @@ function bakeLocal(root){
 // Grid bake: static detail merged per material per cell, so chunks behind you or out of the
 // shadow camera get culled instead of drawing the whole town every frame.
 const VC_MATS=new Map();
-function vcMat(base){ if(!VC_MATS.has(base)){ const m=getMat(base==='vc'?0xffffff:base).clone(); m.vertexColors=true; VC_MATS.set(base,m); } return VC_MATS.get(base); }
+// One vertex-colour clone per (style, base). Baked meshes carry userData.vc so setMatMode swaps them
+// with the rest of the town when the look switches (gloss at build time, Blend/toon once applied).
+function vcMat(base, mode=matMode){ const k=mode+'|'+base; if(!VC_MATS.has(k)){ const m=getMat(base==='vc'?0xffffff:base, mode).clone(); m.vertexColors=true; VC_MATS.set(k,m); } return VC_MATS.get(k); }
 function bakeGrid(root,cell){
   for(const b of BURN) if(b.g.userData.nobake) bakeLocal(b.g);
   // Window interiors (flat planes behind the glass) merge per material and cell; the glass and its
@@ -46,7 +48,7 @@ function bakeGrid(root,cell){
     const sk=(typeof base==='object'?'o'+(base.uuid||base.id||''):base)+(o.castShadow?'':'#ns')+'@'+(big?'big':Math.floor(c.x/cell)+','+Math.floor(c.z/cell));
     if(!groups.has(sk)) groups.set(sk,{base,cast:o.castShadow,list:[]}); groups.get(sk).list.push(g); kill.push(o); });
   for(const o of kill) o.parent.remove(o);
-  for(const {base,cast,list} of groups.values()){ const m=new THREE.Mesh(mergeGeometries(list,false),vcMat(base)); m.userData.baked=1; m.castShadow=cast; m.receiveShadow=true; root.add(m); }
+  for(const {base,cast,list} of groups.values()){ const m=new THREE.Mesh(mergeGeometries(list,false),vcMat(base)); m.userData.baked=1; m.userData.vc=base; m.castShadow=cast; m.receiveShadow=true; root.add(m); }
 }
 
 const TOWN=(()=>{
@@ -930,30 +932,33 @@ const sun0=new THREE.Vector3().copy(sunLight.position);
 let camOv=null, far0=0;
 let fog0=null; window.__townCam=(p,t,clear)=>{ if(!far0){ far0=camera.far; fog0=[scene.fog.near,scene.fog.far]; } camOv=p?{p,t,clear}:null; cullT=0; camera.far=p?1200:far0; camera.updateProjectionMatrix(); scene.fog.near=p&&clear?900:fog0[0]; scene.fog.far=p&&clear?2000:fog0[1]; vm.visible=!p; };
 function cam(){ if(camOv){ camera.position.set(...camOv.p); camera.lookAt(...camOv.t); } }
-window.__townMeshes=()=>{ const burn=new Set(); for(const t of BURN) t.g.traverse(o=>burn.add(o)); const out={}; scene.traverse(o=>{ if(!o.isMesh&&!o.isSprite) return; let k=o.userData.baked?'baked':burn.has(o)?'tree':o.material===glassMat?'glass':(o.material&&o.material.type)+(o.userData.c!==undefined?':c':''); out[k]=(out[k]||0)+1; }); return out; };
-window.__townFrustum=()=>{ const f=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse)); const out={}; let n=0,sh=0; scene.traverse(o=>{ if(!(o.isMesh)||!o.layers.test(camera.layers)) return; let v=true; for(let q=o;q;q=q.parent) if(!q.visible){ v=false; break; } if(!v) return; if(!f.intersectsObject(o)) return; n++; if(o.castShadow) sh++; const k=o.userData.baked?'baked':o.material===glassMat?'glass':(o.material&&o.material.type); out[k]=(out[k]||0)+1; }); out.total=n; out.cast=sh; return out; };
-window.__townDbg=()=>({sunLight,renderer,scene,camera,city,DET,THREE});
-window.__townStats=()=>{ const r=renderer.info.render; return {calls:r.calls,tris:r.triangles}; };
 // Distance culling for small static detail (signs, window interiors, glass, street clutter, trees):
 // they move to an unused layer when far away, so .visible stays the game's to use.
 let DET=null, cullT=0; const CULL_LAYER=1<<6;
 function buildCull(){
   DET=[]; city.updateMatrixWorld(true); const sp=new THREE.Sphere(), burn=new Set(); for(const t of BURN) t.g.traverse(o=>burn.add(o));
   for(const t of BURN) t.g.updateMatrixWorld(true);
-  const visit=o=>{ if(!(o.isMesh||o.isSprite)) return; const isTree=burn.has(o); if(o.userData.baked && !isTree) return;
+  const visit=o=>{ if(!(o.isMesh||o.isSprite)) return; const isTree=burn.has(o);
     if(o.isMesh){ if(!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); sp.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld); } else { sp.center.setFromMatrixPosition(o.matrixWorld); sp.radius=1; }
-    const r=sp.radius; if(r>9) return; const d=isTree?190:r<1.2?80:r<4?135:175; DET.push({o,x:sp.center.x,z:sp.center.z,r2:d*d,off:false,m:0}); };
+    const r=sp.radius; const chunk=o.userData.baked && !isTree;
+    if(r>9 && !chunk) return; if(chunk && r>70) return;
+    if(!chunk && !isTree && r<.8 && o.castShadow) o.castShadow=false;   // street clutter: no shadow-pass draw
+    const d=chunk?300+r:isTree?120:r<1.2?60:r<4?80:150; DET.push({o,x:sp.center.x,z:sp.center.z,r2:d*d,off:false,m:0,chunk}); };
   city.traverse(visit); for(const t of BURN) if(!t.g.userData.nobake) t.g.traverse(visit);
 }
 function cull(dt){
   if(!DET || (cullT-=dt)>0) return; cullT=.25; const cx=camera.position.x, cz=camera.position.z, all=camOv&&camOv.clear;
-  for(const d of DET){ const off=!all && (d.x-cx)**2+(d.z-cz)**2>d.r2; if(off===d.off) continue; d.off=off;
+  const q=typeof SET!=='undefined'&&SET.opt?SET.opt('quality'):'high', k2=q==='low'?.4:q==='medium'?.65:1;   // Graphics quality pulls detail in closer
+  for(const d of DET){ const off=!all && (d.x-cx)**2+(d.z-cz)**2>d.r2*(d.chunk?1:k2); if(off===d.off) continue; d.off=off;
     if(off){ d.m=d.o.layers.mask; d.o.layers.mask=CULL_LAYER; } else d.o.layers.mask=d.m; }
 }
+const _fw=new THREE.Vector3();
 function frame(dt){
   cull(dt||0);
-  renderer.info.autoReset=false; renderer.info.reset();
-  const px=camOv?camOv.t[0]:player.position.x, pz=camOv?camOv.t[2]:player.position.z, snap=1.0;
+  // Centre the shadow box a little ahead of the camera (not the player body: spectating, capture
+  // shots and the debug camera all look from somewhere else).
+  camera.getWorldDirection(_fw); const ah=camOv?0:Math.min(20,Math.hypot(_fw.x,_fw.z)*20);
+  const fl=Math.hypot(_fw.x,_fw.z)||1, px=camOv?camOv.t[0]:camera.position.x+_fw.x/fl*ah, pz=camOv?camOv.t[2]:camera.position.z+_fw.z/fl*ah, snap=1.0;
   const cx=Math.round(px/snap)*snap, cz=Math.round(pz/snap)*snap;
   sunLight.position.set(cx+sun0.x, sun0.y, cz+sun0.z); sunLight.target.position.set(cx,0,cz); sunLight.target.updateMatrixWorld();
 }

@@ -182,8 +182,11 @@ rep("[[-4,-6.7],[10.8,-6.7],[-36,-7],[-18,-6.6],[-4,6.6],[15,6.6],[26,-14],[31,-
 rep("[[-17,-8],[-25.5,-8],[-26,8],[-17,8.2],[8.6,-6.6],[18,-6.7],[-33.5,-8],[-33.5,8]].forEach(", "[[8.6,-6.6],[18,-6.7]].forEach(")
 # Background hills move out past the town limits; haze reaches further for a town this size.
 rep("const r=170+(i%3)*25; const h=put(new THREE.IcosahedronGeometry(40+(i%4)*10,2)", "const r=330+(i%3)*35; const h=put(new THREE.IcosahedronGeometry(80+(i%4)*20,2)")
-rep("scene.fog = new THREE.Fog(P.horizon, 70, 260);", "scene.fog = new THREE.Fog(P.horizon, 90, 430);")
+rep("scene.fog = new THREE.Fog(P.horizon, 70, 260);", "scene.fog = new THREE.Fog(P.horizon, 85, 340);")
 # Town module runs right before the bake; the bake becomes a grid bake so far chunks get culled.
+# GAME-81: baked town chunks (vertex-colour materials) follow the look switch too.
+rep("if(o.isMesh && o.userData.c !== undefined) o.material = getMat(o.userData.c, mode); });",
+    "if(o.isMesh && o.userData.c !== undefined) o.material = getMat(o.userData.c, mode); else if(o.isMesh && o.userData.vc !== undefined) o.material = vcMat(o.userData.vc, mode); });")
 rep('\nbake(city);\n', '\n' + TOWN_JS + '\nTOWN.build();\nbakeGrid(city, 64);\n')
 i = s.index("\n", s.index("vagrant({x:21.8,z:9.3,ry:-2.4,"))
 s = s[:i] + "\nTOWN.afterPeople();" + s[i:]

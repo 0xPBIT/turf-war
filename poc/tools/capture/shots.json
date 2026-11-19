@@ -218,6 +218,96 @@
    ],
    "setup": "if (typeof CARDMG !== 'undefined') { const g = CAR_GROUPS.find(g => Math.abs(g.position.x - 13.3) < 1 && Math.abs(g.position.z + 11.6) < 1); CARDMG.applyAll(g, { dents: [[0.3,0.93,1.5,0,1,0,0.38],[-0.88,0.7,0.3,-1,0,0,0.32],[-0.88,0.62,-1.2,-1,0,0,0.26],[0.4,0.6,2.25,0,0,1,0.3],[-0.2,1.4,-0.3,0,1,0,0.36]], glass: { front: 1, left: 2 } }); }",
    "note": "the same parked car from its left side (GAME-83 car damage)"
+  },
+  "town-overview": {
+   "cam": [
+    -130,
+    150,
+    -60,
+    -1.95,
+    -0.72
+   ],
+   "note": "the whole Puddlewick town from high over the north-east (GAME-81)"
+  },
+  "downtown-main": {
+   "cam": [
+    -20,
+    1.6,
+    -3,
+    1.5708,
+    0.03
+   ],
+   "note": "Main St downtown, looking west from the sidewalk (GAME-81)"
+  },
+  "downtown-aerial": {
+   "cam": [
+    -95,
+    45,
+    -25,
+    -2.245,
+    -0.61
+   ],
+   "note": "downtown, Town Hall plaza and the cinema from above (GAME-81)"
+  },
+  "suburbs-aerial": {
+   "cam": [
+    150,
+    55,
+    10,
+    2.316,
+    -0.556
+   ],
+   "note": "Maple Row, Birch Ln and Bluebell Ct (GAME-81)"
+  },
+  "school-campus": {
+   "cam": [
+    -20,
+    45,
+    -75,
+    0.86,
+    -0.6
+   ],
+   "note": "Sunnyside School campus, track and bus loop (GAME-81)"
+  },
+  "rail-yard": {
+   "cam": [
+    150,
+    30,
+    -150,
+    2.356,
+    -0.49
+   ],
+   "note": "scrapyard, Fizzy Creek and the water tower (GAME-81)"
+  },
+  "industry": {
+   "cam": [
+    60,
+    40,
+    -60,
+    -0.629,
+    -0.53
+   ],
+   "note": "Bottle Depot, Fizzy Co. bottling plant, container stacks (GAME-81)"
+  },
+  "puddle-park": {
+   "cam": [
+    -20,
+    30,
+    95,
+    2.336,
+    -0.69
+   ],
+   "note": "Puddle Park pond, gazebo and playground (GAME-81)"
+  },
+  "skyway-under": {
+   "cam": [
+    24,
+    1.6,
+    40,
+    0,
+    0.04
+   ],
+   "note": "under the Route 9 Skyway, north of Main St (GAME-81)"
   }
  }
 }
