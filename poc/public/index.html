@@ -2645,6 +2645,8 @@ const NET = (() => {
     const d = dyn.splice(n, 1)[0]; world.removeBody(d.b); d.m.position.set(0, 0, 0);
     return d.m;
   }
+  // Stable small number per id, for picking item looks (was dropped in the GAME-93 merge; items crashed spawn).
+  function hash(str) { let h = 7; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
   function spawn(e) {
     if (ents.has(e.id)) despawn(e.id);
     if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
