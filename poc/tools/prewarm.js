@@ -8,6 +8,10 @@
   const st = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: stainTex, transparent: true, depthWrite: false })); g.add(st);
   for (const [map, blending] of [[flameTex, THREE.AdditiveBlending], [smokeTex, THREE.NormalBlending]])
     g.add(new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, blending })));
+  // Hydrant water (GAME-94): spray points and the puddle decal.
+  const pt = new THREE.BufferGeometry(); pt.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+  for (const m of HYD.materials) g.add(m.isPointsMaterial ? new THREE.Points(pt, m) : new THREE.Mesh(geo, m));
+  g.add(ITEMS.mesh('wrench'));
   const b = bottleMesh(); b.traverse(o => { if (o.isMesh) o.castShadow = true; }); g.add(b);
   // A speck in front of the camera, so the first real frames draw it through every pass.
   g.scale.setScalar(.002); camera.updateMatrixWorld();

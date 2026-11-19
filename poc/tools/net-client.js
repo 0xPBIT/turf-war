@@ -4,7 +4,7 @@
 // smoothly interpolates everyone and everything else.
 const NET = (() => {
   const MAPP = fetch('/town.json').then(r => r.json());
-  let MAP = null; MAPP.then(m => { MAP = m; });
+  let MAP = null; MAPP.then(m => { MAP = m; HYD.init(m); });
   const el = id => document.getElementById(id);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const money = n => '$' + Math.round(n).toLocaleString('en-US');
@@ -106,9 +106,13 @@ const NET = (() => {
   function stepRemoteAnim(v, dt) {
     const a = v.ranim; if (!a) return;
     a.t += dt; const k = Math.min(1, a.t / a.dur), g = v.model.g;
-    if (a.kind === 'throw') { g.rotation.x = -bump(k, 0, .35) * .25 + bump(k, .35, .7) * .3; if (v.heldObj) v.heldObj.position.y = .64 + bump(k, 0, .35) * .9; }
+    if (a.kind === 'wrench') {                          // bend over the hydrant and crank the wrench round (GAME-94)
+      g.rotation.x = bump(k, 0, .15) * .5;
+      if (v.heldObj) { v.heldObj.position.y = .64 - bump(k, 0, .15) * .15; v.heldObj.rotation.z = -Math.abs(Math.sin(a.t * 9)) * 1.1 * bump(k, 0, .12); }
+    }
+    else if (a.kind === 'throw') { g.rotation.x = -bump(k, 0, .35) * .25 + bump(k, .35, .7) * .3; if (v.heldObj) v.heldObj.position.y = .64 + bump(k, 0, .35) * .9; }
     else { g.rotation.x = bump(k, 0, a.kind === 'dig' ? .2 : .4) * (a.kind === 'dig' ? .45 : .8); if (a.kind === 'dig') g.rotation.z = Math.sin(a.t * 16) * .05 * bump(k, 0, .2); }
-    if (k >= 1) { v.ranim = null; g.rotation.x = 0; if (v.heldObj) v.heldObj.position.y = .64; }
+    if (k >= 1) { v.ranim = null; g.rotation.x = 0; if (v.heldObj) { v.heldObj.position.y = .64; v.heldObj.rotation.z = 0; } }
   }
   function setRemoteHeld(v, type) {
     if (v.heldObj) { v.model.g.remove(v.heldObj); v.heldObj = null; }
@@ -118,13 +122,14 @@ const NET = (() => {
   // Interaction animations: 'reach' bends down to grab junk, 'dig' rummages in a bin,
   // 'throw' winds up and lets go. They layer on top of the look test's bob and kick.
   let anim = null;                                   // { kind, t, dur }
-  const ANIM_DUR = { reach: .5, dig: .9, throw: .32 };
+  const ANIM_DUR = { reach: .5, dig: .9, throw: .32, wrench: 1.0 };
   function playAnim(kind) { anim = { kind, t: 0, dur: ANIM_DUR[kind] }; }
   const ease = x => x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x);
   const bump = (x, a, b) => ease((x - a) / (b - a)) * (1 - ease((x - b) / (1 - b + 1e-6)));
   const handDrop = () => (1 - Math.max(raise, anim && anim.kind !== 'throw' ? 1 : 0)) * .32;
   const heldVisible = kick => { heldSlot.visible = kick < .6 && !(anim && anim.kind === 'reach' && anim.t / anim.dur < .45); handG.visible = raise > .02 || !!anim; };
   function vmAnim(dt) {
+    vm.rotation.z = 0;                                  // the look test never resets roll; animations below add to it
     if (!anim) return;
     anim.t += dt; const k = anim.t / anim.dur;
     if (k >= 1) { anim = null; return; }
@@ -138,6 +143,15 @@ const NET = (() => {
       camera.rotation.x -= lean * .3; camera.position.y -= lean * .08;
       vm.position.z -= lean * .14; vm.position.y += lean * .02;
       vm.position.x += Math.sin(anim.t * 22) * .03 * lean; vm.rotation.z += Math.sin(anim.t * 17) * .3 * lean; vm.rotation.x += lean * .5;
+    } else if (anim.kind === 'wrench') {              // crouch at the hydrant, set the wrench on the nut, three hard cranks (GAME-94)
+      const down = bump(k, 0, .14);
+      camera.rotation.x -= down * .38; camera.position.y -= down * .22;
+      vm.position.z -= down * .1; vm.position.y -= down * .03; vm.rotation.x += down * .35;
+      const u = Math.max(0, Math.min(1, (k - .12) / .76)) * 3, ph = u % 1;                       // 3 ratchet strokes
+      const stroke = u >= 3 ? 0 : ph < .7 ? ease(ph / .7) : 1 - ease((ph - .7) / .3);           // slow heave, quick return
+      vm.rotation.z += stroke * 1.15 * down; vm.position.x -= stroke * .06 * down;
+      camera.rotation.z -= stroke * .025 * down;
+      if (ph < .7 && u < 3) camera.position.y += Math.sin(ph / .7 * Math.PI) * .012;            // strain on each heave
     } else if (anim.kind === 'throw') {               // wind back over the shoulder, then snap forward
       const back = bump(k, 0, .35);
       vm.position.y += back * .1; vm.position.z += back * .08; vm.rotation.x -= back * -.9;
@@ -200,7 +214,8 @@ const NET = (() => {
   function beforeStep(dt, mx, mz) {
     const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
-    if (!haveAck) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us
+    if (!haveAck) { player.velocity.x = player.velocity.z = 0; return; }   // stand still until the server places us
+    const w = HYD.push(); player.velocity.x += w.x; player.velocity.z += w.z;   // hydrant jets shove you, same as on the server
   }
   function afterStep(dt) {
     // Blend in any correction over a few frames so it never reads as a snap.
@@ -294,11 +309,18 @@ const NET = (() => {
     else if (m.kind === 'pocket') { if (m.id === me) feed(`You flip the lid and dig around... found <b>${esc(m.name)}</b>. Pocketed.`); }
     else if (m.kind === 'thud') { const p = new THREE.Vector3(...m.at); dust(p, m.item === 'brick' || m.item === 'rock' ? 3 : 1, 0xd8d2c4); }
     else if (m.kind === 'rummage') { const p = new THREE.Vector3(m.at[0], 1.9, m.at[2]); dust(p, 4, 0xb9b09a); if (m.by !== me) { remoteAnim(m.by, 'dig'); const v = ents.get(m.by); if (v && v.obj) popText('*rummage*', [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z], 'say'); } }
+    else if (m.kind === 'wrench') {                    // GAME-94: someone cranks a hydrant
+      const f = fixtures.get(m.hyd); if (f) HYD.clank(f.pos);
+      if (m.id === me) { if (!anim || anim.kind !== 'wrench') playAnim('wrench'); const open = meta && meta.objects[m.hyd]?.water; feed(open ? 'You crank the valve back shut.' : 'You fit the wrench on the valve nut and heave...'); }
+      else remoteAnim(m.id, 'wrench');
+    }
+    else if (m.kind === 'douse') HYD.douse(fixtures.get(m.id), m.at);
     else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
   function onMeta(m) {
     meta = m; damage = m.town;
+    HYD.onMeta(m, fixtures);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
@@ -316,10 +338,12 @@ const NET = (() => {
   // ---------- per-frame ----------
   const cur = new THREE.Vector3();
   function frame(dt, t) {
+    HYD.frame(dt);
     const rt = serverNow() - INTERP_MS, showTags = SET.tags();
     raise += ((myHeld ? 1 : 0) - raise) * (1 - Math.exp(-dt * 12));
     if (itemTarget && itemTarget.obj) itemTarget.obj.scale.setScalar(1);
     itemTarget = findItemTarget();
+    if (itemTarget && myHeld === 'wrench' && nearestAction()?.type === 'hydrant') itemTarget = null;   // wrench in hand at a hydrant: E cranks, not swaps
     if (itemTarget) itemTarget.obj.scale.setScalar(1 + .12 * (.5 + .5 * Math.sin(t * 8)));
     for (const v of ents.values()) {
       if (!v.obj) continue;
@@ -352,6 +376,11 @@ const NET = (() => {
   // ---------- actions ----------
   function nearestAction() {
     if (!MAP) return null; let best = null, bd = 9;
+    if (myHeld === 'wrench') for (const f of fixtures.values()) {   // holding a wrench, the hydrant wins (GAME-94)
+      if (f.type !== 'hydrant') continue;
+      const d = (f.pos[0] - player.position.x) ** 2 + (f.pos[2] - player.position.z) ** 2; if (d < bd) { bd = d; best = f; }
+    }
+    if (best) return best;
     for (const f of fixtures.values()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
@@ -367,6 +396,10 @@ const NET = (() => {
     else {
       const f = nearestAction();
       if (f && (f.type === 'dumpster' || f.type === 'pile')) html = `Dig through the ${f.type === 'pile' ? 'trash' : 'dumpster'} <kbd>${keyLabel('act')}</kbd> &nbsp;Light it <kbd>${keyLabel('light')}</kbd>`;
+      else if (f && f.type === 'hydrant') {
+        const open = meta && meta.objects[f.id]?.water;
+        html = myHeld === 'wrench' ? `${open ? 'Crank the hydrant shut' : 'Crank open the fire hydrant'} <kbd>${keyLabel('act')}</kbd>` : open ? '' : 'Fire hydrant. The valve needs a <b>wrench</b>';
+      }
       else if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel('act')}</kbd>`;
     }
     btn.hidden = !html;
@@ -379,6 +412,7 @@ const NET = (() => {
     if (itemTarget) { send({ t: 'pickup', id: itemTarget.id }); playAnim('reach'); return; }
     const f = nearestAction(); send({ t: 'act' });
     if (f && (f.type === 'dumpster' || f.type === 'pile')) playAnim('dig');
+    if (f && f.type === 'hydrant' && myHeld === 'wrench') playAnim('wrench');
   };
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);

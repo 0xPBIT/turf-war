@@ -18,6 +18,7 @@ HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
 ITEMS = (HERE / 'items-client.js').read_text()
+HYDRANTS = (HERE / 'hydrant-client.js').read_text()
 
 s = SRC.read_text()
 
@@ -95,7 +96,7 @@ rep("if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) w
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + ITEMS + '\n' + NET + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + ITEMS + '\n' + HYDRANTS + '\n' + NET + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

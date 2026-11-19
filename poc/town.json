@@ -615,7 +615,9 @@
    "cyl": [
     0.17,
     0.7
-   ]
+   ],
+   "tag": "hydrant",
+   "dir": 1.5708
   },
   {
    "p": [
@@ -1743,6 +1745,13 @@
    "verb": "Knocked a cone",
    "cost": 40,
    "repairSec": 5
+  },
+  "hydrant": {
+   "verb": "Cracked open a fire hydrant",
+   "cost": 250,
+   "repairSec": 90,
+   "gushSec": 45,
+   "flowCost": 12
   }
  },
  "traffic": {
@@ -1790,6 +1799,44 @@
     "hx": 3.5,
     "hz": 3.5,
     "control": "stop"
+   }
+  ]
+ },
+ "hydrants": [
+  {
+   "p": [
+    19.0,
+    3.85
+   ],
+   "dir": 1.5708
+  },
+  {
+   "p": [
+    -7.85,
+    -12.0
+   ],
+   "dir": -1.5708
+  }
+ ],
+ "items": {
+  "spots": [
+   {
+    "p": [
+     22.6,
+     7.6
+    ],
+    "types": [
+     "wrench"
+    ]
+   },
+   {
+    "p": [
+     -0.4,
+     -4.4
+    ],
+    "types": [
+     "wrench"
+    ]
    }
   ]
  }

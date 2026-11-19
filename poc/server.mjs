@@ -88,6 +88,7 @@ function describe(e) {
   if (e.color) d.color = e.color;
   if (e.index !== undefined) d.index = e.index;
   if (e.spec) { d.s = e.spec.s; d.hex = e.spec.hex; }
+  if (e.dir !== undefined) d.dir = e.dir;
   return d;
 }
 
@@ -99,7 +100,13 @@ MAP.colliders.forEach((c, i) => {
   if (!c.tag || c.tag === 'npc') return;
   const n = fixtureCount[c.tag] = (fixtureCount[c.tag] || 0) + 1;
   const id = c.tag === 'pile' ? 'pile:' + c.pile : `f:${c.tag}${n}`;
-  addEntity({ id, kind: 'fixture', type: c.tag, collider, fixedPos: c.p, index: c.pile, state: {} });
+  addEntity({ id, kind: 'fixture', type: c.tag, collider, fixedPos: c.p, index: c.pile, dir: c.dir, state: {} });
+});
+// Extra fire hydrants (GAME-94): the client builds their models from the same list.
+(MAP.hydrants || []).forEach((h, i) => {
+  const p = [h.p[0], 0.35, h.p[1]];
+  const collider = colliderFor({ p, cyl: [0.17, 0.7] });
+  addEntity({ id: 'f:hydrantx' + (i + 1), kind: 'fixture', type: 'hydrant', collider, fixedPos: p, dir: h.dir || 0, state: {} });
 });
 for (const w of MAP.windows) {
   const collider = colliderFor({ p: w.p, q: w.q, box: w.half });
@@ -239,8 +246,11 @@ function interact(s, light) {
   const now = Date.now();
   if (now - (s.lastAct || 0) < 600) return;
   s.lastAct = now;
-  const target = nearest(e, 3, o => o.kind === 'fixture' && ACTIONS[o.type] && !HIT_ONLY.has(o.type) && (!light || o.type === 'pile' || o.type === 'dumpster'));
+  // Holding a wrench, a hydrant in reach wins over whatever else is nearer (GAME-94).
+  const target = (!light && p.held === 'wrench' && nearest(e, 3, o => o.type === 'hydrant'))
+    || nearest(e, 3, o => o.kind === 'fixture' && ACTIONS[o.type] && !HIT_ONLY.has(o.type) && (!light || o.type === 'pile' || o.type === 'dumpster'));
   if (!target) return;
+  if (target.type === 'hydrant') return hydrantAct(s, target, now);
   if ((target.type === 'dumpster' || target.type === 'pile') && !light) return rummage(s, target, now);
   const a = ACTIONS[target.type];
   const busyUntil = target.state.busyUntil || 0;
@@ -383,7 +393,7 @@ function onItemHit(it, other) {
     if (!T.breaks) addDamage(p, ITEM_RULES.pelt, posOf(other), other.type === 'car' ? `Pelted a car with a ${T.name}` : `Bonked a window with a ${T.name}`);
     else if (now >= (other.state.brokenUntil || 0)) {
       other.state.brokenUntil = now + a.repairSec * 1000;
-      addDamage(p, other.value || a.cost, posOf(other), other.type === 'car' && it.type !== 'bottle' ? `${T.name === 'rock' ? 'Rocked' : 'Bricked'} a windshield` : a.verb);
+      addDamage(p, other.value || a.cost, posOf(other), other.type === 'car' && it.type !== 'bottle' ? `${T.hitVerb || (T.name === 'rock' ? 'Rocked' : 'Bricked')} a windshield` : a.verb);
       broadcast({ t: 'fx', kind: 'break', id: other.id, at, v });
     } else addDamage(p, 15, at, 'More glass');
   } else if (other && other.type === 'crate' && hard && T.mass >= 0.4) {
@@ -400,6 +410,76 @@ function onItemHit(it, other) {
     broadcast({ t: 'fx', kind: 'smash', at, v });
     setTimeout(() => removeEntity(it.id), 30);
   } else if (hard) broadcast({ t: 'fx', kind: 'thud', at, item: it.type, v });
+}
+
+// ---------- fire hydrants (GAME-94) ----------
+// Find a wrench, crank a hydrant open and it gushes for a while: the jet shoves loose junk,
+// crates, sleepers and vagrants along it, puts out any fire it hits, and every second of
+// wasted water goes on the town's bill. Same water for everyone: the state rides in meta.
+const HYD = { len: 6.5, radius: 0.9, playerPush: 5.2, ...(ACTIONS.hydrant || {}) };
+const hydrantOpen = (st, now) => (st.openAt || 0) <= now && (st.openUntil || 0) > now;
+const jetOf = h => ({ ox: h.fixedPos[0] + Math.sin(h.dir || 0) * 0.26, oz: h.fixedPos[2] + Math.cos(h.dir || 0) * 0.26, dx: Math.sin(h.dir || 0), dz: Math.cos(h.dir || 0) });
+const hydrants = [...entities.values()].filter(e => e.type === 'hydrant');
+// Where a point sits in a jet: k = 1 at the nozzle fading to 0 at the far end, or null if outside.
+function inJet(j, x, z, pad = 0) {
+  const rx = x - j.ox, rz = z - j.oz, along = rx * j.dx + rz * j.dz;
+  if (along < -0.2 || along > HYD.len + pad) return null;
+  const lat = Math.abs(rx * j.dz - rz * j.dx);
+  if (lat > HYD.radius + pad + along * 0.08) return null;
+  return Math.max(0, 1 - Math.max(0, along) / HYD.len);
+}
+function waterPush(x, z) {
+  const now = Date.now(), out = { x: 0, z: 0 };
+  for (const h of hydrants) {
+    if (!hydrantOpen(h.state, now)) continue;
+    const j = jetOf(h), k = inJet(j, x, z);
+    if (k !== null) { const v = HYD.playerPush * (0.35 + 0.65 * k); out.x += j.dx * v; out.z += j.dz * v; }
+  }
+  return out;
+}
+function hydrantAct(s, h, now) {
+  const e = s.entity, p = e.player, st = h.state;
+  const say = text => broadcast({ t: 'fx', kind: 'say', id: e.id, text });
+  if (p.held !== 'wrench') return say(hydrantOpen(st, now) ? "It's gushing. You'd need a wrench to shut it" : "The valve nut won't budge. Need a wrench");
+  if ((st.openAt || 0) > now) return;                                   // someone is already cranking it
+  if (hydrantOpen(st, now)) {                                           // crank it shut again
+    broadcast({ t: 'fx', kind: 'wrench', id: e.id, hyd: h.id });
+    setTimeout(() => { st.openUntil = Date.now(); st.wetUntil = Date.now() + 40000; }, 900);
+    return;
+  }
+  if ((st.cappedUntil || 0) > now) return say('The water dept. just capped this one. Give it a minute');
+  broadcast({ t: 'fx', kind: 'wrench', id: e.id, hyd: h.id });
+  // The water comes when the crank animation finishes.
+  st.openAt = now + 900; st.openUntil = st.openAt + HYD.gushSec * 1000; st.by = p.id; st.flowAcc = 0;
+  st.cappedUntil = st.openUntil + HYD.repairSec * 1000;
+  setTimeout(() => { if (st.by === p.id) addDamage(p, HYD.cost, h.fixedPos, HYD.verb); }, 900);
+}
+function stepHydrants(now) {
+  for (const h of hydrants) {
+    const st = h.state;
+    if (!hydrantOpen(st, now)) continue;
+    st.wetUntil = st.openUntil + 40000;                                 // the puddle outlives the gush
+    const j = jetOf(h);
+    // The bill: wasted water, billed to whoever opened it.
+    st.flowAcc = (st.flowAcc || 0) + dt;
+    if (st.flowAcc >= 2) { st.flowAcc -= 2; const p = save.players[st.by]; if (p) addDamage(p, HYD.flowCost * 2, [j.ox + j.dx * 2, 0.5, j.oz + j.dz * 2], 'Water everywhere'); }
+    for (const o of entities.values()) {
+      // Loose things get shoved down the jet and lifted a little; heavy things barely slide.
+      if (o.body && o.body.isDynamic()) {
+        const t = o.body.translation(); if (t.y > 2.2) continue;
+        const k = inJet(j, t.x, t.z); if (k === null) continue;
+        const m = o.body.mass(), accel = Math.min(28, 160 / Math.max(m, 0.5)) * (0.3 + 0.7 * k);
+        o.body.applyImpulse({ x: j.dx * accel * m * dt, y: (t.y < 0.6 ? 6 : 0) * Math.min(m, 3) * k * dt, z: j.dz * accel * m * dt }, true);
+      }
+      // Fire goes out where the water lands.
+      if ((o.state?.fireUntil || 0) > now) {
+        const [x, , z] = posOf(o); if (inJet(j, x, z, 0.8) === null) continue;
+        o.state.fireUntil = now; o.state.busyUntil = Math.max(o.state.busyUntil || 0, now + 5000);
+        broadcast({ t: 'fx', kind: 'douse', id: o.id, at: posOf(o) });
+        const p = save.players[st.by]; if (p) broadcast({ t: 'fx', kind: 'say', id: 'p:' + p.id, text: 'Fire out. Soggy ash everywhere' });
+      }
+    }
+  }
 }
 
 // Grabbing joins your hands to the object with a ball joint the server owns.
@@ -586,7 +666,8 @@ function stepPlayers() {
       if (g && g.mass) speed *= Math.max(0.25, Math.min(1, 60 / g.mass)); // heavy things slow you down
     }
     e.vy += GRAVITY * step;
-    const desired = { x: mx * speed * step, y: e.vy * step, z: mz * speed * step };
+    const push = waterPush(t.x, t.z);                               // standing in a hydrant's jet shoves you along it
+    const desired = { x: (mx * speed + push.x) * step, y: e.vy * step, z: (mz * speed + push.z) * step };
     controller.computeColliderMovement(e.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC | RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC);
     const mv = controller.computedMovement();
     const grounded = controller.computedGrounded();
@@ -613,6 +694,7 @@ function physicsTick() {
   const now = Date.now();
   for (const e of entities.values()) if (e.live && now > e.live.until) endLive(e);
   if (tick % 30 === 0) stepItems(now);
+  stepHydrants(now);
   tick++;
   if (tick % (PHYSICS_HZ / SNAPSHOT_HZ) === 0) sendSnapshot(false);
   if (tick % (PHYSICS_HZ / META_HZ) === 0) sendMeta();
@@ -653,6 +735,7 @@ function metaPayload() {
     else if ((st.burntUntil || 0) > now) o.burnt = 1;
     if ((st.brokenUntil || 0) > now) o.broken = 1;
     if (st.braking) o.brake = 1;
+    if (e.type === 'hydrant') { if (hydrantOpen(st, now)) o.water = 1; if ((st.wetUntil || 0) > now) o.wet = 1; }
     if (Object.keys(o).length) objects[e.id] = o;
   }
   const owners = {};
