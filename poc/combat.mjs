@@ -126,7 +126,7 @@ export function createCombat(ctx) {
     if (!canFight(victim)) return false;
     const speed = Math.hypot(vel.x, vel.y, vel.z);
     if (speed < 3) return false;
-    const amount = Math.max(8, Math.min(70, mass * speed * 4));
+    const amount = Math.max(12, Math.min(70, mass * speed * 5));
     const hs = Math.hypot(vel.x, vel.z) || 1, kick = Math.min(7, hs * Math.min(1, mass * 0.6));
     hurt(victim, amount, { by: thrower, cause: 'item', push: { x: vel.x / hs * kick, y: 0, z: vel.z / hs * kick } });
     return true;

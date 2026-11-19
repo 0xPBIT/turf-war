@@ -156,7 +156,11 @@ const FIGHT = (() => {
     F.fall = Math.min(1, Math.max(0, F.fall + (v.down ? dt * 3.2 : -dt * 1.6)));
     const guard = v.angry || now() < F.guardUntil;
     const k = F.punch > 0 ? Math.sin((1 - F.punch) * Math.PI) : 0;
-    if (m.arms) {
+    if (m.sign) m.sign.visible = !guard && !v.down && F.fall === 0;
+    if (F.stars) F.stars.visible = !!v.down;
+    // Not fighting: leave the walk / grab arm animation alone.
+    if (!guard && !v.down && F.punch === 0 && F.hurt === 0 && F.fall === 0) return;
+    if (m.arms && m.arms.length === 2) {
       const [L, R] = m.arms, base = guard ? -.95 : 0;
       L.rotation.set(base, 0, guard ? .32 : 0); R.rotation.set(base, 0, guard ? -.32 : 0);
       if (F.punch > 0) {
@@ -165,7 +169,6 @@ const FIGHT = (() => {
       }
       if (v.down) { L.rotation.set(-2.6, 0, .5); R.rotation.set(-2.4, 0, -.6); }   // sprawled
     }
-    if (m.sign) m.sign.visible = !guard && !v.down && F.fall === 0;
     const twist = F.punch > 0 && F.hand !== 'T' ? (F.hand === 'R' ? -1 : 1) * .35 * k : 0;
     g.rotation.y = twist;
     g.rotation.x = (guard ? .1 : 0) + .15 * k - .4 * F.hurt - Math.PI / 2 * ease(F.fall);
