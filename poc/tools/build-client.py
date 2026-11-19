@@ -16,6 +16,7 @@ OUT = HERE.parent / 'public' / 'index.html'
 NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
+GLASS = (HERE / 'glass.js').read_text()
 FIGHTJS = (HERE / 'fight-client.js').read_text()
 SKY = (HERE / 'sky.js').read_text()
 PROPS = (HERE / 'props.js').read_text()
@@ -175,7 +176,7 @@ rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAc
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

@@ -29,13 +29,14 @@ const COPPER = (() => {
   function snip(p, k) { const [a, b] = p.userData.jaws; a.rotation.z = -k * .22; b.rotation.z = k * .22; }
 
   // A few metres of wire spilling out of the hand hole and across the sidewalk, cut ends bare.
-  function wireSpill(parent) {
+  function wireSpill(parent, G) {   // G: height of the ground the wire lands on (sidewalk slab = .16)
     // Out of the hole, slumped down the pole, then snaking along the sidewalk both ways.
     const runs = [
       [0x2A2A33, [[0, .8, -.11], [.03, .7, -.19], [.06, .3, -.2], [.12, .03, -.28], [.5, .03, -.42], [.85, .03, -.25], [1.3, .03, -.38]]],
       [0xEDEDED, [[-.01, .79, -.11], [-.03, .68, -.2], [-.07, .25, -.22], [-.16, .03, -.32], [-.55, .03, -.5], [-.9, .03, -.3], [-1.25, .03, -.45]]],
       [0x3FA34D, [[.01, .77, -.11], [.02, .6, -.18], [.0, .15, -.24], [.05, .03, -.42], [-.2, .03, -.75]]],
     ];
+    for (const run of runs) run[1] = run[1].map(([x, y, z]) => [x, y < .1 ? y + G : y, z]);
     for (const [hex, pts] of runs) {
       tube(pts, .017, hex, parent, 28);
       const end = pts[pts.length - 1], prev = pts[pts.length - 2];
@@ -44,9 +45,9 @@ const COPPER = (() => {
     }
     // shredded insulation where the copper got skinned
     let q = 11; const r = () => (q = (q * 16807) % 2147483647) / 2147483647;
-    for (let i = 0; i < 14; i++) put(B(.06 + r() * .07, .01, .016), i % 2 ? 0x2A2A33 : 0xEDEDED, parent, (r() - .5) * 2.2, .015, -.2 - r() * .8, { ry: r() * 3 });
+    for (let i = 0; i < 14; i++) put(B(.06 + r() * .07, .01, .016), i % 2 ? 0x2A2A33 : 0xEDEDED, parent, (r() - .5) * 2.2, G + .012, -.2 - r() * .8, { ry: r() * 3 });
     // an empty skin of insulation coiled where they peeled it
-    for (let k = 0; k < 3; k++) put(new THREE.TorusGeometry(.14 - k * .015, .012, 6, 18), k % 2 ? 0x2A2A33 : 0xEDEDED, parent, .55 + k * .03, .02 + k * .012, -.85, { rx: Math.PI / 2 });
+    for (let k = 0; k < 3; k++) put(new THREE.TorusGeometry(.14 - k * .015, .012, 6, 18), k % 2 ? 0x2A2A33 : 0xEDEDED, parent, .55 + k * .03, G + .015 + k * .012, -.85, { rx: Math.PI / 2 });
   }
 
   function buildLamp(l) {
@@ -63,7 +64,7 @@ const COPPER = (() => {
     put(B(.075, .18, .012), INK, open, 0, .78, -.108);
     const hinge = new THREE.Group(); hinge.position.set(.045, .68, -.116); open.add(hinge);
     put(B(.1, .22, .016, .004), POLE, hinge, -.03, .1, -.02, { rz: 2.5, ry: .5 });
-    wireSpill(open);
+    wireSpill(open, l.gy ?? .16);
     lamps.set(l.id, { g, lit, glow, open, stripped: false, base: new THREE.Vector3(l.p[0], .78, l.p[2]).add(new THREE.Vector3(0, 0, -.14).applyAxisAngle(_up, l.ry || 0)) });
   }
   const _up = new THREE.Vector3(0, 1, 0);
