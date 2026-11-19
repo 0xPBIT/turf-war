@@ -16,8 +16,6 @@ const NET = (() => {
   for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
 
   // ---------- entities ----------
-  // Stable small number from an id (item mesh variety). GAME-93 moved the old helper into characters.js.
-  const hash = str => { let h = 7; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
   const fixtures = new Map();        // fixture id -> desc
   const fixtureCars = new Map();     // parked car fixture id -> its model group (car damage)
