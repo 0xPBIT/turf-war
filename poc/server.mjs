@@ -232,6 +232,15 @@ function nearest(e, radius, filter) {
 }
 
 const HIT_ONLY = new Set(['window', 'car', 'crate', 'cone']);
+
+// ---------- player animations (GAME-92) ----------
+// playAnim(entity, clip, extra) shows a clip from tools/anim.js on that vagrant for everyone.
+// The player's own client plays it in first person right away and skips the echo.
+function playAnim(e, clip, extra) { broadcast({ t: 'fx', kind: 'anim', id: e.id, clip, ...(extra || {}) }); }
+// Which clip each E interaction plays (a map action can override it with "anim").
+const ACTION_ANIM = { pile: 'light', dumpster: 'toss', stop_sign: 'panhandle', fire_can: 'warm', couch: 'sit' };
+// Where you sit on a fixture: its centre, facing the way the look test's couch faces.
+const SEAT_FACE = { couch: -Math.PI / 2 - 0.3 };
 function interact(s) {
   const e = s.entity, p = e.player;
   const now = Date.now();
@@ -247,6 +256,8 @@ function interact(s) {
   if (target.type === 'pile') target.state.fireUntil = now + 30000;
   if (target.type === 'dumpster') target.state.fireUntil = now + a.repairSec * 1000;
   if (target.type === 'pile' || target.type === 'dumpster') target.state.burntUntil = now + a.repairSec * 1000;
+  const clip = a.anim || ACTION_ANIM[target.type];
+  if (clip) playAnim(e, clip, SEAT_FACE[target.type] !== undefined ? { seat: [target.fixedPos[0], target.fixedPos[2], SEAT_FACE[target.type]] } : undefined);
   if (a.cash) { p.cash = (p.cash || 0) + a.cash; broadcast({ t: 'fx', kind: 'say', id: e.id, text: `Spare change? (+$${a.cash})` }); }
   if (a.hangout) broadcast({ t: 'fx', kind: 'say', id: e.id, text: target.type === 'couch' ? 'comfy' : 'warming up' });
   addDamage(p, a.cost, posOf(target), a.verb);
@@ -267,6 +278,7 @@ function throwBottle(s, dir) {
   const collider = world.createCollider(RAPIER.ColliderDesc.capsule(0.12, 0.07).setMass(0.4)
     .setRestitution(0.2).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
   addEntity({ id: 'b:' + nextBottle++, kind: 'bottle', body, collider, thrower: e.player, born: now, state: {} });
+  playAnim(e, 'throw');
 }
 
 function onBottleHit(bottle, other) {

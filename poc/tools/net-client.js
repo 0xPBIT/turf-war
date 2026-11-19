@@ -33,9 +33,11 @@ const NET = (() => {
   }
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
   function buildVagrant(e) {
-    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e) });
+    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e), rig: true });
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
+    // The beer bottle everyone carries, in the right glove (others see it raised and thrown).
+    if (p.parts) { const b = bottleMesh(); b.position.set(-.07, -.6, .11); b.rotation.x = .15; p.parts.armR.add(b); p.held = b; }
     return p;
   }
   function nameTag(text) {
@@ -211,6 +213,7 @@ const NET = (() => {
     else if (m.kind === 'crate') splinters(m.at, m.s, m.hex, m.v || [0, 0, 0]);
     else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
+    else if (m.kind === 'anim') { if (m.id === me) ANIM.echo(m.clip, m); else ANIM.playOn(ents.get(m.id), m.clip, m); }
     else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
@@ -241,11 +244,10 @@ const NET = (() => {
       if (v.kind === 'vagrant') {
         cur.copy(v.obj.position); v.obj.position.copy(s.p);
         if (s.f !== undefined) v.obj.rotation.y = s.f;
-        const moving = cur.distanceTo(s.p) > dt * .5;
-        v.walk = (v.walk || 0) + (moving ? dt * 9 : 0);
-        v.model.g.position.y = -0.9 + (moving ? Math.abs(Math.sin(v.walk)) * .05 : 0);
-        v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
-        v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
+        // Ground speed, smoothed so interpolation steps don't stutter the walk cycle.
+        const sp = dt > 0 ? Math.hypot(s.p.x - cur.x, s.p.z - cur.z) / dt : 0;
+        v.spd = (v.spd || 0) + (Math.min(sp, 12) - (v.spd || 0)) * (1 - Math.exp(-dt * 8));
+        ANIM.poseVagrant(v, dt, v.spd, t);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
@@ -276,7 +278,15 @@ const NET = (() => {
     const f = nearestAction(); btn.hidden = !f;
     if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
   }
-  const act = () => { if (ws && ws.readyState === 1) ws.send('{"t":"act"}'); };
+  // Same clip names as ACTION_ANIM in server.mjs; played at once so the hand moves on the key press.
+  const ACTION_ANIM = { pile: 'light', dumpster: 'toss', stop_sign: 'panhandle', fire_can: 'warm', couch: 'sit' };
+  let lastAct = 0;
+  const act = () => {
+    if (!ws || ws.readyState !== 1) return;
+    const f = nearestAction(), now = performance.now();
+    if (f && now - lastAct > 600) { lastAct = now; const clip = (MAP.actions[f.type] || {}).anim || ACTION_ANIM[f.type]; if (clip) ANIM.play(clip); }
+    ws.send('{"t":"act"}');
+  };
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   function throwDir(dir) {
@@ -331,6 +341,7 @@ const NET = (() => {
     el('login').addEventListener('pointerdown', e => e.stopPropagation());
     setTimeout(() => el('nameInput').focus(), 50);
   }
-  window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
+  window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs,
+    look(y, p) { yaw = y; pitch = p ?? pitch; }, get yaw() { return yaw; } };   // look() aims the camera for captures and tests
   return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir };
 })();

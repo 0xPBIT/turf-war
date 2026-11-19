@@ -17,6 +17,7 @@ NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
+ANIMJS = (HERE / 'anim.js').read_text()
 
 s = SRC.read_text()
 
@@ -90,9 +91,18 @@ rep("const m=new THREE.Mesh(g,mat); m.castShadow=true;", "const m=new THREE.Mesh
 rep("if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); }",
     "if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); if(o.m.userData.ownGeo) o.m.geometry.dispose(); }")
 
+# Player animation (GAME-92): networked vagrants are split into posable parts, and the
+# first-person hand and camera take offsets from the animation helper (tools/anim.js).
+rep("bake(head); bake(g); head.position.y=1.62; g.add(head);",
+    "bake(head); head.position.y=1.62; let parts=null; if(o.rig) parts=ANIM.rigVagrant(g,head); else bake(g); g.add(head);")
+rep("const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62};", "const p={g,head,parts,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62};")
+rep("heldBottle.visible=handKick<.6;", "heldBottle.visible=handKick<.6; ANIM.applyFP(vm,heldBottle,dt,ml>0);")
+rep("player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()", "player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()+ANIM.camY()")
+rep("camera.rotation.set(pitch,yaw,0,'YXZ');", "camera.rotation.set(pitch+ANIM.camPitch(),yaw,0,'YXZ');")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + NET + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + ANIMJS + '\n' + NET + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
