@@ -171,6 +171,11 @@ function spawnProp(pr, fresh) {
   return addEntity({ id: pr.id, kind: 'prop', type: pr.type, body, collider, mass: cat.mass, cat, spec: pr, unsettled: !saved, state: {} });
 }
 for (const pr of MAP.props) spawnProp(pr);
+// Burnables (GAME-86): trees, bushes and plants you can set on fire with a lighter.
+// The client draws them; ids match its build order ("t:0", "t:1", ...).
+for (const b of MAP.burnables || []) addEntity({ id: b.id, kind: 'fixture', type: b.type, fixedPos: b.p, s: b.s, state: {} });
+// Shops: walk up and buy something (Sunny Mart sells lighters).
+for (const sh of MAP.shops || []) addEntity({ id: sh.id, kind: 'fixture', type: sh.type, fixedPos: sh.p, item: sh.item, price: sh.price, state: {} });
 // Props placed by hand in town.json may float or overlap a little. Let new ones settle
 // once at startup so they are already lying still when the first player arrives.
 (function settleNewProps() {
@@ -308,6 +313,63 @@ function nearest(e, radius, filter) {
   return best;
 }
 
+// ---------- lighters and fire (GAME-86) ----------
+// You need a lighter to set anything on fire. It lives in your pockets as
+// p.items.lighter = { fuel } (shared with the GAME-82 item code), and each fire costs one flick of fuel.
+const BURNABLE = new Set(['pile', 'dumpster', 'tree', 'bush', 'plant']);
+const PLANTS = new Set(['tree', 'bush', 'plant']);
+const LIGHTER_FUEL = 10;
+const fuelOf = p => (p.items && p.items.lighter && p.items.lighter.fuel) || 0;
+function tell(s, text) { if (s.ws.readyState === 1) s.ws.send(JSON.stringify({ t: 'fx', kind: 'say', id: s.entity.id, text })); }
+function sendInv(s) { if (s && s.ws.readyState === 1) s.ws.send(JSON.stringify({ t: 'inv', lighter: fuelOf(s.entity.player) })); }
+function giveLighter(s) {
+  const p = s.entity.player;
+  p.items ||= {};
+  p.items.lighter = { fuel: LIGHTER_FUEL };
+  saveDirty = true;
+  sendInv(s);
+}
+// Shops are fixtures of type 'shop_<item>'; SHOP_ITEMS says how each item lands in your pockets.
+const SHOP_ITEMS = {
+  lighter: { name: 'a lighter', has: p => fuelOf(p) > 3, give: giveLighter },
+};
+function buy(s, shop) {
+  const p = s.entity.player, it = SHOP_ITEMS[shop.item];
+  if (!it) return;
+  if (it.has(p)) return tell(s, `You already have ${it.name}.`);
+  if ((p.cash || 0) < shop.price) return tell(s, `That's $${shop.price}. You have $${p.cash || 0}. Go panhandle.`);
+  p.cash -= shop.price;
+  it.give(s);
+  tell(s, `Bought ${it.name} for $${shop.price}.`);
+}
+// Sets a burnable alight. by = the save.players entry who gets the damage and heat.
+function ignite(target, by, now, spread) {
+  const a = ACTIONS[target.type];
+  target.state.busyUntil = now + a.repairSec * 1000;
+  target.state.fireUntil = now + (a.burnSec || 30) * 1000;
+  target.state.burntUntil = now + a.repairSec * 1000;
+  target.state.litAt = now; target.state.spread = false; target.state.by = by.id;
+  addDamage(by, a.cost, posOf(target), spread ? 'The fire spread' : a.verb);
+}
+// Fire spreads from anything burning to plants close by, a few seconds in.
+function spreadFires() {
+  const now = Date.now();
+  for (const src of entities.values()) {
+    const st = src.state;
+    if (!st || !BURNABLE.has(src.type) || src.type === 'dumpster' || st.spread || (st.fireUntil || 0) < now || now - st.litAt < 7000) continue;
+    st.spread = true;
+    const by = save.players[st.by]; if (!by) continue;
+    const [x, , z] = posOf(src);
+    const reach = src.type === 'tree' ? 4.5 : 3.5;
+    for (const o of entities.values()) {
+      if (o === src || !PLANTS.has(o.type) || now < (o.state.busyUntil || 0)) continue;
+      const [ox, , oz] = posOf(o);
+      if ((ox - x) ** 2 + (oz - z) ** 2 < reach * reach && Math.random() < 0.6) ignite(o, by, now, true);
+    }
+  }
+}
+setInterval(spreadFires, 1000);
+
 const HIT_ONLY = new Set(['window', 'car', 'crate', 'cone']);
 // E does the fixture's main thing (dumpsters: dig for junk); F lights anything that burns.
 function interact(s, light) {
@@ -315,17 +377,22 @@ function interact(s, light) {
   const now = Date.now();
   if (now - (s.lastAct || 0) < 600) return;
   s.lastAct = now;
-  const target = nearest(e, 3, o => (o.kind === 'fixture' || o.kind === 'prop') && ACTIONS[o.type] && !HIT_ONLY.has(o.type) && (!light || o.type === 'pile' || o.type === 'dumpster'));
+  // Skip things already burning or burnt, so a charred tree never hides the trash pile beside it. F only looks at burnables.
+  const target = nearest(e, 3, o => (o.kind === 'fixture' || o.kind === 'prop') && ACTIONS[o.type] && !HIT_ONLY.has(o.type) && now >= ((o.state && o.state.busyUntil) || 0) && (!light || BURNABLE.has(o.type)));
   if (!target) return;
   if ((target.type === 'dumpster' || target.type === 'pile') && !light) return rummage(s, target, now);
   const a = ACTIONS[target.type];
-  const busyUntil = target.state.busyUntil || 0;
-  if (now < busyUntil) return;
+  if (target.type.startsWith('shop_')) return buy(s, target);
+  if (BURNABLE.has(target.type)) {
+    const fuel = fuelOf(p);
+    if (!fuel) return tell(s, 'You need a lighter. Dig through a dumpster or buy one at Sunny Mart.');
+    p.items.lighter.fuel = fuel - 1;
+    if (fuel - 1 <= 0) { p.items.lighter = null; tell(s, 'Your lighter is out of fluid.'); }
+    sendInv(s);
+    broadcast({ t: 'fx', kind: 'flick', id: e.id });
+    return ignite(target, p, now);
+  }
   target.state.busyUntil = now + a.repairSec * 1000;
-  // A trash pile burns for 30 s then sits charred until the town cleans it up.
-  if (target.type === 'pile') target.state.fireUntil = now + 30000;
-  if (target.type === 'dumpster') target.state.fireUntil = now + a.repairSec * 1000;
-  if (target.type === 'pile' || target.type === 'dumpster') target.state.burntUntil = now + a.repairSec * 1000;
   if (a.cash) { p.cash = (p.cash || 0) + a.cash; broadcast({ t: 'fx', kind: 'say', id: e.id, text: `Spare change? (+$${a.cash})` }); }
   if (a.hangout) broadcast({ t: 'fx', kind: 'say', id: e.id, text: target.type === 'couch' ? 'comfy' : 'warming up' });
   addDamage(p, a.cost, posOf(target), a.verb);
@@ -402,11 +469,12 @@ function pickup(s, id) {
 // lighter: { fuel } (lighting fires spends fuel, GAME-86); cigarettes: a count.
 function pocketItem(e, key) {
   const items = e.player.items ||= {};
-  if (key === 'lighter') items.lighter = { fuel: Math.max(10, items.lighter?.fuel || 0) };
+  if (key === 'lighter') items.lighter = { fuel: Math.max(LIGHTER_FUEL, fuelOf(e.player)) };
   else if (key === 'pliers') items.pliers = { uses: 3 };
   else items[key] = (items[key] || 0) + 1;
   saveDirty = true;
   broadcast({ t: 'fx', kind: 'pocket', id: e.id, key, name: POCKET_TYPES[key]?.name || key });
+  if (key === 'lighter') sendInv(sessions.get(e.player.id));
 }
 function rummage(s, dump, now) {
   const e = s.entity, st = dump.state;
@@ -845,6 +913,7 @@ wss.on('connection', ws => {
       ws.send(JSON.stringify({ t: 'welcome', token, you: vagrantId(pid), name: p.name, entities: [...entities.values()].map(describe) }));
       sendSnapshot(true, ws);
       ws.send(JSON.stringify(metaPayload()));
+      sendInv(sessions.get(pid));
       saveDirty = true;
       console.log(`[town] ${p.name} woke up (${sessions.size} online)`);
       return;

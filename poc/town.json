@@ -1824,12 +1824,14 @@
   "pile": {
    "verb": "Light the trash",
    "cost": 400,
-   "repairSec": 75
+   "repairSec": 75,
+   "burnSec": 30
   },
   "dumpster": {
    "verb": "Set the dumpster on fire",
    "cost": 450,
-   "repairSec": 45
+   "repairSec": 45,
+   "burnSec": 45
   },
   "stop_sign": {
    "verb": "Panhandle at the stop sign",
@@ -1867,6 +1869,30 @@
    "verb": "Knocked a cone",
    "cost": 40,
    "repairSec": 5
+  },
+  "tree": {
+   "verb": "Set the tree on fire",
+   "cost": 900,
+   "repairSec": 240,
+   "burnSec": 40
+  },
+  "bush": {
+   "verb": "Torch the bush",
+   "cost": 220,
+   "repairSec": 150,
+   "burnSec": 18
+  },
+  "plant": {
+   "verb": "Torch the plants",
+   "cost": 150,
+   "repairSec": 120,
+   "burnSec": 14
+  },
+  "shop_lighter": {
+   "verb": "Buy a lighter at Sunny Mart ($5)",
+   "cost": 0,
+   "repairSec": 1,
+   "price": 5
   }
  },
  "traffic": {
@@ -1916,5 +1942,260 @@
     "control": "stop"
    }
   ]
- }
+ },
+ "burnables": [
+  {
+   "id": "t:0",
+   "type": "tree",
+   "p": [
+    -4,
+    0,
+    -6.7
+   ],
+   "s": 0.9
+  },
+  {
+   "id": "t:1",
+   "type": "tree",
+   "p": [
+    10.8,
+    0,
+    -6.7
+   ],
+   "s": 1.1
+  },
+  {
+   "id": "t:2",
+   "type": "tree",
+   "p": [
+    -36,
+    0,
+    -7
+   ],
+   "s": 1.3
+  },
+  {
+   "id": "t:3",
+   "type": "tree",
+   "p": [
+    -18,
+    0,
+    -6.6
+   ],
+   "s": 1.0
+  },
+  {
+   "id": "t:4",
+   "type": "tree",
+   "p": [
+    -4,
+    0,
+    6.6
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:5",
+   "type": "tree",
+   "p": [
+    15,
+    0,
+    6.6
+   ],
+   "s": 0.9
+  },
+  {
+   "id": "t:6",
+   "type": "tree",
+   "p": [
+    26,
+    0,
+    -14
+   ],
+   "s": 1.1
+  },
+  {
+   "id": "t:7",
+   "type": "tree",
+   "p": [
+    31,
+    0,
+    -10
+   ],
+   "s": 1.3
+  },
+  {
+   "id": "t:8",
+   "type": "tree",
+   "p": [
+    -36,
+    0,
+    8
+   ],
+   "s": 1.0
+  },
+  {
+   "id": "t:9",
+   "type": "tree",
+   "p": [
+    31,
+    0,
+    14
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:10",
+   "type": "tree",
+   "p": [
+    -6,
+    0,
+    22
+   ],
+   "s": 0.9
+  },
+  {
+   "id": "t:11",
+   "type": "tree",
+   "p": [
+    4,
+    0,
+    26
+   ],
+   "s": 1.1
+  },
+  {
+   "id": "t:12",
+   "type": "tree",
+   "p": [
+    16,
+    0,
+    22
+   ],
+   "s": 1.3
+  },
+  {
+   "id": "t:13",
+   "type": "tree",
+   "p": [
+    -24,
+    0,
+    -18
+   ],
+   "s": 1.0
+  },
+  {
+   "id": "t:14",
+   "type": "tree",
+   "p": [
+    -14,
+    0,
+    18
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:15",
+   "type": "tree",
+   "p": [
+    28,
+    0,
+    22
+   ],
+   "s": 0.9
+  },
+  {
+   "id": "t:16",
+   "type": "bush",
+   "p": [
+    -17,
+    0,
+    -8
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:17",
+   "type": "bush",
+   "p": [
+    -25.5,
+    0,
+    -8
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:18",
+   "type": "bush",
+   "p": [
+    -26,
+    0,
+    8
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:19",
+   "type": "bush",
+   "p": [
+    -17,
+    0,
+    8.2
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:20",
+   "type": "bush",
+   "p": [
+    8.6,
+    0,
+    -6.6
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:21",
+   "type": "bush",
+   "p": [
+    18,
+    0,
+    -6.7
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:22",
+   "type": "bush",
+   "p": [
+    -33.5,
+    0,
+    -8
+   ],
+   "s": 1.2
+  },
+  {
+   "id": "t:23",
+   "type": "bush",
+   "p": [
+    -33.5,
+    0,
+    8
+   ],
+   "s": 1.2
+  }
+ ],
+ "shops": [
+  {
+   "id": "f:shop1",
+   "type": "shop_lighter",
+   "p": [
+    4.2,
+    0,
+    -5.6
+   ],
+   "item": "lighter",
+   "price": 5
+  }
+ ]
 }

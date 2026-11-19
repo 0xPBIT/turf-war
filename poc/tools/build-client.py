@@ -21,6 +21,7 @@ FIGHTJS = (HERE / 'fight-client.js').read_text()
 SKY = (HERE / 'sky.js').read_text()
 PROPS = (HERE / 'props.js').read_text()
 MINI = (HERE / 'minimap.js').read_text()
+FIRE = (HERE / 'fire-client.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
 
 s = SRC.read_text()
@@ -146,9 +147,21 @@ rep("""  if(o.sign){
 rep("const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62};", "const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62,sign:o._sign||null};")
 rep("  camera.rotation.set(pitch,yaw,0,'YXZ');", "  camera.rotation.set(pitch,yaw,0,'YXZ');\n  FIGHT.afterCamera(dt, t);")
 
+# Burnable trees and bushes (GAME-86): each one stays out of the city bake as its own small
+# baked group in burnGroup, listed in BURN with the id the server uses ("t:N", build order).
+rep("function lumpy(rad,sd){", "const burnGroup=new THREE.Group(); scene.add(burnGroup); const BURN=[];\nfunction lumpy(rad,sd){")
+rep("  const g=grp(city,x,0,z,R()*6);\n  put(CYL(.12*s,.22*s,2.2*s,8),'tx:pole',g,0,1.1*s,0);",
+    "  const g=grp(burnGroup,0,0,0), ry0=R()*6;\n  put(CYL(.12*s,.22*s,2.2*s,8),'tx:pole',g,0,1.1*s,0);")
+rep("  const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.25*s,.25*s,2.2*s,8)}); b.position.set(x,1.1*s,z); world.addBody(b);\n}",
+    "  bake(g); g.position.set(x,0,z); g.rotation.y=ry0; BURN.push({id:'t:'+BURN.length,type:'tree',g,x,z,s});\n  const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.25*s,.25*s,2.2*s,8)}); b.position.set(x,1.1*s,z); world.addBody(b);\n}")
+rep("function bush(x,z,s=1){ const g=grp(city,x,0,z);", "function bush(x,z,s=1){ const g=grp(burnGroup,0,0,0);")
+rep(",Math.sin(a)*.35*s); } }", ",Math.sin(a)*.35*s); } bake(g); g.position.set(x,0,z); BURN.push({id:'t:'+BURN.length,type:'bush',g,x,z,s}); }")
+# Burning plants update with the other fire effects.
+rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAct();")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + ITEMS + '\n' + NET + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + ITEMS + '\n' + NET + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
