@@ -17,6 +17,7 @@ NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
 ITEMS = (HERE / 'items-client.js').read_text()
+GLASS = (HERE / 'glass.js').read_text()
 FIGHTJS = (HERE / 'fight-client.js').read_text()
 SKY = (HERE / 'sky.js').read_text()
 PROPS = (HERE / 'props.js').read_text()
@@ -101,6 +102,22 @@ rep("vm.position.set(.2+Math.cos(bobT*.5)*.008,-.17+Math.abs(Math.sin(bobT*.5))*
 # Throwable junk (GAME-82): the hand drops out of view when empty and only shows what you hold.
 rep("-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6;", "-handKick*.1-NET.handDrop(),-.45+handKick*.06); vm.rotation.x=-handKick*.9; NET.heldVisible(handKick); NET.vmAnim(dt);")
 
+# GAME-83: jump off anything you stand on (car hoods and roofs), not just the ground.
+rep("  if(SET.down('jump') && player.position.y<.4){ player.velocity.y=6.5; }", "  if(SET.down('jump') && (player.position.y<.4 || NET.grounded())){ player.velocity.y=6.5; }")
+# GAME-83: third-person camera while you are knocked down.
+rep("  camera.rotation.set(pitch,yaw,0,'YXZ');\n", "  camera.rotation.set(pitch,yaw,0,'YXZ');\n  NET.knockedCamera(dt);\n")
+
+# GAME-83: cars get a see-through cabin (roof, pillars, tinted glass windshield, windows,
+# seats, dash, wheel) instead of a solid dark window band, and a hood + cabin collider
+# you can climb onto. Same shape as carColliders() in server.mjs.
+rep("[-.95,.94],[-.35,1.4],[.8,1.4],[1.5,1.0]", "[-.95,.94],[1.5,1.0]")
+rep("const win=[[-.88,.95],[-.33,1.36],[.78,1.36],[1.44,1.0]]; const wm=shapeExtrude([...win,[1.44,.96],[-.88,.92]],Wd+.04,0x2A3050,g);",
+    "carCabin(g,Wd,bodyHex);")
+rep("put(B(.03,.42,Wd+.06),bodyHex,g,.25,1.15,0); put(B(.03,.4,Wd+.06),bodyHex,g,-.35,1.15,0,{rz:-.6});", "")
+rep("const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry); staticBox(x,.8,z,Math.abs(s.x)*2.2+Math.abs(s.z)*.9,.8,Math.abs(s.z)*2.2+Math.abs(s.x)*.9);",
+    "const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry), ax=Math.abs(s.x), az=Math.abs(s.z); staticBox(x,.545,z,ax*2.2+az*.875,.385,az*2.2+ax*.875); staticBox(x+s.x*.25,1.165,z+s.z*.25,ax*.9+az*.8,.235,az*.9+ax*.8);")
+rep("function car(x,z,ry,bodyHex){", (HERE / 'car-cabin.js').read_text() + "\nfunction car(x,z,ry,bodyHex){")
+
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
 
@@ -161,7 +178,7 @@ rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAc
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + ITEMS + '\n' + NET + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
