@@ -13,6 +13,10 @@ const NET = (() => {
   { const B = TOWN.BOUNDS, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2, hx = (B.maxX - B.minX) / 2 + 1, hz = (B.maxZ - B.minZ) / 2 + 1;
     for (const [x, z, ex, ez] of [[B.minX - .5, cz, .5, hz], [B.maxX + .5, cz, .5, hz], [cx, B.minZ - .5, hx, .5], [cx, B.maxZ + .5, hx, .5]]) { const b = staticBox(x, 5, z, ex, 10, ez); if (b) b.twEdge = true; } }
 
+  // Your body is moved by the shared movement code below (GAME-99), not by the effects physics:
+  // it stays a kinematic body there only so loose local debris still bumps off you.
+  player.type = CANNON.Body.KINEMATIC; player.mass = 0; player.updateMassProperties(); player.velocity.set(0, 0, 0);
+
   // The look test's three static vagrants are server-driven NPCs now (GAME-85).
   for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
 
@@ -330,47 +334,126 @@ const NET = (() => {
     return b[0];
   }
 
-  // ---------- prediction for your own vagrant ----------
-  let seq = 0, sendAcc = 0, lastIn = { x: 0, z: 0 };
-  const hist = [];                   // [{seq, x, y, z}] in server space (capsule centre)
-  const corr = new THREE.Vector3();  // correction still to blend in
-  let haveAck = false;
-  const errs = [];                   // recent prediction errors, for debugging
-  function beforeStep(dt, mx, mz) {
-    const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
-    if (!haveAck || ownRag) { player.velocity.x = player.velocity.z = 0; return; }   // stand still until the server places us, or while knocked down
-    if (FIGHT.isDown()) player.velocity.y = Math.min(player.velocity.y, 0);   // no jumping while knocked out
-    const w = HYD.push(); player.velocity.x += w.x; player.velocity.z += w.z;   // hydrant jets shove you, same as on the server (GAME-94)
+  // ---------- prediction for your own vagrant (GAME-99) ----------
+  // Movement runs on a fixed 60 Hz tick through movement.mjs, in a Rapier world built from the
+  // same town.json shapes as the server's, so what you predict is what the server computes.
+  // Each tick is a numbered command. The server acks the last one it ran with its movement
+  // state; we rewind to that, replay the commands still in flight, and ease any leftover
+  // difference out of the view. What you see is interpolated between the last two ticks, so
+  // motion is smooth at any frame rate (60, 144 Hz, or a stuttery laptop).
+  const MC = MOVE.C, TICK = MC.TICK, CENTRE = MC.CAP_HALF;   // player.position sits CAP_HALF below the capsule centre (eye = +1.25)
+  let seq = 0, haveAck = false, acc = 0, eyeDY = 0;
+  const pending = [];                 // commands the server hasn't acked yet
+  let outbox = [];                    // commands not sent yet (sent two ticks at a time)
+  const sim = { st: MOVE.state(), p: new THREE.Vector3(0, -100, 0), prev: new THREE.Vector3(0, -100, 0) };   // capsule centre now / one tick ago
+  const smooth = new THREE.Vector3(); // correction still being eased out of what you see
+  const errs = [];                    // recent correction sizes in metres, for debugging (window.__net.errs)
+  let PH = null;                      // { w, col, ctl, move, kin }
+  const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _d = new THREE.Vector3();
+  RAPIER.init().then(() => MAPP).then(map => {
+    const w = new RAPIER.World({ x: 0, y: MC.GRAVITY, z: 0 });
+    MOVE.buildStatic(RAPIER, w, map, TERRAIN);
+    const col = w.createCollider(RAPIER.ColliderDesc.capsule(MC.CAP_HALF, MC.CAP_R).setTranslation(0, -100, 0));
+    const ctl = MOVE.makeController(w);
+    w.step();
+    PH = { w, col, ctl, move: MOVE.mover(ctl, col, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC), kin: new Map() };
+  }).catch(err => console.error('[move] physics failed to start', err));
+  // Cars and the street NPCs are solid for you, as on the server. The server checks your commands
+  // against where they are when the commands arrive, which is later than the (interpolated, slightly
+  // past) spot you see them at, so collide against them pushed forward along their recent motion.
+  const _sp = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  function aheadOf(v, lead) {
+    const b = v.buf, n = b.length; if (!n) return null;
+    const c = b[n - 1]; if (n < 2) { _sp.p.copy(c.p); _sp.q.copy(c.q); return _sp; }
+    const a = b[n - 2], span = Math.max(1, c.t - a.t), k = Math.min(0.3 * 1000, Math.max(0, serverNow() + lead - c.t)) / span;
+    if (a.p.distanceToSquared(c.p) > 900) { _sp.p.copy(c.p); _sp.q.copy(c.q); return _sp; }
+    _sp.p.copy(c.p).sub(a.p).multiplyScalar(k).add(c.p); _sp.q.copy(c.q);
+    return _sp;
   }
-  function afterStep(dt) {
-    FIGHT.afterStep(dt);
-    // Blend in any correction over a few frames so it never reads as a snap.
-    if (corr.lengthSq() > 1e-6) { const k = 1 - Math.exp(-dt * 8); player.position.x += corr.x * k; player.position.z += corr.z * k; corr.multiplyScalar(1 - k); }
-    sendAcc += dt;
-    if (ws && ws.readyState === 1 && me && haveAck && !ownRag && sendAcc >= 1 / 30) {
-      const span = Math.min(sendAcc, 0.1); sendAcc = 0; seq = (seq + 1) >>> 0;
-      ws.send(JSON.stringify({ t: 'in', seq, dt: +span.toFixed(4), x: +lastIn.x.toFixed(3), z: +lastIn.z.toFixed(3), yaw: +Math.atan2(-Math.sin(yaw), -Math.cos(yaw)).toFixed(3),
-        jump: SET.down('jump'), run: SET.running() }));
-      hist.push({ seq, x: player.position.x + corr.x, y: player.position.y + 0.55, z: player.position.z + corr.z });
-      if (hist.length > 120) hist.shift();
+  function syncSolids() {
+    const lead = pending.length * TICK * 1000 * 0.5;   // about half the command round trip
+    for (const [id, k] of PH.kin) if (!ents.has(id)) { PH.w.removeRigidBody(k); PH.kin.delete(id); }
+    for (const [id, v] of ents) {
+      if (v.kind !== 'traffic' && v.kind !== 'npc') continue;
+      const s = aheadOf(v, lead); if (!s) continue;
+      let k = PH.kin.get(id);
+      if (!k) {
+        k = PH.w.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(s.p.x, s.p.y, s.p.z));
+        if (v.kind === 'traffic') MOVE.carColliders(RAPIER, PH.w, k, 0.7);
+        else PH.w.createCollider(RAPIER.ColliderDesc.capsule(MC.CAP_HALF, MC.CAP_R), k);
+        PH.kin.set(id, k);
+      }
+      k.setTranslation({ x: s.p.x, y: s.p.y, z: s.p.z }, false);
+      if (v.kind === 'traffic' && s.q) k.setRotation({ x: s.q.x, y: s.q.y, z: s.q.z, w: s.q.w }, false);
     }
+    PH.w.step();
   }
+  function runCmd(c) {
+    PH.col.setTranslation({ x: sim.p.x, y: sim.p.y, z: sim.p.z });
+    const mv = MOVE.step(sim.st, c, TICK, PH.move);
+    sim.p.x += mv.x; sim.p.y += mv.y; sim.p.z += mv.z;
+  }
+  const r3 = n => Math.round(n * 1000) / 1000;   // what goes on the wire, so both sides replay the same numbers
+  function command(mx, mz) {
+    _f.set(-Math.sin(yaw), 0, -Math.cos(yaw)); _r.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    seq = (seq + 1) >>> 0;
+    const kick = FIGHT.kick(TICK), push = HYD.push();
+    return { seq, x: r3(_f.x * mz + _r.x * mx), z: r3(_f.z * mz + _r.z * mx), jump: SET.down('jump'), run: SET.running(),
+      yaw: r3(Math.atan2(-Math.sin(yaw), -Math.cos(yaw))), scale: speedScale(), noJump: FIGHT.isDown(), push, kick };
+  }
+  function resetPrediction() { haveAck = false; pending.length = 0; outbox = []; smooth.set(0, 0, 0); eyeDY = 0; acc = 0; }
+  function teleport(x, y, z) {
+    sim.p.set(x, y, z); sim.prev.copy(sim.p); sim.st = MOVE.state(); smooth.set(0, 0, 0); eyeDY = 0;
+    player.position.set(x, y - CENTRE, z);
+  }
+  // Called once per frame from the game loop, after the local effects physics has stepped.
+  function move(dt, mx, mz) {
+    FIGHT.afterStep(dt);
+    if (!PH || !haveAck || ownRag || !ws || ws.readyState !== 1) { acc = 0; return; }   // stand still until the server places us, or while knocked down
+    syncSolids();
+    acc += dt;
+    let n = 0;
+    while (acc >= TICK && n < 12) {
+      acc -= TICK; n++;
+      const c = command(mx, mz);
+      sim.prev.copy(sim.p);
+      const y0 = sim.p.y, g0 = sim.st.g;
+      runCmd(c);
+      // Stepped up a curb or down a step: the eye catches up over a few frames instead of popping.
+      if (g0 && sim.st.g) { const dy = sim.p.y - y0; if (Math.abs(dy) > 0.06) eyeDY = Math.max(-0.5, Math.min(0.5, eyeDY - dy)); }
+      pending.push(c); outbox.push(c);
+      if (pending.length > 240) pending.shift();
+    }
+    if (acc > TICK) acc = TICK;       // fell far behind (tab was hidden): don't fast-forward
+    if (outbox.length >= 2) {
+      ws.send(JSON.stringify({ t: 'in', c: outbox.map(c => [c.seq, c.x, c.z, (c.jump ? 1 : 0) | (c.run ? 2 : 0), c.yaw]) }));
+      outbox = [];
+    }
+    const k = 1 - Math.exp(-dt * 10); smooth.multiplyScalar(1 - k);
+    eyeDY *= Math.exp(-dt * 16);
+    const a = acc / TICK;
+    player.position.set(sim.prev.x + (sim.p.x - sim.prev.x) * a + smooth.x, sim.prev.y + (sim.p.y - sim.prev.y) * a + smooth.y - CENTRE, sim.prev.z + (sim.p.z - sim.prev.z) * a + smooth.z);
+  }
+  function afterStep() {}
   function onAck(m) {
     const [sx, sy, sz] = m.p;
     if (ownRag && !ownRag.rag.up) return;                       // knocked down: the server is moving us
-    if (!haveAck) { haveAck = true; player.position.set(sx, Math.max(.35, sy - 0.55), sz); player.velocity.set(0, 0, 0); hist.length = 0; return; }
-    while (hist.length && hist[0].seq < m.seq) hist.shift();
-    const h = hist[0]; if (!h || h.seq !== m.seq) return;
-    const ex = sx - h.x, ez = sz - h.z, ey = sy - h.y, err = Math.hypot(ex, ez);
+    if (!PH) return;
+    if (!haveAck) { haveAck = true; teleport(sx, sy, sz); if (m.m) MOVE.unpackState(m.m, sim.st); return; }
+    while (pending.length && ((pending[0].seq - m.seq) | 0) <= 0) pending.shift();
+    // Rewind to where the server had us after that command, then replay what's still in flight.
+    _d.copy(sim.p);
+    sim.p.set(sx, sy, sz); if (m.m) MOVE.unpackState(m.m, sim.st);
+    for (const c of pending) runCmd(c);
+    _d.subVectors(sim.p, _d);                                   // how far the replay moved us from what we predicted
+    const err = _d.length();
     errs.push(+err.toFixed(3)); if (errs.length > 400) errs.shift();
-    if (err > 3 || Math.abs(ey) > 1.5) {                         // way off (teleport, stuck): snap
-      player.position.x += ex; player.position.z += ez; if (Math.abs(ey) > 1.5) player.position.y = Math.max(.35, sy - .55);
-      corr.set(0, 0, 0); for (const k of hist) { k.x += ex; k.z += ez; }
-    } else if (err > 0.1) {                                     // small drift: blend it in
-      corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
-    }
+    sim.prev.add(_d);
+    if (err > 3) smooth.set(0, 0, 0);                           // way off (teleport, stuck): just go there
+    else smooth.sub(_d);                                        // otherwise the view eases over
   }
+  const grounded = () => !!sim.st.g;
+  const groundSpeed = () => (sim.st.g ? Math.hypot(sim.st.vx, sim.st.vz) : 0);
   const speedScale = () => { const g = grabbing && ents.get(grabbing); return (!g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1)) * FIGHT.speedScale(); };
 
   // ---------- fixtures and effects ----------
@@ -510,8 +593,7 @@ const NET = (() => {
       if (!ownRag) return;
       getUpRagdoll(ownRag.v); ownRag.rag = ownRag.v.rag;
       // Snap your predicted body to where the server stood you up.
-      haveAck = false; hist.length = 0; corr.set(0, 0, 0);
-      player.position.set(m.at[0], Math.max(.35, m.at[1] - .55), m.at[2]); player.velocity.set(0, 0, 0);
+      resetPrediction(); teleport(m.at[0], m.at[1], m.at[2]);
       return;
     }
     const v = ents.get(m.id); if (v && v.rag) getUpRagdoll(v);
@@ -540,15 +622,6 @@ const NET = (() => {
     const still = v.rag ? poseRagdoll(v, dt, s && s.p) : false;
     if (!still) { scene.remove(v.obj); ownRag = null; vm.visible = true; }
   }
-  // Standing on something (ground, a car hood, a roof) so you can jump again.
-  function grounded() {
-    for (const c of world.contacts) {
-      if (c.bi === player && c.ni.y < -.5) return true;
-      if (c.bj === player && c.ni.y > .5) return true;
-    }
-    return false;
-  }
-
   function onMeta(m) {
     meta = m; damage = m.town; TOWN.lights(m.lights); FIGHT.onMeta(m); COPPER.meta(m);
     HYD.onMeta(m, fixtures);
@@ -742,7 +815,7 @@ const NET = (() => {
       else if (m.t === 'welcome') {
         try { localStorage.setItem('tw_token', m.token); } catch {}
         for (const id of [...ents.keys(), ...fixtures.keys()]) despawn(id);
-        me = m.you; myPid = m.you.slice(2); haveAck = false; hist.length = 0; corr.set(0, 0, 0);
+        me = m.you; myPid = m.you.slice(2); resetPrediction();
         m.entities.forEach(spawn);
         el('status').style.display = 'none';
         feed(`Good morning, <b>${esc(m.name)}</b>. You stretch and get up.`);
@@ -763,7 +836,7 @@ const NET = (() => {
     el('login').addEventListener('pointerdown', e => e.stopPropagation());
     setTimeout(() => el('nameInput').focus(), 50);
   }
-  window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p ?? pitch; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
+  window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p ?? pitch; }, get me() { return me; }, ents, fixtures, get corr() { return smooth.length(); }, get sim() { return { p: sim.p.toArray(), st: { ...sim.st }, pending: pending.length }; }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
     get held() { return myHeld; }, get busy() { return !!anim || COPPER.busy(); }, get target() { return itemTarget && itemTarget.id; }, send,
     previewHeld(t) { setMyHeld(t); },
     throwNow() { lastPointer = 'touch'; throwDir(camera.getWorldDirection(new THREE.Vector3())); },
@@ -773,5 +846,5 @@ const NET = (() => {
     getUp(id) { const v = ents.get(id); if (v && v.rag) getUpRagdoll(v); } };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  return { get ragdolled() { return !!ownRag; }, beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
+  return { get ragdolled() { return !!ownRag; }, move, afterStep, groundSpeed, eyeDY: () => eyeDY, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
 })();

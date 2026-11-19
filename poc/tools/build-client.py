@@ -257,9 +257,26 @@ rep("camera.rotation.set(pitch,yaw,0,'YXZ');", "camera.rotation.set(pitch+ANIM.c
 # pose is the only hand on screen, and nothing floats in front of the camera while ragdolled.
 rep("COPPER.viewmodel(dt,t);", "COPPER.viewmodel(dt,t); FIGHT.afterViewmodel();")
 
+# ---------- GAME-99: smooth physics movement ----------
+# Rapier (the server's physics engine) runs in the browser too, and the shared movement code
+# (movement.mjs) moves your vagrant on a fixed 60 Hz tick; the camera reads the interpolated result.
+rep('  "cannon-es":"/vendor/cannon-es.js"\n}}', '  "cannon-es":"/vendor/cannon-es.js",\n  "rapier":"/vendor/rapier.mjs"\n}}')
+rep("import * as CANNON from 'cannon-es';", "import * as CANNON from 'cannon-es';\nimport RAPIER from 'rapier';")
+MOVE_JS = (HERE.parent / 'movement.mjs').read_text().replace('export const MOVE', 'const MOVE', 1)
+rep("""  player.velocity.x=(fwd.x*mz+right.x*mx)*speed; player.velocity.z=(fwd.z*mz+right.z*mx)*speed;
+  if(SET.down('jump') && (player.position.y<.4 || NET.grounded())){ player.velocity.y=6.5; }
+  NET.beforeStep(dt, mx, mz, speed);
+  if(ml>0) player.wakeUp();
+  world.step(1/90,dt,6);
+  NET.afterStep(dt);""", """  world.step(1/90,dt,6);
+  NET.move(dt, mx, mz);""")
+# Head bob follows how fast you're actually going (it eases in and out with your momentum).
+rep("bobT+=dt*(ml>0?speed*2.2:0);", "bobT+=dt*NET.groundSpeed()*2.2;")
+rep("camera.position.set(player.position.x, player.position.y+1.25+", "camera.position.set(player.position.x, player.position.y+NET.eyeDY()+1.25+")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + ANIMJS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + HYDRANTS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + ANIMJS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + HYDRANTS + '\n' + MOVE_JS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
