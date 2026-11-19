@@ -210,7 +210,19 @@ const FIGHT = (() => {
     }
   }
 
+  // Runs last, after every viewmodel module has posed the hand (GAME-98). The idle fists are
+  // the default empty-handed pose, so they step aside whenever something else owns the view:
+  // an interaction animation raising the gloved hand (ANIM, reach/dig, grab, copper, wrench),
+  // the lighter flick, a knockout, or your own ragdoll (both hide vm). A punch still shows.
+  function afterViewmodel() {
+    const other = handG.visible || FIRE.flicking;
+    for (const h of ['L', 'R']) {
+      const f = fists[h]; if (!f.visible) continue;
+      if (!vm.visible || NET.ragdolled || (other && !(own.punchT > 0 && own.hand === h))) f.visible = false;
+    }
+  }
+
   drawHp();
   window.__fight = { own, pose, onFx, send: o => NET.send(o) };
-  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, isDown };
+  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, afterViewmodel, isDown };
 })();

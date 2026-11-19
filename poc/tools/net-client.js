@@ -518,7 +518,7 @@ const NET = (() => {
   }
   // Third-person camera on your own ragdoll, mouse orbits it; eases back to your eyes as you get up.
   function knockedCamera(dt) {
-    if (!ownRag) { vm.visible = true; return; }
+    if (!ownRag) return;                                        // FIGHT.afterCamera sets vm.visible each frame (hidden while knocked out)
     const R = ownRag.v.rag;
     const target = R && !R.up && R.bodies ? new THREE.Vector3(R.bodies.torso.position.x, R.bodies.torso.position.y, R.bodies.torso.position.z) : ownRag.obj.position.clone();
     const want = target.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.4, 1.9, Math.cos(yaw) * 3.4));
@@ -773,5 +773,5 @@ const NET = (() => {
     getUp(id) { const v = ents.get(id); if (v && v.rag) getUpRagdoll(v); } };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
+  return { get ragdolled() { return !!ownRag; }, beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
 })();
