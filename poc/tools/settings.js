@@ -5,7 +5,8 @@ const SET = (() => {
   const KEY = 'tw_settings';
   const BIND_ACTIONS = [
     ['fwd', 'Walk forward', 'KeyW'], ['back', 'Walk back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
-    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'], ['punch', 'Punch', 'KeyV'],
+    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Pick up / do the thing', 'KeyE'], ['light', 'Light it on fire', 'KeyF'],
+    ['drop', 'Drop what you hold', 'KeyQ'], ['grab', 'Grab or drag', 'KeyG'], ['punch', 'Punch', 'KeyV'],
     ['map', 'Big town map', 'KeyM'],
   ];
   // Arrow keys and the right-hand Shift always work too, whatever the bindings say.
@@ -48,7 +49,7 @@ const SET = (() => {
   function applyHud() {
     const show = (id, on) => { const e = el(id); if (e) e.style.visibility = on ? '' : 'hidden'; };
     show('help', s.help); show('board', s.board); show('xh', s.xhair);
-    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle (punches with empty hands) · <kbd>${keyName(s.binds.punch)}</kbd> punch · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
+    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br><kbd>${keyName(s.binds.act)}</kbd> pick up junk or do the thing · click throws it (punches with empty hands) · <kbd>${keyName(s.binds.punch)}</kbd> punch · <kbd>${keyName(s.binds.drop)}</kbd> drop · <kbd>${keyName(s.binds.light)}</kbd> light it · <kbd>${keyName(s.binds.grab)}</kbd> drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
   }
   function applyAll() { applyVideo(); applyHud(); }
 
