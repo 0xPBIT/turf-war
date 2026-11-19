@@ -32,11 +32,121 @@ const NET = (() => {
       hoodie: [0x9AA3B8, 0x7A3E4E, 0xD8C9A8, 0x5E7A4A][(h >> 7) % 4], skin, skinSh, beard: BEARDS[(h >> 9) % BEARDS.length], scarf: (h >> 11) % 2 ? 0xE8343F : 0 };
   }
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
+  // It is built unbaked and split into six limbs so it can ragdoll (GAME-83).
   function buildVagrant(e) {
-    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e) });
+    const realBake = bake; bake = () => {};
+    let p; try { p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e) }); } finally { bake = realBake; }
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
+    rig(p);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
     return p;
+  }
+
+  // ---------- ragdolls (GAME-83) ----------
+  // The server tumbles one capsule per knocked-down vagrant; each client runs a six-part
+  // cannon ragdoll of the model, seeded with the same hit velocity and pulled softly
+  // toward the server's capsule so everyone sees the body land in the same spot.
+  // Model space (p.g): origin at the feet, facing +z, left side on -x. A model may come with
+  // p.parts already split (six groups pivoting at their joints); otherwise rig() splits it.
+  const JOINTS = { torso: [0, .9, 0], head: [0, 1.48, 0], armL: [-.24, 1.36, 0], armR: [.24, 1.36, 0], legL: [-.1, .9, 0], legR: [.1, .9, 0] };
+  const RAGM = { torso: { m: 30 }, head: { m: 5, cone: .55 }, armL: { m: 4, cone: 1.6 }, armR: { m: 4, cone: 1.6 }, legL: { m: 9, cone: .9 }, legR: { m: 9, cone: .9 } };
+  function partOf(c) {
+    if (c.y > 1.47) return 'head';
+    if (Math.abs(c.x) > .21 && c.y > .62) return c.x < 0 ? 'armL' : 'armR';
+    if (c.y < .86) return c.x < 0 ? 'legL' : 'legR';
+    return 'torso';
+  }
+  // Split the (unbaked, parentless) model: each mesh goes under the pivot of its limb, then
+  // each limb is baked so a player still costs only a handful of draw calls.
+  function rig(p) {
+    const g = p.g; g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.updateMatrixWorld(true);
+    const box = new THREE.Box3(), c = new THREE.Vector3();
+    if (!p.parts) {
+      const parts = {};
+      for (const k in JOINTS) parts[k] = new THREE.Group();
+      for (const ch of [...g.children]) {
+        box.setFromObject(ch); if (box.isEmpty()) continue; box.getCenter(c);
+        const k = partOf(c); ch.position.sub(new THREE.Vector3(...JOINTS[k])); parts[k].add(ch);
+      }
+      for (const k in parts) { bake(parts[k]); parts[k].position.set(...JOINTS[k]); g.add(parts[k]); }
+      p.parts = parts;
+    }
+    // Physics box per limb from its bounds; offset = box centre relative to the joint.
+    g.updateMatrixWorld(true); p.rag = {};
+    for (const k in RAGM) {
+      const pv = p.parts[k]; if (!pv) continue;
+      box.setFromObject(pv); const ctr = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+      p.rag[k] = { pv, rest: pv.position.clone(), off: ctr.sub(pv.position), h: size.multiplyScalar(.42).max(new THREE.Vector3(.05, .05, .05)) };
+    }
+  }
+  const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q1 = new THREE.Quaternion(), _m1 = new THREE.Matrix4();
+  function startRagdoll(v, vel, spin) {
+    if (v.rag && !v.rag.up) return;
+    if (v.rag) endRagdollNow(v);
+    const P = v.model.rag; v.obj.updateMatrixWorld(true);
+    const bodies = {}, cons = [], torsoAt = P.torso.pv.localToWorld(P.torso.off.clone());
+    const V = new THREE.Vector3(...vel), W = new THREE.Vector3(...spin);
+    for (const k in P) {
+      const d = P[k];
+      const b = new CANNON.Body({ mass: RAGM[k].m, shape: new CANNON.Box(new CANNON.Vec3(d.h.x, d.h.y, d.h.z)), linearDamping: .05, angularDamping: .35 });
+      b.collisionFilterGroup = 8; b.collisionFilterMask = 1;      // the town and cars, not each other or you
+      d.pv.localToWorld(_v1.copy(d.off)); d.pv.getWorldQuaternion(_q1);
+      b.position.copy(_v1); b.quaternion.copy(_q1);
+      _v2.copy(W).cross(_v1.clone().sub(torsoAt)).add(V);         // rigid body velocity: v + w x r
+      b.velocity.set(_v2.x, _v2.y, _v2.z); b.angularVelocity.set(W.x, W.y, W.z);
+      world.addBody(b); bodies[k] = b;
+    }
+    for (const k in P) {
+      if (k === 'torso' || !bodies.torso) continue;
+      const jw = P[k].pv.getWorldPosition(new THREE.Vector3()), A = bodies.torso, B = bodies[k], J = new CANNON.Vec3(jw.x, jw.y, jw.z);
+      const c = new CANNON.ConeTwistConstraint(A, B, { pivotA: A.pointToLocalFrame(J), pivotB: B.pointToLocalFrame(J),
+        axisA: new CANNON.Vec3(0, 1, 0), axisB: new CANNON.Vec3(0, 1, 0), angle: RAGM[k].cone, twistAngle: .6 });
+      c.collideConnected = false; world.addConstraint(c); cons.push(c);
+    }
+    v.rag = { bodies, cons, up: null };
+  }
+  function removeRagBodies(R) { if (!R || !R.bodies) return; for (const c of R.cons) world.removeConstraint(c); for (const k in R.bodies) world.removeBody(R.bodies[k]); R.bodies = null; }
+  function endRagdollNow(v) {
+    removeRagBodies(v.rag); v.rag = null;
+    for (const k in v.model.rag) { const d = v.model.rag[k]; d.pv.position.copy(d.rest); d.pv.quaternion.identity(); }
+  }
+  // Getting up: freeze the pose and blend each limb back to standing over ~0.7 s.
+  function getUpRagdoll(v) {
+    const R = v.rag; if (!R || R.up) return;
+    const from = {};
+    for (const k in v.model.rag) { const pv = v.model.rag[k].pv; from[k] = { p: pv.getWorldPosition(new THREE.Vector3()), q: pv.getWorldQuaternion(new THREE.Quaternion()) }; }
+    removeRagBodies(R); R.up = { t: 0, from };
+  }
+  // Pose the model from the ragdoll (call after the normal transform is set). Returns false once standing again.
+  function poseRagdoll(v, dt, target) {
+    const R = v.rag, P = v.model.rag, g = v.model.g;
+    if (!R.up) {
+      const tb = R.bodies.torso;
+      if (target) {   // drift toward the server's body; limbs follow through the joints
+        const k = 1 - Math.exp(-dt * 2.5);
+        for (const b of Object.values(R.bodies)) { b.position.x += (target.x - tb.position.x) * k; b.position.z += (target.z - tb.position.z) * k; if (target.y > tb.position.y + .6) b.position.y += (target.y - tb.position.y) * k; }
+      }
+      v.obj.position.set(tb.position.x, tb.position.y, tb.position.z); v.obj.quaternion.identity();
+      g.position.set(0, -0.9, 0); g.rotation.set(0, 0, 0); g.scale.set(1, 1, 1);
+      v.obj.updateMatrixWorld(true);
+      _m1.copy(g.matrixWorld).invert();
+      for (const k in P) {   // pivot = body centre minus the rotated joint-to-centre offset
+        const b = R.bodies[k], d = P[k];
+        d.pv.quaternion.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+        d.pv.position.set(b.position.x, b.position.y, b.position.z).sub(_v1.copy(d.off).applyQuaternion(d.pv.quaternion)).applyMatrix4(_m1);
+      }
+      return true;
+    }
+    R.up.t += dt; const k = Math.min(1, R.up.t / .7), e = k * k * (3 - 2 * k);
+    v.obj.updateMatrixWorld(true);
+    _m1.copy(g.matrixWorld).invert(); g.getWorldQuaternion(_q1).invert();
+    for (const key in P) {
+      const d = P[key], f = R.up.from[key];
+      _v1.copy(f.p).applyMatrix4(_m1); d.pv.position.copy(_v1).lerp(d.rest, e);
+      d.pv.quaternion.copy(_q1).multiply(f.q).slerp(new THREE.Quaternion(), e);
+    }
+    if (k >= 1) { endRagdollNow(v); return false; }
+    return true;
   }
   function nameTag(text) {
     const cv = document.createElement('canvas'); cv.width = 512; cv.height = 112; const g = cv.getContext('2d');
@@ -78,14 +188,26 @@ const NET = (() => {
       const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag);
       extra = { model: v, tag };
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
-    } else if (e.kind === 'traffic') obj = buildCar(e.color);
+    } else if (e.kind === 'traffic') {
+      obj = buildCar(e.color);
+      // Same hood + cabin boxes as the server (nose along +z, body origin 0.7 m up).
+      const b = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+      b.addShape(new CANNON.Box(new CANNON.Vec3(.875, .385, 2.2)), new CANNON.Vec3(0, .545 - .7, 0));
+      b.addShape(new CANNON.Box(new CANNON.Vec3(.8, .235, .9)), new CANNON.Vec3(0, 1.165 - .7, -.25));
+      b.position.set(0, -50, 0); world.addBody(b); extra = { body: b };
+    }
     else if (e.kind === 'prop') obj = buildProp(e);
     else if (e.kind === 'bottle') obj = bottleMesh();
     else return;
     scene.add(obj);
     ents.set(e.id, { ...e, obj, buf: [], ...extra });
   }
-  function despawn(id) { const v = ents.get(id); if (v && v.obj) scene.remove(v.obj); ents.delete(id); fixtures.delete(id); }
+  function despawn(id) {
+    const v = ents.get(id);
+    if (v) { if (v.obj) scene.remove(v.obj); if (v.body) world.removeBody(v.body); if (v.rag) removeRagBodies(v.rag); }
+    if (id === me && ownRag) { scene.remove(ownRag.obj); removeRagBodies(ownRag.rag); ownRag = null; }
+    ents.delete(id); fixtures.delete(id);
+  }
 
   // ---------- snapshots and interpolation ----------
   const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0);
@@ -94,7 +216,7 @@ const NET = (() => {
     // Track the smallest observed delay; drift slowly so a late packet doesn't jerk everything.
     if (clockOffset === null || sample > clockOffset) clockOffset = sample; else clockOffset += (sample - clockOffset) * 0.02;
     for (const r of m.b) {
-      const v = ents.get(r[0]); if (!v || v.own) continue;
+      const v = ents.get(r[0]); if (!v) continue;
       v.buf.push({ t: m.ts, p: new THREE.Vector3(r[1], r[2], r[3]), q: new THREE.Quaternion(r[4], r[5], r[6], r[7]), f: r[8] });
       if (v.buf.length > 30) v.buf.shift();
     }
@@ -125,13 +247,13 @@ const NET = (() => {
   function beforeStep(dt, mx, mz) {
     const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
-    if (!haveAck) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us
+    if (!haveAck || ownRag) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us, or while knocked down
   }
   function afterStep(dt) {
     // Blend in any correction over a few frames so it never reads as a snap.
     if (corr.lengthSq() > 1e-6) { const k = 1 - Math.exp(-dt * 8); player.position.x += corr.x * k; player.position.z += corr.z * k; corr.multiplyScalar(1 - k); }
     sendAcc += dt;
-    if (ws && ws.readyState === 1 && me && haveAck && sendAcc >= 1 / 30) {
+    if (ws && ws.readyState === 1 && me && haveAck && !ownRag && sendAcc >= 1 / 30) {
       const span = Math.min(sendAcc, 0.1); sendAcc = 0; seq = (seq + 1) >>> 0;
       ws.send(JSON.stringify({ t: 'in', seq, dt: +span.toFixed(4), x: +lastIn.x.toFixed(3), z: +lastIn.z.toFixed(3), yaw: +Math.atan2(-Math.sin(yaw), -Math.cos(yaw)).toFixed(3),
         jump: SET.down('jump'), run: SET.running() }));
@@ -141,6 +263,7 @@ const NET = (() => {
   }
   function onAck(m) {
     const [sx, sy, sz] = m.p;
+    if (ownRag && !ownRag.rag.up) return;                       // knocked down: the server is moving us
     if (!haveAck) { haveAck = true; player.position.set(sx, Math.max(.35, sy - 0.55), sz); player.velocity.set(0, 0, 0); hist.length = 0; return; }
     while (hist.length && hist[0].seq < m.seq) hist.shift();
     const h = hist[0]; if (!h || h.seq !== m.seq) return;
@@ -209,16 +332,116 @@ const NET = (() => {
       else shards(new THREE.Vector3(...m.at), 18, shardMat, .22, new THREE.Vector3(...m.v).multiplyScalar(-.1));
     }
     else if (m.kind === 'crate') splinters(m.at, m.s, m.hex, m.v || [0, 0, 0]);
-    else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
+    else if (m.kind === 'honk') {
+      popText(m.rage ? 'THAT\'S IT!!' : m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at);
+      if (m.target === me) feed(m.rage ? 'The driver has had enough of you. <b>Move!</b>' : 'A car is honking at you. Get out of the street!');
+    }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
     else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
+    else if (m.kind === 'hit') onHit(m);
+    else if (m.kind === 'up') onUp(m);
+    else if (m.kind === 'hurt') {
+      const v = ents.get(m.id), at = m.id === me ? null : v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.1, v.obj.position.z] : m.at;
+      if (at) popText(`+${money(m.cash)}`, at, 'cash');
+      if (m.id === me) { feed(`Ouch. That's worth <b>+${money(m.cash)}</b>.`); popScreen(`+${money(m.cash)}`); }
+    }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
+  // ---------- getting hit (GAME-83) ----------
+  let ownRag = null;                 // { obj, model, rag, cam } while you are knocked down
+  const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
+  function thud(at, hard) {
+    const d = camera.position.distanceTo(new THREE.Vector3(...at)); if (d > 45) return;
+    try { actx ||= new AudioContext(); } catch { return; }
+    const vol = .5 * (1 - d / 45) * SET.vol() * (hard ? 1 : .5); if (vol <= 0) return;
+    const n = actx.sampleRate * .35, buf = actx.createBuffer(1, n, actx.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
+    const src = actx.createBufferSource(); src.buffer = buf;
+    const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380;
+    const g = actx.createGain(); g.gain.value = vol; src.connect(lp); lp.connect(g); g.connect(actx.destination); src.start();
+  }
+  function flash() {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:5;pointer-events:none;background:radial-gradient(circle,rgba(255,255,255,.0) 30%,rgba(232,52,63,.55));opacity:1;transition:opacity .9s ease-out';
+    document.body.appendChild(d); requestAnimationFrame(() => requestAnimationFrame(() => { d.style.opacity = 0; })); setTimeout(() => d.remove(), 1000);
+  }
+  function popScreen(text) {
+    const d = document.createElement('div'); d.className = 'pop cash'; d.textContent = text;
+    d.style.left = '50%'; d.style.top = '38%'; document.body.appendChild(d); setTimeout(() => d.remove(), 1150);
+  }
+  function onHit(m) {
+    if (m.id === me) {
+      const e = ents.get(me); if (!e) return;
+      if (ownRag) { scene.remove(ownRag.obj); removeRagBodies(ownRag.rag); }
+      // Your own body appears where you stood, facing where you looked, and goes flying.
+      const obj = new THREE.Group(), model = buildVagrant(e); obj.add(model.g);
+      obj.position.set(player.position.x, player.position.y + .55, player.position.z);
+      obj.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
+      scene.add(obj);
+      const v = { obj, model };
+      startRagdoll(v, m.v, m.spin);
+      ownRag = { obj, model, rag: v.rag, v, t: 0, back: 0 };
+      camPos.copy(camera.position); camLook.copy(obj.position);
+      vm.visible = false; grabbing = null;
+      flash(); thud(obj.position.toArray(), true);
+      if (m.cause === 'car') feed('<b>WHAM.</b> You got hit by a car.');
+      return;
+    }
+    const v = ents.get(m.id); if (!v || !v.model) return;
+    startRagdoll(v, m.v, m.spin);
+    thud(v.obj.position.toArray(), true);
+    popText(m.cause === 'car' ? 'WHAM!' : 'OOF!', [v.obj.position.x, v.obj.position.y + 1.2, v.obj.position.z], 'honk');
+  }
+  function onUp(m) {
+    if (m.id === me) {
+      if (!ownRag) return;
+      getUpRagdoll(ownRag.v); ownRag.rag = ownRag.v.rag;
+      // Snap your predicted body to where the server stood you up.
+      haveAck = false; hist.length = 0; corr.set(0, 0, 0);
+      player.position.set(m.at[0], Math.max(.35, m.at[1] - .55), m.at[2]); player.velocity.set(0, 0, 0);
+      return;
+    }
+    const v = ents.get(m.id); if (v && v.rag) getUpRagdoll(v);
+  }
+  // Third-person camera on your own ragdoll, mouse orbits it; eases back to your eyes as you get up.
+  function knockedCamera(dt) {
+    if (!ownRag) { vm.visible = true; return; }
+    const R = ownRag.v.rag;
+    const target = R && !R.up && R.bodies ? new THREE.Vector3(R.bodies.torso.position.x, R.bodies.torso.position.y, R.bodies.torso.position.z) : ownRag.obj.position.clone();
+    const want = target.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.4, 1.9, Math.cos(yaw) * 3.4));
+    const k = 1 - Math.exp(-dt * 5);
+    camPos.lerp(want, k); camLook.lerp(target, 1 - Math.exp(-dt * 10));
+    const eye = camera.position.clone(), eyeQ = camera.quaternion.clone();
+    camera.position.copy(camPos); camera.lookAt(camLook);
+    if (R && R.up) {                                            // getting up: blend back into first person
+      const e = Math.min(1, R.up.t / .7);
+      camera.position.lerp(eye, e); camera.quaternion.slerp(eyeQ, e);
+    }
+    vm.visible = false;
+  }
+  function frameOwnRag(dt) {
+    if (!ownRag) return;
+    const v = ownRag.v;
+    const s = sampleBuf(ents.get(me) || { buf: [] }, serverNow() - INTERP_MS);
+    if (v.rag && v.rag.up) { v.obj.position.set(player.position.x, player.position.y + .55, player.position.z); v.obj.rotation.set(0, Math.atan2(-Math.sin(yaw), -Math.cos(yaw)), 0); }
+    const still = v.rag ? poseRagdoll(v, dt, s && s.p) : false;
+    if (!still) { scene.remove(v.obj); ownRag = null; vm.visible = true; }
+  }
+  // Standing on something (ground, a car hood, a roof) so you can jump again.
+  function grounded() {
+    for (const c of world.contacts) {
+      if (c.bi === player && c.ni.y < -.5) return true;
+      if (c.bj === player && c.ni.y > .5) return true;
+    }
+    return false;
+  }
+
   function onMeta(m) {
     meta = m; damage = m.town;
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
+    for (const [id, v] of ents) if (v.kind === 'vagrant' && v.model && m.objects[id] && m.objects[id].down && !v.rag) startRagdoll(v, [0, 0, 0], [0, 0, 0]);
     for (const [id, f] of fixtures) {
       const st = m.objects[id] || {};
       if (f.type === 'window') { const t = paneFor(f); if (st.broken) breakPane(t, true); else repairPane(t); }
@@ -249,8 +472,17 @@ const NET = (() => {
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
-      } else { v.obj.position.copy(s.p); v.obj.quaternion.copy(s.q); }
+      } else {
+        v.obj.position.copy(s.p); v.obj.quaternion.copy(s.q);
+        if (v.body) {                                            // kinematic car collider follows the drawn car
+          const b = v.body;
+          if (dt > 0 && b.position.y > -10) b.velocity.set((s.p.x - b.position.x) / dt, 0, (s.p.z - b.position.z) / dt);
+          b.position.set(s.p.x, s.p.y, s.p.z); b.quaternion.set(s.q.x, s.q.y, s.q.z, s.q.w);
+        }
+      }
+      if (v.rag && v.model) poseRagdoll(v, dt, v.rag.up || v.rag.noPull ? null : s.p);
     }
+    frameOwnRag(dt);
     // zone readout
     if (MAP) {
       const px = player.position.x, pz = player.position.z;
@@ -276,10 +508,11 @@ const NET = (() => {
     const f = nearestAction(); btn.hidden = !f;
     if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
   }
-  const act = () => { if (ws && ws.readyState === 1) ws.send('{"t":"act"}'); };
+  const act = () => { if (ws && ws.readyState === 1 && !ownRag) ws.send('{"t":"act"}'); };
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   function throwDir(dir) {
+    if (ownRag) return;
     if (lastPointer === 'mouse' && document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
     if (document.pointerLockElement === canvas) camera.getWorldDirection(dir);
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'throw', dir: { x: dir.x, y: dir.y, z: dir.z } }));
@@ -331,6 +564,9 @@ const NET = (() => {
     el('login').addEventListener('pointerdown', e => e.stopPropagation());
     setTimeout(() => el('nameInput').focus(), 50);
   }
-  window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir };
+  window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
+    // Debug: ragdoll someone locally without the server (vel/spin as in fx 'hit').
+    ragdoll(id, vel = [6, 4, 0], spin = [0, 0, -8]) { const v = ents.get(id); if (v && v.model) { startRagdoll(v, vel, spin); v.rag.noPull = true; } },
+    getUp(id) { const v = ents.get(id); if (v && v.rag) getUpRagdoll(v); } };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, grounded, knockedCamera };
 })();
