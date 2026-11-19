@@ -84,13 +84,14 @@ const FIGHT = (() => {
 
   // ---------- movement while hurt (mirrors combat.mjs moveMod) ----------
   function speedScale() { const t = now(); return t < own.downUntil ? 0 : t < own.staggerUntil ? .35 : 1; }
-  function afterStep(dt) {
-    if (own.kb.lengthSq() > 1e-4) {
-      player.position.x += own.kb.x * dt; player.position.z += own.kb.z * dt;
-      own.kb.multiplyScalar(Math.exp(-dt * 7));
-    }
-    if (isDown()) player.velocity.y = Math.min(player.velocity.y, 0);
+  // Knockback for one movement tick (GAME-99: fed into the shared movement step, like the server's moveMod).
+  function kick(dt) {
+    if (own.kb.lengthSq() <= 1e-4) return null;
+    const k = { x: own.kb.x * dt, z: own.kb.z * dt };
+    own.kb.multiplyScalar(Math.exp(-dt * 7));
+    return k;
   }
+  function afterStep() {}
 
   // ---------- events from the server ----------
   function stars() {
@@ -224,5 +225,5 @@ const FIGHT = (() => {
 
   drawHp();
   window.__fight = { own, pose, onFx, send: o => NET.send(o) };
-  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, afterViewmodel, isDown };
+  return { holding, punch, speedScale, afterStep, kick, onFx, onMeta, pose, afterCamera, afterViewmodel, isDown };
 })();

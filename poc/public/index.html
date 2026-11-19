@@ -228,12 +228,14 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 {"imports":{
   "three":"/vendor/three/build/three.module.js",
   "three/addons/":"/vendor/three/examples/jsm/",
-  "cannon-es":"/vendor/cannon-es.js"
+  "cannon-es":"/vendor/cannon-es.js",
+  "rapier":"/vendor/rapier.mjs"
 }}
 </script>
 <script type="module">
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
+import RAPIER from 'rapier';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -2754,12 +2756,8 @@ function tick(){
   mx+=jv.x; mz-=jv.y; const ml=Math.hypot(mx,mz); if(ml>1){mx/=ml;mz/=ml;}
   const speed=(SET.running()?8:4.6)*NET.speedScale();
   fwd.set(-Math.sin(yaw),0,-Math.cos(yaw)); right.set(Math.cos(yaw),0,-Math.sin(yaw));
-  player.velocity.x=(fwd.x*mz+right.x*mx)*speed; player.velocity.z=(fwd.z*mz+right.z*mx)*speed;
-  if(SET.down('jump') && (player.position.y<.4 || NET.grounded())){ player.velocity.y=6.5; }
-  NET.beforeStep(dt, mx, mz, speed);
-  if(ml>0) player.wakeUp();
   world.step(1/90,dt,6);
-  NET.afterStep(dt);
+  NET.move(dt, mx, mz);
   processBreaks();
   for(const {m,b} of dyn){ m.position.copy(b.position); m.quaternion.copy(b.quaternion); }
   for(const e of bottles){ e.m.position.copy(e.b.position); e.m.quaternion.copy(e.b.quaternion); }
@@ -2770,8 +2768,8 @@ function tick(){
   TOWN.frame(dt, t);
   MINI.frame(dt, t);
   // camera
-  bobT+=dt*(ml>0?speed*2.2:0);
-  camera.position.set(player.position.x, player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()+ANIM.camY(), player.position.z);
+  bobT+=dt*NET.groundSpeed()*2.2;
+  camera.position.set(player.position.x, player.position.y+NET.eyeDY()+1.25+Math.sin(bobT)*.04*SET.bob()+ANIM.camY(), player.position.z);
   camera.rotation.set(pitch+ANIM.camPitch(),yaw,0,'YXZ');
   FIGHT.afterCamera(dt, t);
   TOWN.cam();
@@ -4066,6 +4064,182 @@ const HYD = (() => {
 })();
 window.__hyd = HYD;   // for capture/debug scripts
 
+// Player movement (GAME-99): one movement model shared by the server and the client.
+// The server runs it to own where every vagrant is; the client runs the exact same code,
+// on the same physics engine (Rapier) and the same static world, to predict your own
+// vagrant, so a correction is rare and tiny instead of a constant tug.
+//
+// How it works (the usual recipe for a server-authoritative first-person game):
+//   - Fixed tick: the client samples input once per 1/60 s tick and steps movement for
+//     exactly TICK; every tick becomes a numbered command the server replays for TICK too.
+//   - Momentum: you accelerate up to speed and slow to a stop with ground friction instead of
+//     switching velocity instantly; in the air you keep your momentum and steer a little.
+//   - Kinematic capsule: Rapier's character controller slides along walls, steps up curbs,
+//     climbs slopes up to MAX_SLOPE and snaps down onto the ground so you don't hop off crests.
+//   - Forgiving jumps: coyote time (jump just after walking off an edge) and a jump buffer
+//     (press just before landing). A held key does not bunny-hop; each press is one jump.
+//   - Reconciliation: the server acks the last command with its full movement state; the
+//     client rewinds to it, replays the commands still in flight and eases any difference out.
+// The client inlines this file (build-client.py strips the `export`).
+const MOVE = (() => {
+  const C = {
+    TICK: 1 / 60,
+    WALK: 4.6, RUN: 8,
+    GROUND_ACCEL: 55,     // m/s² toward the speed you want: walking pace in ~0.1 s, a full run in ~0.15 s
+    GROUND_FRICTION: 9,   // 1/s, Quake-style: stops from a run in ~0.25 s once you let go
+    STOP_SPEED: 2.2,      // friction acts as if you were going at least this fast, so the last bit of slide dies quickly
+    AIR_ACCEL: 12,        // m/s² of steering while airborne
+    JUMP: 6.5, GRAVITY: -18, MAX_FALL: -40,
+    COYOTE: 0.1, JUMP_BUFFER: 0.12,
+    CAP_HALF: 0.55, CAP_R: 0.35, SKIN: 0.05,   // capsule centre sits 0.9 m (+ skin) above the feet
+    STEP: 0.45, STEP_MIN_W: 0.2, SNAP: 0.4,
+    MAX_SLOPE: 50 * Math.PI / 180, SLIDE_SLOPE: 55 * Math.PI / 180,
+  };
+
+  function makeController(world) {
+    const c = world.createCharacterController(C.SKIN);
+    c.enableAutostep(C.STEP, C.STEP_MIN_W, true);
+    c.enableSnapToGround(C.SNAP);
+    c.setMaxSlopeClimbAngle(C.MAX_SLOPE);
+    c.setMinSlopeSlideAngle(C.SLIDE_SLOPE);
+    c.setSlideEnabled(true);
+    c.setApplyImpulsesToDynamicBodies(false);
+    return c;
+  }
+
+  // Fresh movement state. Lives on the server entity and in the client's predictor.
+  const state = () => ({ vx: 0, vy: 0, vz: 0, g: 1, air: 0, jb: 0, jh: 0 });
+  const copyState = (to, from) => { to.vx = from.vx; to.vy = from.vy; to.vz = from.vz; to.g = from.g; to.air = from.air; to.jb = from.jb; to.jh = from.jh; return to; };
+  const packState = (s) => [+s.vx.toFixed(5), +s.vy.toFixed(5), +s.vz.toFixed(5), s.g ? 1 : 0, +s.air.toFixed(4), +s.jb.toFixed(4), s.jh ? 1 : 0];
+  const unpackState = (a, s = state()) => { [s.vx, s.vy, s.vz, s.g, s.air, s.jb, s.jh] = a; return s; };
+
+  // One tick of movement.
+  //   st:  movement state (mutated)
+  //   inp: { x, z } world-space wish direction (length <= 1), run, jump (key held),
+  //        scale (speed multiplier: dragging something heavy, staggered; 0 = can't move),
+  //        noJump (knocked out), push { x, z } extra velocity (hydrant jet), kick { x, z } displacement this tick (knockback)
+  //   move(desired) -> { x, y, z, grounded }: the character controller's corrected displacement
+  // Returns the displacement to apply this tick.
+  function step(st, inp, dt, move) {
+    let wx = inp.x || 0, wz = inp.z || 0;
+    const wl = Math.hypot(wx, wz); if (wl > 1) { wx /= wl; wz /= wl; }
+    const top = (inp.run ? C.RUN : C.WALK) * (inp.scale ?? 1);
+    const wantX = wx * top, wantZ = wz * top, want = Math.hypot(wantX, wantZ);
+    if (st.g) {
+      // Friction first (so letting go glides to a stop), then accelerate toward what you want.
+      const sp = Math.hypot(st.vx, st.vz);
+      if (sp > 1e-4) {
+        const drop = Math.max(sp, C.STOP_SPEED) * C.GROUND_FRICTION * dt * (want > 0.01 ? 0.25 : 1);
+        const k = Math.max(0, sp - drop) / sp; st.vx *= k; st.vz *= k;
+      }
+      const dx = wantX - st.vx, dz = wantZ - st.vz, dl = Math.hypot(dx, dz), a = C.GROUND_ACCEL * dt;
+      if (dl > 1e-5) { const f = Math.min(1, a / dl); st.vx += dx * f; st.vz += dz * f; }
+    } else if (want > 0.01) {
+      // Air steering: nudge toward the wish, but never speed past what you'd reach on the ground.
+      const dx = wantX - st.vx, dz = wantZ - st.vz, dl = Math.hypot(dx, dz), a = C.AIR_ACCEL * dt;
+      if (dl > 1e-5) {
+        const before = Math.hypot(st.vx, st.vz), f = Math.min(1, a / dl);
+        st.vx += dx * f; st.vz += dz * f;
+        const after = Math.hypot(st.vx, st.vz), cap = Math.max(before, top);
+        if (after > cap) { st.vx *= cap / after; st.vz *= cap / after; }
+      }
+    }
+    // Jumping: a press is remembered for JUMP_BUFFER, and works up to COYOTE after leaving the ground.
+    const held = inp.jump ? 1 : 0;
+    if (held && !st.jh) st.jb = C.JUMP_BUFFER;
+    st.jh = held;
+    let jumped = false;
+    if (st.jb > 0 && (st.g || st.air < C.COYOTE) && !inp.noJump) { st.vy = C.JUMP; st.jb = 0; st.g = 0; st.air = C.COYOTE; jumped = true; }
+    st.jb = Math.max(0, st.jb - dt);
+    if (!st.g || jumped) st.vy = Math.max(C.MAX_FALL, st.vy + C.GRAVITY * dt);
+    else st.vy = 0;                                    // grounded: snap-to-ground keeps you on slopes; pushing into the floor makes the controller stall
+    const px = (inp.push && inp.push.x) || 0, pz = (inp.push && inp.push.z) || 0;
+    const kx = (inp.kick && inp.kick.x) || 0, kz = (inp.kick && inp.kick.z) || 0;
+    const desired = { x: (st.vx + px) * dt + kx, y: st.vy * dt, z: (st.vz + pz) * dt + kz };
+    const mv = move(desired);
+    // Ran into something: lose the speed the wall ate, so you don't keep pressing into it.
+    const wantH = Math.hypot(desired.x - kx, desired.z - kz);
+    if (wantH > 1e-5) {
+      const gotX = mv.x - kx, gotZ = mv.z - kz;
+      const along = (gotX * (desired.x - kx) + gotZ * (desired.z - kz)) / (wantH * wantH);
+      if (along < 0.999) {
+        const ax = gotX / dt - px, az = gotZ / dt - pz;
+        if (Math.hypot(ax, az) < Math.hypot(st.vx, st.vz)) { st.vx = ax; st.vz = az; }
+      }
+    }
+    if (mv.grounded && !jumped) { st.g = 1; st.air = 0; if (st.vy < 0) st.vy = 0; }
+    else {
+      st.g = 0; st.air += dt;
+      if (st.vy > 0 && desired.y > 1e-4 && mv.y < desired.y * 0.5) st.vy = 0;   // bumped your head
+    }
+    return mv;
+  }
+
+  // Wraps a Rapier character controller as step()'s move() for one collider.
+  function mover(controller, collider, flags, groups, predicate) {
+    return (desired) => {
+      controller.computeColliderMovement(collider, desired, flags, groups, predicate);
+      const m = controller.computedMovement();
+      return { x: m.x, y: m.y, z: m.z, grounded: controller.computedGrounded() };
+    };
+  }
+
+  // The static world players collide with, identical on server and client: the ground slab,
+  // the hills heightfield (GAME-96), the town-edge walls, every town.json collider (parked
+  // cars as hood + cabin), the extra hydrants and the window panes.
+  // on(kind, info) is called for each fixture so the server can make it an entity.
+  const CAR_HOOD_TOP = 0.93, CAR_ROOF = 1.4, CAR_CABIN_Z = -0.25;
+  function carColliders(RAPIER, world, body, bodyY, cabinZ = CAR_CABIN_Z) {
+    const lower = RAPIER.ColliderDesc.cuboid(0.875, CAR_HOOD_TOP / 2 - 0.08, 2.2).setTranslation(0, CAR_HOOD_TOP / 2 + 0.08 - bodyY, 0).setFriction(0.8);
+    const cabin = RAPIER.ColliderDesc.cuboid(0.8, (CAR_ROOF - CAR_HOOD_TOP) / 2, 0.9).setTranslation(0, (CAR_ROOF + CAR_HOOD_TOP) / 2 - bodyY, cabinZ).setFriction(0.8);
+    return [world.createCollider(lower, body), world.createCollider(cabin, body)];
+  }
+  function buildStatic(RAPIER, world, MAP, TERRAIN, on = () => {}) {
+    const fixed = (x, y, z, hx, hy, hz) => {
+      const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z));
+      return world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.8), b);
+    };
+    const { minX, maxX, minZ, maxZ } = MAP.bounds;
+    // Flat ground slab, except under the hills heightfield: there it sits 0.25 m lower as a safety
+    // net, because a slab flush with the heightfield's flat parts gives the character controller two
+    // coplanar floors, which made it hitch on their seams (and hitch differently on server and client).
+    { const A = TERRAIN.AREA, x0 = minX - 2, x1 = maxX + 2, z0 = minZ - 2, z1 = maxZ + 2, zs = Math.max(z0, Math.min(z1, A.minZ));
+      if (zs > z0) fixed((x0 + x1) / 2, -0.5, (z0 + zs) / 2, (x1 - x0) / 2, 0.5, (zs - z0) / 2);
+      if (z1 > zs) fixed((x0 + x1) / 2, -0.75, (zs + z1) / 2, (x1 - x0) / 2, 0.5, (z1 - zs) / 2); }
+    { const A = TERRAIN.AREA, nc = A.maxX - A.minX, nr = A.maxZ - A.minZ, hs = new Float32Array((nr + 1) * (nc + 1));
+      for (let i = 0; i <= nr; i++) for (let j = 0; j <= nc; j++) hs[i + j * (nr + 1)] = TERRAIN.h(A.minX + j, A.minZ + i);   // rows run along z, columns along x
+      const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation((A.minX + A.maxX) / 2, 0, (A.minZ + A.maxZ) / 2));
+      world.createCollider(RAPIER.ColliderDesc.heightfield(nr, nc, hs, { x: nc, y: 1, z: nr }).setFriction(0.8), b); }
+    { const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, hx = (maxX - minX) / 2 + 1, hz = (maxZ - minZ) / 2 + 1;
+      fixed(minX - 0.5, 5, cz, 0.5, 10, hz); fixed(maxX + 0.5, 5, cz, 0.5, 10, hz);
+      fixed(cx, 5, minZ - 0.5, hx, 10, 0.5); fixed(cx, 5, maxZ + 0.5, hx, 10, 0.5); }
+    const colliderFor = (c) => {
+      const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], c.p[1], c.p[2]);
+      if (c.q) desc.setRotation({ x: c.q[0], y: c.q[1], z: c.q[2], w: c.q[3] });
+      const b = world.createRigidBody(desc);
+      const shape = c.box ? RAPIER.ColliderDesc.cuboid(c.box[0], c.box[1], c.box[2]) : RAPIER.ColliderDesc.cylinder(c.cyl[1] / 2, c.cyl[0]);
+      return world.createCollider(shape.setFriction(0.8), b);
+    };
+    for (const c of MAP.colliders) {
+      if (c.loose || c.tag === 'npc') continue;   // movable props and the street NPCs are entities, not static
+      if (c.tag === 'car') {
+        // Parked cars: same hood + cabin shape as traffic. c.ry is the look-test model's yaw; the car shape's nose points along +z.
+        const yaw = c.ry !== undefined ? c.ry - Math.PI / 2 : (c.box[0] > c.box[2] ? Math.PI / 2 : 0);
+        const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], TERRAIN.h(c.p[0], c.p[2]), c.p[2]).setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }));
+        const [collider, ...extraColliders] = carColliders(RAPIER, world, b, 0, c.ry !== undefined ? CAR_CABIN_Z : 0);
+        on('collider', { c, collider, extraColliders, carBody: b });
+      } else on('collider', { c, collider: colliderFor(c) });
+    }
+    (MAP.hydrants || []).forEach((h, i) => {
+      const p = [h.p[0], TERRAIN.h(h.p[0], h.p[1]) + 0.35, h.p[1]];
+      on('hydrant', { h, i, p, collider: colliderFor({ p, cyl: [0.17, 0.7] }) });
+    });
+    for (const w of MAP.windows || []) on('window', { w, collider: colliderFor({ p: w.p, q: w.q, box: w.half }) });
+  }
+
+  return { C, makeController, state, copyState, packState, unpackState, step, mover, buildStatic, carColliders, CAR_HOOD_TOP, CAR_ROOF, CAR_CABIN_Z };
+})();
+
 // ===================== car damage (GAME-83) =====================
 // The server sends dents and per-pane crack levels in the car's own frame (nose +z, y from
 // the ground). The car model's frame is nose -x, so model = (-z, y, x). Each damaged car
@@ -4218,6 +4392,10 @@ const NET = (() => {
   // The server has walls at the town edge; mirror them so prediction agrees.
   { const B = TOWN.BOUNDS, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2, hx = (B.maxX - B.minX) / 2 + 1, hz = (B.maxZ - B.minZ) / 2 + 1;
     for (const [x, z, ex, ez] of [[B.minX - .5, cz, .5, hz], [B.maxX + .5, cz, .5, hz], [cx, B.minZ - .5, hx, .5], [cx, B.maxZ + .5, hx, .5]]) { const b = staticBox(x, 5, z, ex, 10, ez); if (b) b.twEdge = true; } }
+
+  // Your body is moved by the shared movement code below (GAME-99), not by the effects physics:
+  // it stays a kinematic body there only so loose local debris still bumps off you.
+  player.type = CANNON.Body.KINEMATIC; player.mass = 0; player.updateMassProperties(); player.velocity.set(0, 0, 0);
 
   // The look test's three static vagrants are server-driven NPCs now (GAME-85).
   for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
@@ -4536,47 +4714,126 @@ const NET = (() => {
     return b[0];
   }
 
-  // ---------- prediction for your own vagrant ----------
-  let seq = 0, sendAcc = 0, lastIn = { x: 0, z: 0 };
-  const hist = [];                   // [{seq, x, y, z}] in server space (capsule centre)
-  const corr = new THREE.Vector3();  // correction still to blend in
-  let haveAck = false;
-  const errs = [];                   // recent prediction errors, for debugging
-  function beforeStep(dt, mx, mz) {
-    const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
-    if (!haveAck || ownRag) { player.velocity.x = player.velocity.z = 0; return; }   // stand still until the server places us, or while knocked down
-    if (FIGHT.isDown()) player.velocity.y = Math.min(player.velocity.y, 0);   // no jumping while knocked out
-    const w = HYD.push(); player.velocity.x += w.x; player.velocity.z += w.z;   // hydrant jets shove you, same as on the server (GAME-94)
+  // ---------- prediction for your own vagrant (GAME-99) ----------
+  // Movement runs on a fixed 60 Hz tick through movement.mjs, in a Rapier world built from the
+  // same town.json shapes as the server's, so what you predict is what the server computes.
+  // Each tick is a numbered command. The server acks the last one it ran with its movement
+  // state; we rewind to that, replay the commands still in flight, and ease any leftover
+  // difference out of the view. What you see is interpolated between the last two ticks, so
+  // motion is smooth at any frame rate (60, 144 Hz, or a stuttery laptop).
+  const MC = MOVE.C, TICK = MC.TICK, CENTRE = MC.CAP_HALF;   // player.position sits CAP_HALF below the capsule centre (eye = +1.25)
+  let seq = 0, haveAck = false, acc = 0, eyeDY = 0;
+  const pending = [];                 // commands the server hasn't acked yet
+  let outbox = [];                    // commands not sent yet (sent two ticks at a time)
+  const sim = { st: MOVE.state(), p: new THREE.Vector3(0, -100, 0), prev: new THREE.Vector3(0, -100, 0) };   // capsule centre now / one tick ago
+  const smooth = new THREE.Vector3(); // correction still being eased out of what you see
+  const errs = [];                    // recent correction sizes in metres, for debugging (window.__net.errs)
+  let PH = null;                      // { w, col, ctl, move, kin }
+  const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _d = new THREE.Vector3();
+  RAPIER.init().then(() => MAPP).then(map => {
+    const w = new RAPIER.World({ x: 0, y: MC.GRAVITY, z: 0 });
+    MOVE.buildStatic(RAPIER, w, map, TERRAIN);
+    const col = w.createCollider(RAPIER.ColliderDesc.capsule(MC.CAP_HALF, MC.CAP_R).setTranslation(0, -100, 0));
+    const ctl = MOVE.makeController(w);
+    w.step();
+    PH = { w, col, ctl, move: MOVE.mover(ctl, col, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC), kin: new Map() };
+  }).catch(err => console.error('[move] physics failed to start', err));
+  // Cars and the street NPCs are solid for you, as on the server. The server checks your commands
+  // against where they are when the commands arrive, which is later than the (interpolated, slightly
+  // past) spot you see them at, so collide against them pushed forward along their recent motion.
+  const _sp = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  function aheadOf(v, lead) {
+    const b = v.buf, n = b.length; if (!n) return null;
+    const c = b[n - 1]; if (n < 2) { _sp.p.copy(c.p); _sp.q.copy(c.q); return _sp; }
+    const a = b[n - 2], span = Math.max(1, c.t - a.t), k = Math.min(0.3 * 1000, Math.max(0, serverNow() + lead - c.t)) / span;
+    if (a.p.distanceToSquared(c.p) > 900) { _sp.p.copy(c.p); _sp.q.copy(c.q); return _sp; }
+    _sp.p.copy(c.p).sub(a.p).multiplyScalar(k).add(c.p); _sp.q.copy(c.q);
+    return _sp;
   }
-  function afterStep(dt) {
-    FIGHT.afterStep(dt);
-    // Blend in any correction over a few frames so it never reads as a snap.
-    if (corr.lengthSq() > 1e-6) { const k = 1 - Math.exp(-dt * 8); player.position.x += corr.x * k; player.position.z += corr.z * k; corr.multiplyScalar(1 - k); }
-    sendAcc += dt;
-    if (ws && ws.readyState === 1 && me && haveAck && !ownRag && sendAcc >= 1 / 30) {
-      const span = Math.min(sendAcc, 0.1); sendAcc = 0; seq = (seq + 1) >>> 0;
-      ws.send(JSON.stringify({ t: 'in', seq, dt: +span.toFixed(4), x: +lastIn.x.toFixed(3), z: +lastIn.z.toFixed(3), yaw: +Math.atan2(-Math.sin(yaw), -Math.cos(yaw)).toFixed(3),
-        jump: SET.down('jump'), run: SET.running() }));
-      hist.push({ seq, x: player.position.x + corr.x, y: player.position.y + 0.55, z: player.position.z + corr.z });
-      if (hist.length > 120) hist.shift();
+  function syncSolids() {
+    const lead = pending.length * TICK * 1000 * 0.5;   // about half the command round trip
+    for (const [id, k] of PH.kin) if (!ents.has(id)) { PH.w.removeRigidBody(k); PH.kin.delete(id); }
+    for (const [id, v] of ents) {
+      if (v.kind !== 'traffic' && v.kind !== 'npc') continue;
+      const s = aheadOf(v, lead); if (!s) continue;
+      let k = PH.kin.get(id);
+      if (!k) {
+        k = PH.w.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(s.p.x, s.p.y, s.p.z));
+        if (v.kind === 'traffic') MOVE.carColliders(RAPIER, PH.w, k, 0.7);
+        else PH.w.createCollider(RAPIER.ColliderDesc.capsule(MC.CAP_HALF, MC.CAP_R), k);
+        PH.kin.set(id, k);
+      }
+      k.setTranslation({ x: s.p.x, y: s.p.y, z: s.p.z }, false);
+      if (v.kind === 'traffic' && s.q) k.setRotation({ x: s.q.x, y: s.q.y, z: s.q.z, w: s.q.w }, false);
     }
+    PH.w.step();
   }
+  function runCmd(c) {
+    PH.col.setTranslation({ x: sim.p.x, y: sim.p.y, z: sim.p.z });
+    const mv = MOVE.step(sim.st, c, TICK, PH.move);
+    sim.p.x += mv.x; sim.p.y += mv.y; sim.p.z += mv.z;
+  }
+  const r3 = n => Math.round(n * 1000) / 1000;   // what goes on the wire, so both sides replay the same numbers
+  function command(mx, mz) {
+    _f.set(-Math.sin(yaw), 0, -Math.cos(yaw)); _r.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    seq = (seq + 1) >>> 0;
+    const kick = FIGHT.kick(TICK), push = HYD.push();
+    return { seq, x: r3(_f.x * mz + _r.x * mx), z: r3(_f.z * mz + _r.z * mx), jump: SET.down('jump'), run: SET.running(),
+      yaw: r3(Math.atan2(-Math.sin(yaw), -Math.cos(yaw))), scale: speedScale(), noJump: FIGHT.isDown(), push, kick };
+  }
+  function resetPrediction() { haveAck = false; pending.length = 0; outbox = []; smooth.set(0, 0, 0); eyeDY = 0; acc = 0; }
+  function teleport(x, y, z) {
+    sim.p.set(x, y, z); sim.prev.copy(sim.p); sim.st = MOVE.state(); smooth.set(0, 0, 0); eyeDY = 0;
+    player.position.set(x, y - CENTRE, z);
+  }
+  // Called once per frame from the game loop, after the local effects physics has stepped.
+  function move(dt, mx, mz) {
+    FIGHT.afterStep(dt);
+    if (!PH || !haveAck || ownRag || !ws || ws.readyState !== 1) { acc = 0; return; }   // stand still until the server places us, or while knocked down
+    syncSolids();
+    acc += dt;
+    let n = 0;
+    while (acc >= TICK && n < 12) {
+      acc -= TICK; n++;
+      const c = command(mx, mz);
+      sim.prev.copy(sim.p);
+      const y0 = sim.p.y, g0 = sim.st.g;
+      runCmd(c);
+      // Stepped up a curb or down a step: the eye catches up over a few frames instead of popping.
+      if (g0 && sim.st.g) { const dy = sim.p.y - y0; if (Math.abs(dy) > 0.06) eyeDY = Math.max(-0.5, Math.min(0.5, eyeDY - dy)); }
+      pending.push(c); outbox.push(c);
+      if (pending.length > 240) pending.shift();
+    }
+    if (acc > TICK) acc = TICK;       // fell far behind (tab was hidden): don't fast-forward
+    if (outbox.length >= 2) {
+      ws.send(JSON.stringify({ t: 'in', c: outbox.map(c => [c.seq, c.x, c.z, (c.jump ? 1 : 0) | (c.run ? 2 : 0), c.yaw]) }));
+      outbox = [];
+    }
+    const k = 1 - Math.exp(-dt * 10); smooth.multiplyScalar(1 - k);
+    eyeDY *= Math.exp(-dt * 16);
+    const a = acc / TICK;
+    player.position.set(sim.prev.x + (sim.p.x - sim.prev.x) * a + smooth.x, sim.prev.y + (sim.p.y - sim.prev.y) * a + smooth.y - CENTRE, sim.prev.z + (sim.p.z - sim.prev.z) * a + smooth.z);
+  }
+  function afterStep() {}
   function onAck(m) {
     const [sx, sy, sz] = m.p;
     if (ownRag && !ownRag.rag.up) return;                       // knocked down: the server is moving us
-    if (!haveAck) { haveAck = true; player.position.set(sx, Math.max(.35, sy - 0.55), sz); player.velocity.set(0, 0, 0); hist.length = 0; return; }
-    while (hist.length && hist[0].seq < m.seq) hist.shift();
-    const h = hist[0]; if (!h || h.seq !== m.seq) return;
-    const ex = sx - h.x, ez = sz - h.z, ey = sy - h.y, err = Math.hypot(ex, ez);
+    if (!PH) return;
+    if (!haveAck) { haveAck = true; teleport(sx, sy, sz); if (m.m) MOVE.unpackState(m.m, sim.st); return; }
+    while (pending.length && ((pending[0].seq - m.seq) | 0) <= 0) pending.shift();
+    // Rewind to where the server had us after that command, then replay what's still in flight.
+    _d.copy(sim.p);
+    sim.p.set(sx, sy, sz); if (m.m) MOVE.unpackState(m.m, sim.st);
+    for (const c of pending) runCmd(c);
+    _d.subVectors(sim.p, _d);                                   // how far the replay moved us from what we predicted
+    const err = _d.length();
     errs.push(+err.toFixed(3)); if (errs.length > 400) errs.shift();
-    if (err > 3 || Math.abs(ey) > 1.5) {                         // way off (teleport, stuck): snap
-      player.position.x += ex; player.position.z += ez; if (Math.abs(ey) > 1.5) player.position.y = Math.max(.35, sy - .55);
-      corr.set(0, 0, 0); for (const k of hist) { k.x += ex; k.z += ez; }
-    } else if (err > 0.1) {                                     // small drift: blend it in
-      corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
-    }
+    sim.prev.add(_d);
+    if (err > 3) smooth.set(0, 0, 0);                           // way off (teleport, stuck): just go there
+    else smooth.sub(_d);                                        // otherwise the view eases over
   }
+  const grounded = () => !!sim.st.g;
+  const groundSpeed = () => (sim.st.g ? Math.hypot(sim.st.vx, sim.st.vz) : 0);
   const speedScale = () => { const g = grabbing && ents.get(grabbing); return (!g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1)) * FIGHT.speedScale(); };
 
   // ---------- fixtures and effects ----------
@@ -4716,8 +4973,7 @@ const NET = (() => {
       if (!ownRag) return;
       getUpRagdoll(ownRag.v); ownRag.rag = ownRag.v.rag;
       // Snap your predicted body to where the server stood you up.
-      haveAck = false; hist.length = 0; corr.set(0, 0, 0);
-      player.position.set(m.at[0], Math.max(.35, m.at[1] - .55), m.at[2]); player.velocity.set(0, 0, 0);
+      resetPrediction(); teleport(m.at[0], m.at[1], m.at[2]);
       return;
     }
     const v = ents.get(m.id); if (v && v.rag) getUpRagdoll(v);
@@ -4746,15 +5002,6 @@ const NET = (() => {
     const still = v.rag ? poseRagdoll(v, dt, s && s.p) : false;
     if (!still) { scene.remove(v.obj); ownRag = null; vm.visible = true; }
   }
-  // Standing on something (ground, a car hood, a roof) so you can jump again.
-  function grounded() {
-    for (const c of world.contacts) {
-      if (c.bi === player && c.ni.y < -.5) return true;
-      if (c.bj === player && c.ni.y > .5) return true;
-    }
-    return false;
-  }
-
   function onMeta(m) {
     meta = m; damage = m.town; TOWN.lights(m.lights); FIGHT.onMeta(m); COPPER.meta(m);
     HYD.onMeta(m, fixtures);
@@ -4948,7 +5195,7 @@ const NET = (() => {
       else if (m.t === 'welcome') {
         try { localStorage.setItem('tw_token', m.token); } catch {}
         for (const id of [...ents.keys(), ...fixtures.keys()]) despawn(id);
-        me = m.you; myPid = m.you.slice(2); haveAck = false; hist.length = 0; corr.set(0, 0, 0);
+        me = m.you; myPid = m.you.slice(2); resetPrediction();
         m.entities.forEach(spawn);
         el('status').style.display = 'none';
         feed(`Good morning, <b>${esc(m.name)}</b>. You stretch and get up.`);
@@ -4969,7 +5216,7 @@ const NET = (() => {
     el('login').addEventListener('pointerdown', e => e.stopPropagation());
     setTimeout(() => el('nameInput').focus(), 50);
   }
-  window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p ?? pitch; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
+  window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p ?? pitch; }, get me() { return me; }, ents, fixtures, get corr() { return smooth.length(); }, get sim() { return { p: sim.p.toArray(), st: { ...sim.st }, pending: pending.length }; }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
     get held() { return myHeld; }, get busy() { return !!anim || COPPER.busy(); }, get target() { return itemTarget && itemTarget.id; }, send,
     previewHeld(t) { setMyHeld(t); },
     throwNow() { lastPointer = 'touch'; throwDir(camera.getWorldDirection(new THREE.Vector3())); },
@@ -4979,7 +5226,7 @@ const NET = (() => {
     getUp(id) { const v = ents.get(id); if (v && v.rag) getUpRagdoll(v); } };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  return { get ragdolled() { return !!ownRag; }, beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
+  return { get ragdolled() { return !!ownRag; }, move, afterStep, groundSpeed, eyeDY: () => eyeDY, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
 })();
 
 // ===================== copper wire theft (GAME-91) =====================
@@ -5263,13 +5510,14 @@ const FIGHT = (() => {
 
   // ---------- movement while hurt (mirrors combat.mjs moveMod) ----------
   function speedScale() { const t = now(); return t < own.downUntil ? 0 : t < own.staggerUntil ? .35 : 1; }
-  function afterStep(dt) {
-    if (own.kb.lengthSq() > 1e-4) {
-      player.position.x += own.kb.x * dt; player.position.z += own.kb.z * dt;
-      own.kb.multiplyScalar(Math.exp(-dt * 7));
-    }
-    if (isDown()) player.velocity.y = Math.min(player.velocity.y, 0);
+  // Knockback for one movement tick (GAME-99: fed into the shared movement step, like the server's moveMod).
+  function kick(dt) {
+    if (own.kb.lengthSq() <= 1e-4) return null;
+    const k = { x: own.kb.x * dt, z: own.kb.z * dt };
+    own.kb.multiplyScalar(Math.exp(-dt * 7));
+    return k;
   }
+  function afterStep() {}
 
   // ---------- events from the server ----------
   function stars() {
@@ -5403,7 +5651,7 @@ const FIGHT = (() => {
 
   drawHp();
   window.__fight = { own, pose, onFx, send: o => NET.send(o) };
-  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, afterViewmodel, isDown };
+  return { holding, punch, speedScale, afterStep, kick, onFx, onMeta, pose, afterCamera, afterViewmodel, isDown };
 })();
 
 // ===================== turf mini map (GAME-80) =====================

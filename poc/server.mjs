@@ -4,6 +4,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -11,6 +12,7 @@ import { ITEM_TYPES, ITEM_RULES, POCKET_TYPES, itemSpots, pickWeighted, dumpster
 import { createCombat } from './combat.mjs';
 import { initCopper } from './copper.mjs';
 import { TERRAIN } from './terrain.mjs';
+import { MOVE } from './movement.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -18,9 +20,8 @@ const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'town-v2
 const GRACE_MS = Number(process.env.GRACE_MS || 5000); // design doc says 20 s; shorter for the demo
 const HEAT_HALF_LIFE_S = Number(process.env.HEAT_HALF_LIFE_S || 600); // design doc says ~24 h
 const PHYSICS_HZ = 60, SNAPSHOT_HZ = 20, META_HZ = 2;
-// Same numbers as the client's predicted movement, so prediction rarely needs correcting.
-const WALK = 4.6, RUN = 8, JUMP = 6.5, GRAVITY = -18;
-const CAP_HALF = 0.55, CAP_R = 0.35; // capsule centre sits 0.9 m above the ground
+// Movement numbers live in movement.mjs (GAME-99), shared with the client's prediction.
+const { WALK, RUN, JUMP, GRAVITY, CAP_HALF, CAP_R } = MOVE.C; // capsule centre sits 0.9 m above the ground
 
 const MAP = JSON.parse(fs.readFileSync(path.join(__dirname, process.env.MAP_FILE || 'town.json'), 'utf8'));
 
@@ -46,24 +47,13 @@ function writeSave() {
 }
 
 // ---------- static world ----------
-const fixed = (x, y, z, hx, hy, hz) => {
-  const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z));
-  return world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.8), b);
-};
+// Built by movement.mjs (GAME-99) so the client's prediction collides with exactly the same
+// shapes: ground slab, hills heightfield (GAME-96), town-edge walls, town.json colliders,
+// extra hydrants and windows. Fixtures among them become entities further down.
 const { minX, maxX, minZ, maxZ } = MAP.bounds;
-fixed((minX + maxX) / 2, -0.5, (minZ + maxZ) / 2, (maxX - minX) / 2 + 2, 0.5, (maxZ - minZ) / 2 + 2); // flat ground under everything
-// Hills (GAME-96): a 1 m heightfield over the part of the map that isn't flat, from the same
-// TERRAIN.h the client builds its ground from. Heights never go below 0, so the slab above still
-// catches anything that slips through.
-{ const A = TERRAIN.AREA, nc = A.maxX - A.minX, nr = A.maxZ - A.minZ, hs = new Float32Array((nr + 1) * (nc + 1));
-  for (let i = 0; i <= nr; i++) for (let j = 0; j <= nc; j++) hs[i + j * (nr + 1)] = TERRAIN.h(A.minX + j, A.minZ + i);   // rows run along z, columns along x
-  const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation((A.minX + A.maxX) / 2, 0, (A.minZ + A.maxZ) / 2));
-  world.createCollider(RAPIER.ColliderDesc.heightfield(nr, nc, hs, { x: nc, y: 1, z: nr }).setFriction(0.8), b); }
 const groundY = (x, z) => TERRAIN.h(x, z);
-{ const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, hx = (maxX - minX) / 2 + 1, hz = (maxZ - minZ) / 2 + 1;
-  fixed(minX - 0.5, 5, cz, 0.5, 10, hz); fixed(maxX + 0.5, 5, cz, 0.5, 10, hz);
-  fixed(cx, 5, minZ - 0.5, hx, 10, 0.5); fixed(cx, 5, maxZ + 0.5, hx, 10, 0.5); }
-// Colliders come from the art look test, in the order the client builds them.
+const staticFixtures = [];
+MOVE.buildStatic(RAPIER, world, MAP, TERRAIN, (kind, info) => staticFixtures.push({ kind, ...info }));
 const colliderFor = (c) => {
   const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], c.p[1], c.p[2]);
   if (c.q) desc.setRotation({ x: c.q[0], y: c.q[1], z: c.q[2], w: c.q[3] });
@@ -76,12 +66,8 @@ const colliderFor = (c) => {
 // A car is a lower body box (hood and trunk height) plus a cabin box (roof height),
 // matching the look-test car model, so you can jump on the hood and then the roof.
 // Local frame: nose along +z, y measured from the ground. Shared by parked and AI cars.
-const CAR_HOOD_TOP = 0.93, CAR_ROOF = 1.4, CAR_CABIN_Z = -0.25;
-function carColliders(body, bodyY, cabinZ = CAR_CABIN_Z) {
-  const lower = RAPIER.ColliderDesc.cuboid(0.875, CAR_HOOD_TOP / 2 - 0.08, 2.2).setTranslation(0, CAR_HOOD_TOP / 2 + 0.08 - bodyY, 0).setFriction(0.8);
-  const cabin = RAPIER.ColliderDesc.cuboid(0.8, (CAR_ROOF - CAR_HOOD_TOP) / 2, 0.9).setTranslation(0, (CAR_ROOF + CAR_HOOD_TOP) / 2 - bodyY, cabinZ).setFriction(0.8);
-  return [world.createCollider(lower, body), world.createCollider(cabin, body)];
-}
+const { CAR_HOOD_TOP, CAR_ROOF, CAR_CABIN_Z } = MOVE;
+const carColliders = (body, bodyY, cabinZ = CAR_CABIN_Z) => MOVE.carColliders(RAPIER, world, body, bodyY, cabinZ);
 
 // ---------- entities ----------
 const sessions = new Map(); // playerId -> { ws, entity, input, lastAct, graceTimer }
@@ -128,37 +114,25 @@ function describe(e) {
 // Fixtures: static things you can act on (trash piles, the dumpster, the stop sign,
 // windows, parked cars). The client already draws them; the server owns their state.
 const fixtureCount = {};
-MAP.colliders.forEach((c, i) => {
-  if (c.loose) return; // drawn and simulated as a movable prop instead (see props)
-  if (c.tag === 'npc') return;          // the street vagrants are server-driven NPCs now (combat.mjs)
-  if (c.loose) return; // drawn and simulated as a movable prop instead (see props)
-  let collider, extraColliders;
-  if (c.tag === 'car') {
-    // Parked cars: same hood + cabin shape as traffic, so you can climb onto them.
-    // c.ry is the model's yaw from the look test; the car shape's nose points along +z.
-    const yaw = c.ry !== undefined ? c.ry - Math.PI / 2 : (c.box[0] > c.box[2] ? Math.PI / 2 : 0);
-    const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], groundY(c.p[0], c.p[2]), c.p[2]).setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }));
-    [collider, ...extraColliders] = carColliders(b, 0, c.ry !== undefined ? CAR_CABIN_Z : 0);
-    // Not enumerable: MAP is sent to clients as /town.json, and a physics body can't be serialised.
-    Object.defineProperty(c, 'carBody', { value: b, enumerable: false, writable: true, configurable: true });
-  } else collider = colliderFor(c);
-  if (!c.tag || c.tag === 'npc') return;
-  const n = fixtureCount[c.tag] = (fixtureCount[c.tag] || 0) + 1;
-  const id = c.tag === 'pile' ? 'pile:' + c.pile : `f:${c.tag}${n}`;
-  addEntity({ id, kind: 'fixture', type: c.tag, collider, extraColliders, carBody: c.carBody, fixedPos: c.p, index: c.pile, dir: c.dir, state: {} });
-});
-// Extra fire hydrants (GAME-94): the client builds their models from the same list.
-(MAP.hydrants || []).forEach((h, i) => {
-  const p = [h.p[0], groundY(h.p[0], h.p[1]) + 0.35, h.p[1]];
-  const collider = colliderFor({ p, cyl: [0.17, 0.7] });
-  addEntity({ id: 'f:hydrantx' + (i + 1), kind: 'fixture', type: 'hydrant', collider, fixedPos: p, dir: h.dir || 0, state: {} });
-});
-// Broken windows survive restarts: { brokenUntil, boardAt, glass: { s: seed, h: [[u, v], ...] } }.
 save.windows ||= {};
-for (const w of MAP.windows) {
-  const collider = colliderFor({ p: w.p, q: w.q, box: w.half });
-  const st = save.windows[w.id] && save.windows[w.id].brokenUntil > Date.now() ? save.windows[w.id] : {};
-  addEntity({ id: w.id, kind: 'fixture', type: 'window', collider, fixedPos: w.p, rot: w.q, half: w.half, index: w.gi, value: w.value, state: st });
+for (const f of staticFixtures) {
+  if (f.kind === 'collider') {
+    const c = f.c;
+    // Not enumerable: MAP is sent to clients as /town.json, and a physics body can't be serialised.
+    if (f.carBody) Object.defineProperty(c, 'carBody', { value: f.carBody, enumerable: false, writable: true, configurable: true });
+    if (!c.tag) continue;
+    const n = fixtureCount[c.tag] = (fixtureCount[c.tag] || 0) + 1;
+    const id = c.tag === 'pile' ? 'pile:' + c.pile : `f:${c.tag}${n}`;
+    addEntity({ id, kind: 'fixture', type: c.tag, collider: f.collider, extraColliders: f.extraColliders, carBody: c.carBody, fixedPos: c.p, index: c.pile, dir: c.dir, state: {} });
+  } else if (f.kind === 'hydrant') {
+    // Extra fire hydrants (GAME-94): the client builds their models from the same list.
+    addEntity({ id: 'f:hydrantx' + (f.i + 1), kind: 'fixture', type: 'hydrant', collider: f.collider, fixedPos: f.p, dir: f.h.dir || 0, state: {} });
+  } else if (f.kind === 'window') {
+    // Broken windows survive restarts: { brokenUntil, boardAt, glass: { s: seed, h: [[u, v], ...] } }.
+    const w = f.w;
+    const st = save.windows[w.id] && save.windows[w.id].brokenUntil > Date.now() ? save.windows[w.id] : {};
+    addEntity({ id: w.id, kind: 'fixture', type: 'window', collider: f.collider, fixedPos: w.p, rot: w.q, half: w.half, index: w.gi, value: w.value, state: st });
+  }
 }
 // Where on the pane a hit landed, as u, v in -1..1 (GAME-84: cracks start there).
 function paneUV(win, at) {
@@ -265,10 +239,8 @@ function rescueLostProps() {
 }
 
 // ---------- players ----------
-const controller = world.createCharacterController(0.05);
-controller.enableAutostep(0.45, 0.25, true);
-controller.enableSnapToGround(0.4);
-controller.setMaxSlopeClimbAngle(50 * Math.PI / 180);
+// Same controller settings as the client's prediction (movement.mjs); the street NPCs use it too.
+const controller = MOVE.makeController(world);
 
 combat = createCombat({ RAPIER, world, controller, entities, addEntity, broadcast: (m) => broadcast(m), addDamage: (...a) => addDamage(...a),
   MAP, NPCS: JSON.parse(fs.readFileSync(path.join(__dirname, 'npcs.json'), 'utf8')).npcs, dt: 1 / PHYSICS_HZ, WALK, RUN, GRAVITY, CAP_HALF, CAP_R,
@@ -768,7 +740,7 @@ function knockDown(e, { vel = [0, 0, 0], spin = [0, 0, 0], cause = 'hit', by = n
   const s = e.player && sessions.get(e.player.id);
   if (s && s.queue && s.queue.length) { s.ackSeq = s.queue[s.queue.length - 1].seq; s.queue.length = 0; }
   e.down = { since: Date.now(), cause, by };
-  e.vy = 0;
+  e.vy = 0; e.mv = MOVE.state();
   e.collider.setMass(70);
   e.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
   e.body.setLinearDamping(0.2); e.body.setAngularDamping(0.8);
@@ -792,7 +764,7 @@ function getUp(e) {
   e.body.setTranslation({ x: t.x, y, z: t.z }, true);
   e.body.setNextKinematicTranslation({ x: t.x, y, z: t.z });
   if (e.player) Object.assign(e.player, { x: t.x, y, z: t.z });
-  e.down = null; e.vy = 0;
+  e.down = null; e.vy = 0; e.mv = MOVE.state();
   broadcast({ t: 'fx', kind: 'up', id: e.id, at: [+t.x.toFixed(2), +y.toFixed(2), +t.z.toFixed(2)] });
 }
 // While down: drop inputs (still ack them) and get up once the body has settled.
@@ -1138,49 +1110,46 @@ spawnCars();
 combat.spawnNpcs();
 
 const notAVagrant = (c) => { const o = byCollider.get(c.handle); return !o || o.kind !== 'vagrant'; };
+// Movement (GAME-99): every client tick is one command, replayed here for exactly one
+// fixed tick with the same movement code (movement.mjs) the client predicts with.
+const MAX_QUEUE = 30;                 // half a second of commands: anything older is dropped (the client gets corrected)
 function stepPlayers() {
   for (const s of sessions.values()) {
     if (s.entity.down) { downedStep(s); continue; }
-    // Inputs are played back for exactly the time the client simulated them, so the
-    // server lands where the client's prediction did. No input queued: stand still.
     const q = s.queue || (s.queue = []);
-    if (!q.length) continue;
-    let queued = 0; for (const i of q) queued += i.rem;
-    while (queued > 0.5 && q.length > 1) queued -= q.shift().rem;   // way behind: drop old inputs
-    const step = queued > 0.15 ? dt * 2 : dt;                       // a little behind: catch up
-    const inp = q[0];
-    let need = step - inp.rem; inp.rem -= step;
-    if (inp.rem <= 1e-6) {
-      q.shift(); s.ackSeq = inp.seq;
-      if (q.length && need > 0) q[0].rem -= need;                   // carry the overrun into the next input
-    }
-    s.input = inp;
-    const e = s.entity;
-    const t = e.body.translation();
-    let mx = inp.x || 0, mz = inp.z || 0;
-    const ml = Math.hypot(mx, mz);
-    if (ml > 1) { mx /= ml; mz /= ml; }
-    let speed = inp.run ? RUN : WALK;
-    if (e.grabbing) {
-      const g = entities.get(e.grabbing);
-      if (g) speed *= g.cat ? g.cat.drag : g.kind === 'sleeper' ? 60 / 70 : 1; // heavy things slow you down
-    }
-    e.vy += GRAVITY * step;
-    const mm = combat.moveMod(e, step);              // knocked out / staggered / knocked back (GAME-85)
-    const push = waterPush(t.x, t.z);                // standing in a hydrant's jet shoves you along it (GAME-94)
-    const desired = { x: (mx * speed * mm.scale + push.x) * step + mm.kx, y: e.vy * step, z: (mz * speed * mm.scale + push.z) * step + mm.kz };
-    // Cars (kinematic) are solid so you can stand on them; other players are not (GAME-83).
-    controller.computeColliderMovement(e.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC, undefined, notAVagrant);
-    const mv = controller.computedMovement();
-    const grounded = controller.computedGrounded();
-    if (grounded && e.vy < -STOMP_V) stompCar(e, t, mv, e.vy);   // landed hard on something: a car? (GAME-83)
-    if (grounded) { e.vy = inp.jump && !mm.down ? JUMP : 0; }
-    if (typeof inp.yaw === 'number') e.facing = inp.yaw;
-    else if (ml > 0.01) e.facing = Math.atan2(mx, mz);
-    e.body.setNextKinematicTranslation({ x: t.x + mv.x, y: t.y + mv.y, z: t.z + mv.z });
-    const p = e.player;
-    p.x = t.x + mv.x; p.y = t.y + mv.y; p.z = t.z + mv.z;
+    if (!q.length) continue;          // no command yet: hold still until it arrives
+    if (q.length > MAX_QUEUE) { const drop = q.splice(0, q.length - MAX_QUEUE); s.ackSeq = drop[drop.length - 1].seq; }
+    // Client clocks run a hair fast or packets bunch up: work off a backlog two commands a tick.
+    const n = q.length > 2 ? 2 : 1;
+    for (let i = 0; i < n && q.length; i++) { if (i) world.propagateModifiedBodyPositionsToColliders(); moveCommand(s, q.shift()); }
   }
+}
+function moveCommand(s, inp) {
+  const e = s.entity;
+  e.mv ||= MOVE.state();
+  s.input = inp; s.ackSeq = inp.seq;
+  let scale = 1;
+  if (e.grabbing) {
+    const g = entities.get(e.grabbing);
+    if (g) scale *= g.cat ? g.cat.drag : g.kind === 'sleeper' ? 60 / 70 : 1; // heavy things slow you down
+  }
+  const t = e.body.translation();
+  const mm = combat.moveMod(e, dt);                // knocked out / staggered / knocked back (GAME-85)
+  const push = waterPush(t.x, t.z);                // standing in a hydrant's jet shoves you along it (GAME-94)
+  const vy0 = e.mv.vy;
+  // Cars (kinematic) are solid so you can stand on them; other players are not (GAME-83).
+  const mv = MOVE.step(e.mv, { x: inp.x, z: inp.z, run: inp.run, jump: inp.jump, scale: scale * mm.scale, noJump: mm.down, push, kick: { x: mm.kx, z: mm.kz } }, dt,
+    MOVE.mover(controller, e.collider, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC, undefined, notAVagrant));
+  e.vy = e.mv.vy;
+  if (mv.grounded && vy0 < -STOMP_V) stompCar(e, t, mv, vy0);   // landed hard on something: a car? (GAME-83)
+  if (typeof inp.yaw === 'number') e.facing = inp.yaw;
+  else if (Math.hypot(inp.x, inp.z) > 0.01) e.facing = Math.atan2(inp.x, inp.z);
+  const nx = t.x + mv.x, ny = t.y + mv.y, nz = t.z + mv.z;
+  // Several commands can run in one physics tick: move the body now so the next one starts from here.
+  e.body.setTranslation({ x: nx, y: ny, z: nz }, true);
+  e.body.setNextKinematicTranslation({ x: nx, y: ny, z: nz });
+  const p = e.player;
+  p.x = nx; p.y = ny; p.z = nz;
 }
 
 let tick = 0;
@@ -1229,7 +1198,9 @@ function sendSnapshot(all, ws) {
     // Tell each player where the server has them after their latest input, so the
     // client can correct its own prediction gently instead of snapping.
     const p = s.entity.player;
-    s.ws.send(JSON.stringify({ t: 'a', seq: s.ackSeq || 0, p: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)] }));
+    // With the full movement state (GAME-99), so the client can rewind to it and replay what's still in flight.
+    // Full precision: a capsule rounded 0.1 mm into the ground makes the controller's first replayed step stall.
+    s.ws.send(JSON.stringify({ t: 'a', seq: s.ackSeq || 0, p: [+p.x.toFixed(5), +p.y.toFixed(5), +p.z.toFixed(5)], m: MOVE.packState(s.entity.mv ||= MOVE.state()), q: (s.queue || []).length }));
   }
 }
 function metaPayload() {
@@ -1284,11 +1255,21 @@ setInterval(decayHeatAndOwners, 5000);
 setInterval(persistWorld, 5000);
 
 // ---------- network ----------
+let rapierCache = null, rapierGzCache = null;
+const rapierSrc = () => rapierCache ||= fs.readFileSync(path.join(__dirname, 'node_modules', '@dimforge', 'rapier3d-compat', 'dist', 'rapier.mjs'));
+zlib.gzip(rapierSrc(), { level: 9 }, (err, buf) => { if (!err) rapierGzCache = buf; });   // off the main thread, so physics never hitches on it
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.css': 'text/css' };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/healthz') { res.writeHead(200); return res.end('ok'); }
   // Libraries come from node_modules so the game never depends on a CDN.
+  // Rapier for the client's movement prediction (GAME-99). It's 4 MB with the physics engine
+  // inlined, so it goes out gzipped (about 1.6 MB) and is cached.
+  if (url.pathname === '/vendor/rapier.mjs') {
+    const gz = !!rapierGzCache && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+    res.writeHead(200, { 'content-type': MIME['.js'], 'cache-control': 'public, max-age=86400', vary: 'accept-encoding', ...(gz ? { 'content-encoding': 'gzip' } : {}) });
+    return res.end(gz ? rapierGzCache : rapierSrc());
+  }
   if (url.pathname === '/vendor/cannon-es.js') {
     res.writeHead(200, { 'content-type': MIME['.js'], 'cache-control': 'public, max-age=86400' });
     return fs.createReadStream(path.join(__dirname, 'node_modules', 'cannon-es', 'dist', 'cannon-es.js')).pipe(res);
@@ -1355,10 +1336,17 @@ wss.on('connection', ws => {
     }
     const s = pid && sessions.get(pid);
     if (!s || s.ws !== ws) return;
-    if (m.t === 'in') {
+    if (m.t === 'in' && Array.isArray(m.c)) {
+      // A batch of fixed-tick commands (GAME-99): [seq, x, z, flags (1 jump, 2 run), yaw].
       const q = s.queue || (s.queue = []);
-      if (q.length < 40) q.push({ x: +m.x || 0, z: +m.z || 0, jump: !!m.jump, run: !!m.run, yaw: Number.isFinite(+m.yaw) ? +m.yaw : undefined,
-        seq: m.seq >>> 0, rem: Math.min(0.1, Math.max(0, +m.dt || 1 / 30)) });
+      const last = q.length ? q[q.length - 1].seq : (s.ackSeq || 0);
+      for (const c of m.c.slice(0, 32)) {                // a slow frame can carry several ticks; never drop any
+        if (!Array.isArray(c)) continue;
+        const seq = c[0] >>> 0;
+        if (seq <= last && last - seq < 1e6) continue;   // already have it (or a resend)
+        const x = Math.max(-1, Math.min(1, +c[1] || 0)), z = Math.max(-1, Math.min(1, +c[2] || 0)), f = c[3] | 0;
+        q.push({ seq, x, z, jump: !!(f & 1), run: !!(f & 2), yaw: Number.isFinite(+c[4]) ? +c[4] : undefined });
+      }
     }
     else if (s.entity.down) return;                       // knocked down: no actions until you get up
     else if (m.t === 'act') interact(s, !!m.light);
