@@ -27,6 +27,7 @@ PREWARM = (HERE / 'prewarm.js').read_text()
 ANIMJS = (HERE / 'anim.js').read_text()
 COPPER = (HERE / 'copper.js').read_text()
 CHARS = (HERE / 'characters.js').read_text()
+HYDRANTS = (HERE / 'hydrant-client.js').read_text()
 
 s = SRC.read_text()
 
@@ -244,7 +245,7 @@ rep("camera.rotation.set(pitch,yaw,0,'YXZ');", "camera.rotation.set(pitch+ANIM.c
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + ANIMJS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + ANIMJS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + HYDRANTS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

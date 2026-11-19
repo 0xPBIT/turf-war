@@ -52,6 +52,11 @@ for (const p of candidates) {
   if (hit) console.warn('spawn point', p, 'blocked by', JSON.stringify(hit)); else spawnPoints.push(p);
 }
 
+// Hand-added fields on colliders (e.g. GAME-94's tag:'hydrant', dir) survive a regeneration.
+const ckey = c => JSON.stringify([c.p, c.box || null, c.cyl || null]);
+const extra = new Map(old.colliders.map(c => [ckey(c), c]));
+for (const c of dump.colliders) { const o = extra.get(ckey(c)); if (o) for (const [k, v] of Object.entries(o)) if (!(k in c)) c[k] = v; }
+
 const lookProps = old.props.filter(p => !dump.newProps.some(n => n.id === p.id));
 const GENERATED = new Set(['name', 'note', 'bounds', 'spawn', 'spawnPoints', 'colliders', 'windows', 'piles', 'props', 'npcs', 'zones', 'actions', 'traffic', 'burnables', 'lampposts', 'roads', 'walks', 'lots', 'buildings', 'decks']);
 const town = {

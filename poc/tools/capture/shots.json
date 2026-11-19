@@ -219,6 +219,40 @@
    "setup": "if (typeof CARDMG !== 'undefined') { const g = CAR_GROUPS.find(g => Math.abs(g.position.x - 13.3) < 1 && Math.abs(g.position.z + 11.6) < 1); CARDMG.applyAll(g, { dents: [[0.3,0.93,1.5,0,1,0,0.38],[-0.88,0.7,0.3,-1,0,0,0.32],[-0.88,0.62,-1.2,-1,0,0,0.26],[0.4,0.6,2.25,0,0,1,0.3],[-0.2,1.4,-0.3,0,1,0,0.36]], glass: { front: 1, left: 2 } }); }",
    "note": "the same parked car from its left side (GAME-83 car damage)"
   },
+  "hydrant": {
+   "cam": [
+    -0.6,
+    1.45,
+    -1.5,
+    0.6,
+    -0.3
+   ],
+   "setup": "typeof HYD !== 'undefined' && HYD.force(__net.fixtures)",
+   "wait": 5,
+   "note": "Sunny Mart fire hydrant gushing across the sidewalk (GAME-94; setup forces the jet on)"
+  },
+  "hydrant-clip": {
+   "path": [
+    [
+     -0.2,
+     1.45,
+     -1.3,
+     0.45,
+     -0.28
+    ],
+    [
+     -1.2,
+     1.4,
+     -1.7,
+     0.75,
+     -0.3
+    ]
+   ],
+   "seconds": 5,
+   "setup": "typeof HYD !== 'undefined' && HYD.force(__net.fixtures)",
+   "optional": true,
+   "note": "slow pan past the gushing hydrant (GAME-94)"
+  },
   "town-overview": {
    "cam": [
     -130,

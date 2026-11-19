@@ -13,6 +13,10 @@ export const ITEM_TYPES = {
     shape: R => R.ColliderDesc.ball(0.085) },
   brick: { name: 'brick', mass: 1.6, speed: 17, shatters: false, breaks: true, ground: 1, dumpster: 1.5,
     shape: R => R.ColliderDesc.cuboid(0.06, 0.13, 0.042) },
+  // Heavy pipe wrench (GAME-94): hold it and press E at a fire hydrant to crank it open.
+  // Never in random ground litter; it lies at hand-placed spots (town.json items.spots) and turns up in dumpsters.
+  wrench: { name: 'pipe wrench', mass: 1.3, speed: 17, shatters: false, breaks: true, ground: 0, dumpster: 0.8, hitVerb: 'Wrenched',
+    shape: R => R.ColliderDesc.cuboid(0.035, 0.19, 0.05) },
 };
 
 export const ITEM_RULES = {

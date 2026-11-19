@@ -2943,6 +2943,14 @@ ANIM.define('dig', { dur: 1.2,
 ANIM.define('throw', { dur: .6,
   tp: k => { const s = ANIM.keys([[0, 0], [.3, 1], [.55, -.5], [1, 0]])(k);
     return { armR: [-1.6 - s * 1.3, 0, .1], turn: s * .3, lean: -s * .1, hideHeld: k > .3 && k < .95 }; } });
+// Crank a fire hydrant open with a pipe wrench (GAME-94): crouch at the valve nut, three hard
+// ratchet strokes (slow heave, quick return), the wrench stays in your fist.
+const WRENCH_STROKE = k => { const u = Math.max(0, Math.min(1, (k - .15) / .72)) * 3, ph = u % 1; return u >= 3 ? 0 : ph < .7 ? ANIM.ease(ph / .7) : 1 - ANIM.ease((ph - .7) / .3); };
+ANIM.define('wrench', { dur: 1.1,
+  fp: k => { const s = WRENCH_STROKE(k);
+    return { camY: -.42, camPitch: -.32 + s * .03, x: -.04 - s * .05, y: -.03, z: -.08, rx: .35, rz: s * 1.1 }; },
+  tp: k => { const s = WRENCH_STROKE(k);
+    return { y: -.18, lean: .3, armR: [-.9 - s * .55, 0, .2 - s * .3], armL: [-.7, 0, -.25], legR: [-.6, 0, 0], legL: [.3, 0, 0], head: [.35, 0, 0], tilt: -s * .05 }; } });
 
 // ===================== loose props (GAME-87) =====================
 // Meshes for the movable props the server simulates (carts, mattresses, the couch,
@@ -3626,19 +3634,233 @@ const ITEMS = (() => {
       put(B(.124, .02, .088, .004), 0xCFC6B4, g, 0, .12, 0, { ns: true });                                  // old mortar crust
       return g;
     },
+    wrench: () => {                                     // red pipe wrench (GAME-94); colours reuse town materials so nothing compiles mid-game
+      const g = new THREE.Group();
+      put(B(.034, .3, .024, .008), 0xE8343F, g, 0, -.04, 0);                                  // painted handle
+      for (let k = 0; k < 5; k++) put(B(.037, .008, .027, .002), 0x23202E, g, 0, -.16 + k * .03, 0);   // grip ridges
+      put(B(.044, .07, .03, .006), 0x8E95AE, g, .004, .14, 0);                                // steel body
+      put(B(.1, .028, .03, .006), 0xC8CDDD, g, .03, .19, 0);                                  // hook jaw
+      put(B(.07, .022, .03, .005), 0xC8CDDD, g, .028, .128, 0);                               // heel jaw
+      for (const y of [.18, .138]) for (let k = 0; k < 4; k++) put(B(.006, .006, .031), 0x23202E, g, .05 + k * .014, y + (y > .15 ? -.015 : .012), 0);   // teeth
+      put(CYL(.017, .017, .034, 10), 0x8E95AE, g, .0, .158, 0, { rx: Math.PI / 2 });           // adjusting nut
+      return g;
+    },
   };
   function mesh(type, seed = 0) {
     const g = (BUILD[type] || BUILD.rock)(seed);
     g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     return g;
   }
-  const NAMES = { bottle: 'bottle', can: 'can', rock: 'rock', brick: 'brick' };
+  const NAMES = { bottle: 'bottle', can: 'can', rock: 'rock', brick: 'brick', wrench: 'pipe wrench' };
   // In the first-person fist: the grip was modelled round a bottle, so smaller things sit
   // up out of the fingers where you can see them.
-  const HAND = { rock: { y: .1, s: 1.25 }, can: { y: .04, s: 1 }, brick: { y: .05, s: 1 }, bottle: { y: 0, s: 1 } };
+  const HAND = { rock: { y: .1, s: 1.25 }, can: { y: .04, s: 1 }, brick: { y: .05, s: 1 }, bottle: { y: 0, s: 1 }, wrench: { y: -.02, s: 1 } };
   function inHand(m, type) { const h = HAND[type] || HAND.rock; m.position.y += h.y; m.scale.multiplyScalar(h.s); return m; }
   return { mesh, inHand, name: t => NAMES[t] || t };
 })();
+
+// ===================== fire hydrants (GAME-94) =====================
+// Runs inside the look-test module (reuses put, grp, CYL, decal, dust, flameTex, fxl).
+// The server says which hydrants are open (meta objects[id].water); this draws the jet,
+// the spreading puddle, the shove you feel standing in it, and the gush sound.
+// Cheap on purpose: one Points draw per jet, materials made at load, no lights.
+const HYD = (() => {
+  const LEN = 6.5, RADIUS = 0.9, PUSH = 5.2, G = 9.8;          // same numbers as the server (server.mjs HYD)
+  const jets = new Map();                              // fixture id -> jet
+  // Shared materials, made now so they compile behind the loading screen (see prewarm.js).
+  // Drops: a firm, saturated blue disc. The Blend shader washes pale blues out to nothing, so water has to be a strong blue to read.
+  const dropTex = (() => {
+    const s = 64, cv = document.createElement('canvas'); cv.width = cv.height = s; const g = cv.getContext('2d');
+    const rg = g.createRadialGradient(s * .42, s * .4, 0, s / 2, s / 2, s / 2);
+    rg.addColorStop(0, 'rgba(190,232,255,1)'); rg.addColorStop(.3, 'rgba(40,160,255,1)'); rg.addColorStop(.75, 'rgba(20,110,230,.95)'); rg.addColorStop(1, 'rgba(20,110,230,0)');
+    g.fillStyle = rg; g.fillRect(0, 0, s, s); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const waterMat = new THREE.PointsMaterial({ map: dropTex, color: 0xFFFFFF, size: .12, transparent: true, opacity: .95, depthWrite: false, sizeAttenuation: true });
+  const mistMat = new THREE.PointsMaterial({ map: flameTex, color: 0x8CCBFF, size: .45, transparent: true, opacity: .35, depthWrite: false, sizeAttenuation: true });
+  const puddleTex = (() => {
+    const s = 256, cv = document.createElement('canvas'); cv.width = cv.height = s; const g = cv.getContext('2d');
+    for (let i = 0; i < 30; i++) {
+      const a = Math.random() * 6.28, d = Math.random() * s * .26, x = s / 2 + Math.cos(a) * d, y = s / 2 + Math.sin(a) * d, r = s * (.1 + Math.random() * .16);
+      const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, 'rgba(52,84,118,.55)'); rg.addColorStop(1, 'rgba(52,84,118,0)'); g.fillStyle = rg; g.fillRect(0, 0, s, s);
+    }
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  // The solid core of the jet right out of the outlet: a tapered translucent cone.
+  // Streaky white-water texture that scrolls down the cone, so the jet reads as flowing.
+  const streakTex = (() => {
+    const w = 256, h = 64, cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
+    g.fillStyle = 'rgba(40,150,255,.55)'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 46; i++) { const x = Math.random() * w, len = 30 + Math.random() * 120, y = Math.random() * w; g.fillStyle = `rgba(${Math.random() < .5 ? '235,248,255' : '120,200,255'},${.5 + Math.random() * .5})`; g.fillRect(y, x * h / w, len, 1.5 + Math.random() * 2); g.fillRect(y - w, x * h / w, len, 1.5 + Math.random() * 2); }
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); return t;
+  })();
+  const coreMat = new THREE.MeshBasicMaterial({ map: streakTex, color: 0xFFFFFF, transparent: true, opacity: .9, depthWrite: false, side: THREE.DoubleSide });
+  // The jet itself: a tube along the water's arc (along +x from the outlet), thickening as it spreads.
+  const coreGeo = (() => {
+    const VX = 8, VY = 3, T = .7, pts = [];
+    for (let i = 0; i <= 16; i++) { const t = i / 16 * T; pts.push(new THREE.Vector3(VX * t, VY * t - G / 2 * t * t, 0)); }
+    const g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 1, 10, false);
+    const pos = g.attributes.position, uv = g.attributes.uv, c = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {             // radius: 6 cm at the outlet to 22 cm where it lands
+      const k = uv.getX(i), r = .06 + .16 * k * k;
+      const t = k * T; c.set(VX * t, VY * t - G / 2 * t * t, 0);
+      pos.setXYZ(i, c.x + (pos.getX(i) - c.x) * r, c.y + (pos.getY(i) - c.y) * r, c.z + (pos.getZ(i) - c.z) * r);
+    }
+    g.computeVertexNormals(); return g;
+  })();
+  const puddleMat = new THREE.MeshBasicMaterial({ map: puddleTex, transparent: true, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -2 });
+
+  // Same model as the look test's hydrant, turned so an outlet cap faces the jet.
+  function buildHydrant(x, z, dir) {
+    const g = grp(scene, x, 0, z, dir - Math.PI / 2);
+    const prof = [[0, 0], [.17, 0], [.17, .06], [.13, .08], [.13, .5], [.15, .52], [.15, .56], [.11, .6], [.06, .68], [0, .7]].map(([a, b]) => new THREE.Vector2(a, b));
+    put(new THREE.LatheGeometry(prof, 14), 0xFFD84A, g, 0, 0, 0);
+    for (const r of [0, Math.PI / 2, Math.PI]) { const o = grp(g, 0, .4, 0, r); put(CYL(.06, .06, .12, 10), 0xFFD84A, o, .17, 0, 0, { rz: Math.PI / 2 }); put(CYL(.07, .07, .03, 6), 0xE8343F, o, .24, 0, 0, { rz: Math.PI / 2 }); }
+    put(CYL(.035, .035, .05, 5), 0xE8343F, g, 0, .72, 0);
+    const b = new CANNON.Body({ mass: 0, shape: new CANNON.Cylinder(.17, .17, .7, 8) }); b.position.set(x, .35, z); world.addBody(b);
+  }
+
+  function makeJet(f) {
+    const dir = f.dir || 0, dx = Math.sin(dir), dz = Math.cos(dir);
+    const N = 420, M = 48;
+    const mk = (n, mat) => {
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3).fill(-50), 3));
+      const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; fxl(pts); scene.add(pts); return pts;
+    };
+    const puddle = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), puddleMat.clone());   // clone shares the compiled program
+    puddle.rotation.x = -Math.PI / 2; puddle.position.set(f.pos[0] + dx * 2.6, .085, f.pos[2] + dz * 2.6); puddle.scale.set(5.5, 5.5, 1); fxl(puddle); scene.add(puddle);
+    const core = new THREE.Mesh(coreGeo, coreMat); core.position.set(f.pos[0] + dx * .28, .4, f.pos[2] + dz * .28);
+    core.rotation.set(0, dir - Math.PI / 2, 0, 'YXZ'); core.visible = false; core.layers.set(2); scene.add(core);   // layer 2 = kept out of the paint filter (like sign text), so the jet stays crisp
+    return { f, dx, dz, ox: f.pos[0] + dx * .3, oz: f.pos[2] + dz * .3, on: false, wet: 0, wetTarget: 0, core,
+      drops: mk(N, waterMat), mist: mk(M, mistMat), p: new Float32Array(N * 3), v: new Float32Array(N * 3), age: new Float32Array(N).fill(9),
+      mp: new Float32Array(M * 3), mv: new Float32Array(M * 3), mage: new Float32Array(M).fill(9), acc: 0, macc: 0, next: 0, mnext: 0, puddle };
+  }
+  function jetFor(f) { let j = jets.get(f.id); if (!j) { j = makeJet(f); jets.set(f.id, j); } return j; }
+
+  function init(MAP) { for (const h of MAP.hydrants || []) buildHydrant(h.p[0], h.p[1], h.dir || 0); }
+
+  function onMeta(m, fixtures) {
+    for (const [id, f] of fixtures) {
+      if (f.type !== 'hydrant') continue;
+      const st = m.objects[id] || {};
+      if (!st.water && !st.wet && !jets.has(id)) continue;
+      const j = jetFor(f);
+      if (st.water && !j.on) feedOpen(j);
+      if (forced) continue;
+      j.on = !!st.water; j.wetTarget = st.water ? 1 : st.wet ? .55 : 0;
+    }
+  }
+  let feedOpen = () => {};
+
+  // Shove for your own predicted vagrant: same shape as the server's waterPush().
+  function push() {
+    const out = { x: 0, z: 0 }, x = player.position.x, z = player.position.z;
+    for (const j of jets.values()) {
+      if (!j.on) continue;
+      const rx = x - j.ox, rz = z - j.oz, along = rx * j.dx + rz * j.dz;
+      if (along < -.2 || along > LEN) continue;
+      if (Math.abs(rx * j.dz - rz * j.dx) > RADIUS + along * .08) continue;
+      const v = PUSH * (.35 + .65 * Math.max(0, 1 - Math.max(0, along) / LEN)); out.x += j.dx * v; out.z += j.dz * v;
+    }
+    return out;
+  }
+
+  // ---------- sound: a hissing gush, louder the closer you are ----------
+  let actx = null, noiseBuf = null;
+  function gushNode(j) {
+    try { actx ||= new AudioContext(); } catch { return; }
+    if (!noiseBuf) { noiseBuf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate); const d = noiseBuf.getChannelData(0); let b = 0; for (let i = 0; i < d.length; i++) { b = b * .6 + (Math.random() * 2 - 1) * .4; d[i] = b; } }
+    const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = .6;
+    const g = actx.createGain(); g.gain.value = 0;
+    src.connect(bp); bp.connect(g); g.connect(actx.destination); src.start();
+    j.snd = { src, g, bp };
+  }
+  function clank(at, n = 3) {                         // ratchet clicks while the wrench turns
+    try { actx ||= new AudioContext(); } catch { return; }
+    const d = camera.position.distanceTo(new THREE.Vector3(...at)); if (d > 25) return;
+    const vol = .12 * (1 - d / 25) * SET.vol(); if (vol <= 0) return;
+    for (let i = 0; i < n; i++) {
+      const t0 = actx.currentTime + .12 + i * .26, o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle'; o.frequency.setValueAtTime(1900 - i * 120, t0); o.frequency.exponentialRampToValueAtTime(420, t0 + .07);
+      g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(.0001, t0 + .09);
+      o.connect(g); g.connect(actx.destination); o.start(t0); o.stop(t0 + .1);
+    }
+  }
+
+  function frame(dt) {
+    streakTex.offset.x -= dt * 2.4;                     // tube u runs along the arc
+    for (const j of jets.values()) {
+      // drops: launched from the outlet, arc down under gravity, die on the ground
+      const { p, v, age } = j, N = age.length;
+      if (j.on) {
+        j.acc += dt * 420;
+        while (j.acc > 1) {
+          j.acc--; const i = j.next; j.next = (j.next + 1) % N;
+          const sp = 7 + Math.random() * 2.2, side = (Math.random() - .5) * 1.1, up = 2.4 + Math.random() * 1.3;
+          p[i * 3] = j.ox; p[i * 3 + 1] = .4; p[i * 3 + 2] = j.oz;
+          v[i * 3] = j.dx * sp + j.dz * side; v[i * 3 + 1] = up; v[i * 3 + 2] = j.dz * sp - j.dx * side;
+          const pre = Math.random() * dt - dt;                  // rewind 0..dt; the step below moves it forward dt, so the batch spreads along the arc and low frame rates still read as a stream
+          p[i * 3] += v[i * 3] * pre; p[i * 3 + 1] += (up - G * pre / 2) * pre; p[i * 3 + 2] += v[i * 3 + 2] * pre; v[i * 3 + 1] -= G * pre; age[i] = pre;
+        }
+      }
+      let live = 0;
+      for (let i = 0; i < N; i++) {
+        if (age[i] > 2) continue;
+        age[i] += dt; v[i * 3 + 1] -= G * dt;
+        p[i * 3] += v[i * 3] * dt; p[i * 3 + 1] += v[i * 3 + 1] * dt; p[i * 3 + 2] += v[i * 3 + 2] * dt;
+        if (p[i * 3 + 1] < .1) {                               // lands: gone into the puddle, sometimes with a splash of spray
+          age[i] = 9; if (Math.random() < .03) spawnMist(j, p[i * 3], p[i * 3 + 2]);
+          continue;
+        }
+        live++;
+      }
+      const pa = j.drops.geometry.attributes.position.array;
+      for (let i = 0; i < N; i++) { const dead = age[i] > 2; pa[i * 3] = dead ? 0 : p[i * 3]; pa[i * 3 + 1] = dead ? -50 : p[i * 3 + 1]; pa[i * 3 + 2] = dead ? 0 : p[i * 3 + 2]; }
+      j.drops.geometry.attributes.position.needsUpdate = true;
+      if (j.on) { j.macc += dt * 6; while (j.macc > 1) { j.macc--; spawnMist(j, j.ox + j.dx * (.3 + Math.random() * 1.2), j.oz + j.dz * (.3 + Math.random() * 1.2), .5); } }
+      // mist puffs drift up and fade (all share one material, so they fade by shrinking)
+      const { mp, mv, mage } = j, M = mage.length, ma = j.mist.geometry.attributes.position.array;
+      for (let i = 0; i < M; i++) {
+        if (mage[i] > 1.2) { ma[i * 3 + 1] = -50; continue; }
+        mage[i] += dt; mp[i * 3] += mv[i * 3] * dt; mp[i * 3 + 1] += mv[i * 3 + 1] * dt; mp[i * 3 + 2] += mv[i * 3 + 2] * dt;
+        ma[i * 3] = mp[i * 3]; ma[i * 3 + 1] = mp[i * 3 + 1]; ma[i * 3 + 2] = mp[i * 3 + 2];
+      }
+      j.mist.geometry.attributes.position.needsUpdate = true;
+      j.core.visible = j.on; if (j.on) j.core.scale.set(1 + Math.sin(performance.now() * .031) * .06, 1 + Math.random() * .1, 1 + Math.random() * .1);
+      j.drops.visible = live > 0; j.mist.visible = j.on || mage.some(a => a < 1.2);
+      // puddle spreads while it gushes, then dries slowly
+      j.wet += (j.wetTarget - j.wet) * (1 - Math.exp(-dt * (j.wetTarget > j.wet ? .35 : .05)));
+      j.puddle.material.opacity = j.wet * .9; j.puddle.scale.set(2 + j.wet * 4.5, 2 + j.wet * 3.5, 1); j.puddle.visible = j.wet > .01;
+      // sound
+      if (j.on && !j.snd) gushNode(j);
+      if (j.snd) {
+        const d = Math.hypot(camera.position.x - j.ox, camera.position.z - j.oz);
+        const target = j.on ? .22 * Math.max(0, 1 - d / 35) * SET.vol() : 0;
+        j.snd.g.gain.value += (target - j.snd.g.gain.value) * Math.min(1, dt * 4);
+        if (!j.on && j.snd.g.gain.value < .002) { try { j.snd.src.stop(); } catch {} j.snd = null; }
+      }
+    }
+  }
+  function spawnMist(j, x, z, up = .25) {
+    const i = j.mnext; j.mnext = (j.mnext + 1) % j.mage.length;
+    j.mp[i * 3] = x; j.mp[i * 3 + 1] = .2 + Math.random() * .3; j.mp[i * 3 + 2] = z;
+    j.mv[i * 3] = j.dx * .8 + (Math.random() - .5) * .6; j.mv[i * 3 + 1] = up + Math.random() * .4; j.mv[i * 3 + 2] = j.dz * .8 + (Math.random() - .5) * .6; j.mage[i] = 0;
+  }
+
+  // Water hits a fire: hissing steam and the fire dies down to a smoulder.
+  function douse(f, at) {
+    const p = new THREE.Vector3(at[0], (at[1] || .4) + .4, at[2]);
+    dust(p, 12, 0xF4F6F8);
+    if (f && f.type === 'pile') { const pl = piles[f.index]; if (pl && pl.state === 'burning') { pl.state = 'smolder'; pl.t = 0; if (pl.e) { pl.e.fire = 0; pl.e.smoke = .5; } } }
+  }
+
+  // Capture hook: turn every hydrant on locally (photo-mode clips pause the server, so meta never arrives).
+  let forced = false;
+  function force(fixtures) { forced = true; for (const f of fixtures.values()) if (f.type === 'hydrant') { const j = jetFor(f); j.on = true; j.wetTarget = 1; j.wet = .8; } }
+
+  return { init, onMeta, force, frame, push, douse, clank, set onOpen(fn) { feedOpen = fn; }, materials: [waterMat, mistMat, puddleMat, coreMat], jets };
+})();
+window.__hyd = HYD;   // for capture/debug scripts
 
 // ===================== car damage (GAME-83) =====================
 // The server sends dents and per-pane crack levels in the car's own frame (nose +z, y from
@@ -3784,7 +4006,7 @@ const CARDMG = (() => {
 // smoothly interpolates everyone and everything else.
 const NET = (() => {
   const MAPP = fetch('/town.json').then(r => r.json());
-  let MAP = null; MAPP.then(m => { MAP = m; });
+  let MAP = null; MAPP.then(m => { MAP = m; HYD.init(m); });
   const el = id => document.getElementById(id);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const money = n => '$' + Math.round(n).toLocaleString('en-US');
@@ -4119,8 +4341,9 @@ const NET = (() => {
   function beforeStep(dt, mx, mz) {
     const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
-    if (!haveAck || ownRag) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us, or while knocked down
+    if (!haveAck || ownRag) { player.velocity.x = player.velocity.z = 0; return; }   // stand still until the server places us, or while knocked down
     if (FIGHT.isDown()) player.velocity.y = Math.min(player.velocity.y, 0);   // no jumping while knocked out
+    const w = HYD.push(); player.velocity.x += w.x; player.velocity.z += w.z;   // hydrant jets shove you, same as on the server (GAME-94)
   }
   function afterStep(dt) {
     FIGHT.afterStep(dt);
@@ -4218,6 +4441,11 @@ const NET = (() => {
     else if (m.kind === 'pocket') { if (m.id === me) feed(`You flip the lid and dig around... found <b>${esc(m.name)}</b>. Pocketed.`); }
     else if (m.kind === 'thud') { const p = new THREE.Vector3(...m.at); dust(p, m.item === 'brick' || m.item === 'rock' ? 3 : 1, 0xd8d2c4); }
     else if (m.kind === 'rummage') { const p = new THREE.Vector3(m.at[0], 1.9, m.at[2]); dust(p, 4, 0xb9b09a); if (m.by !== me) { remoteAnim(m.by, 'dig'); const v = ents.get(m.by); if (v && v.obj) popText('*rummage*', [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z], 'say'); } }
+    else if (m.kind === 'wrench') {                    // GAME-94: someone cranks a hydrant
+      const f = fixtures.get(m.hyd); if (f) HYD.clank(f.pos);
+      if (m.id === me) { const open = meta && meta.objects[m.hyd]?.water; feed(open ? 'You crank the valve back shut.' : 'You fit the wrench on the valve nut and heave...'); }   // the crank itself is the 'wrench' clip (tools/anim.js), sent by the server
+    }
+    else if (m.kind === 'douse') HYD.douse(fixtures.get(m.id), m.at);
     else if (m.kind === 'grab') {
       if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
@@ -4325,6 +4553,7 @@ const NET = (() => {
 
   function onMeta(m) {
     meta = m; damage = m.town; TOWN.lights(m.lights); FIGHT.onMeta(m); COPPER.meta(m);
+    HYD.onMeta(m, fixtures);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
@@ -4364,10 +4593,12 @@ const NET = (() => {
   const cur = new THREE.Vector3();
   function frame(dt, t) {
     GLASS.update(dt);
+    HYD.frame(dt);
     const rt = serverNow() - INTERP_MS, showTags = SET.tags();
     raise += ((myHeld || grabbing ? 1 : 0) - raise) * (1 - Math.exp(-dt * 12));
     if (itemTarget && itemTarget.obj) itemTarget.obj.scale.setScalar(1);
     itemTarget = findItemTarget();
+    if (itemTarget && myHeld === 'wrench' && nearestAction()?.type === 'hydrant') itemTarget = null;   // wrench in hand at a hydrant: E cranks, not swaps
     if (itemTarget) itemTarget.obj.scale.setScalar(1 + .12 * (.5 + .5 * Math.sin(t * 8)));
     for (const v of ents.values()) {
       if (!v.obj) continue;
@@ -4414,6 +4645,11 @@ const NET = (() => {
   }
   function nearestAction() {
     if (!MAP) return null; let best = null, bd = 9;
+    if (myHeld === 'wrench') for (const f of fixtures.values()) {   // holding a wrench, the hydrant wins (GAME-94)
+      if (f.type !== 'hydrant') continue;
+      const d = (f.pos[0] - player.position.x) ** 2 + (f.pos[2] - player.position.z) ** 2; if (d < bd) { bd = d; best = f; }
+    }
+    if (best) return best;
     for (const f of actionables()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
@@ -4441,6 +4677,10 @@ const NET = (() => {
       const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
       promptMode = f ? 'act' : g ? 'grab' : null;
       if (f && (f.type === 'dumpster' || f.type === 'pile')) html = `Dig through the ${f.type === 'pile' ? 'trash' : 'dumpster'} <kbd>${keyLabel(__set.s.binds.act)}</kbd> &nbsp;${esc(FIRE.verb(f.type, 'Light it'))} <kbd>${keyLabel(__set.s.binds.light)}</kbd>`;
+      else if (f && f.type === 'hydrant') {
+        const open = meta && meta.objects[f.id]?.water;
+        html = myHeld === 'wrench' ? `${open ? 'Crank the hydrant shut' : 'Crank open the fire hydrant'} <kbd>${keyLabel(__set.s.binds.act)}</kbd>` : open ? '' : 'Fire hydrant. The valve needs a <b>wrench</b>';
+      }
       else if (f) html = `${esc(COPPER.verb(f.type, FIRE.verb(f.type, MAP.actions[f.type].verb)))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
       else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
     }
@@ -4458,6 +4698,7 @@ const NET = (() => {
     if (itemTarget) { send({ t: 'pickup', id: itemTarget.id }); playAnim('reach'); return; }
     const f = nearestAction(); send({ t: 'act' });
     if (f && (f.type === 'dumpster' || f.type === 'pile')) playAnim('dig');
+    if (f && f.type === 'hydrant') { if (myHeld === 'wrench') ANIM.play('wrench'); }   // GAME-94
     else if (f) { const clip = (MAP.actions[f.type] || {}).anim || ACTION_ANIM[f.type]; if (clip) ANIM.play(clip); }   // GAME-92: your hand moves on the key press
   };
   const act = () => (promptMode === 'grab' ? sendGrab : sendAct)();   // the on-screen button does whatever it says
@@ -5351,6 +5592,10 @@ const MINI = (() => {
   const st = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: stainTex, transparent: true, depthWrite: false })); g.add(st);
   for (const [map, blending] of [[flameTex, THREE.AdditiveBlending], [smokeTex, THREE.NormalBlending]])
     g.add(new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, blending })));
+  // Hydrant water (GAME-94): spray points and the puddle decal.
+  const pt = new THREE.BufferGeometry(); pt.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+  for (const m of HYD.materials) g.add(m.isPointsMaterial ? new THREE.Points(pt, m) : new THREE.Mesh(geo, m));
+  g.add(ITEMS.mesh('wrench'));
   const b = bottleMesh(); b.traverse(o => { if (o.isMesh) o.castShadow = true; }); g.add(b);
   // A speck in front of the camera, so the first real frames draw it through every pass.
   g.scale.setScalar(.002); camera.updateMatrixWorld();

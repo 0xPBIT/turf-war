@@ -4,7 +4,7 @@
 // smoothly interpolates everyone and everything else.
 const NET = (() => {
   const MAPP = fetch('/town.json').then(r => r.json());
-  let MAP = null; MAPP.then(m => { MAP = m; });
+  let MAP = null; MAPP.then(m => { MAP = m; HYD.init(m); });
   const el = id => document.getElementById(id);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const money = n => '$' + Math.round(n).toLocaleString('en-US');
@@ -339,8 +339,9 @@ const NET = (() => {
   function beforeStep(dt, mx, mz) {
     const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
-    if (!haveAck || ownRag) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us, or while knocked down
+    if (!haveAck || ownRag) { player.velocity.x = player.velocity.z = 0; return; }   // stand still until the server places us, or while knocked down
     if (FIGHT.isDown()) player.velocity.y = Math.min(player.velocity.y, 0);   // no jumping while knocked out
+    const w = HYD.push(); player.velocity.x += w.x; player.velocity.z += w.z;   // hydrant jets shove you, same as on the server (GAME-94)
   }
   function afterStep(dt) {
     FIGHT.afterStep(dt);
@@ -438,6 +439,11 @@ const NET = (() => {
     else if (m.kind === 'pocket') { if (m.id === me) feed(`You flip the lid and dig around... found <b>${esc(m.name)}</b>. Pocketed.`); }
     else if (m.kind === 'thud') { const p = new THREE.Vector3(...m.at); dust(p, m.item === 'brick' || m.item === 'rock' ? 3 : 1, 0xd8d2c4); }
     else if (m.kind === 'rummage') { const p = new THREE.Vector3(m.at[0], 1.9, m.at[2]); dust(p, 4, 0xb9b09a); if (m.by !== me) { remoteAnim(m.by, 'dig'); const v = ents.get(m.by); if (v && v.obj) popText('*rummage*', [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z], 'say'); } }
+    else if (m.kind === 'wrench') {                    // GAME-94: someone cranks a hydrant
+      const f = fixtures.get(m.hyd); if (f) HYD.clank(f.pos);
+      if (m.id === me) { const open = meta && meta.objects[m.hyd]?.water; feed(open ? 'You crank the valve back shut.' : 'You fit the wrench on the valve nut and heave...'); }   // the crank itself is the 'wrench' clip (tools/anim.js), sent by the server
+    }
+    else if (m.kind === 'douse') HYD.douse(fixtures.get(m.id), m.at);
     else if (m.kind === 'grab') {
       if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
@@ -545,6 +551,7 @@ const NET = (() => {
 
   function onMeta(m) {
     meta = m; damage = m.town; TOWN.lights(m.lights); FIGHT.onMeta(m); COPPER.meta(m);
+    HYD.onMeta(m, fixtures);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
@@ -584,10 +591,12 @@ const NET = (() => {
   const cur = new THREE.Vector3();
   function frame(dt, t) {
     GLASS.update(dt);
+    HYD.frame(dt);
     const rt = serverNow() - INTERP_MS, showTags = SET.tags();
     raise += ((myHeld || grabbing ? 1 : 0) - raise) * (1 - Math.exp(-dt * 12));
     if (itemTarget && itemTarget.obj) itemTarget.obj.scale.setScalar(1);
     itemTarget = findItemTarget();
+    if (itemTarget && myHeld === 'wrench' && nearestAction()?.type === 'hydrant') itemTarget = null;   // wrench in hand at a hydrant: E cranks, not swaps
     if (itemTarget) itemTarget.obj.scale.setScalar(1 + .12 * (.5 + .5 * Math.sin(t * 8)));
     for (const v of ents.values()) {
       if (!v.obj) continue;
@@ -634,6 +643,11 @@ const NET = (() => {
   }
   function nearestAction() {
     if (!MAP) return null; let best = null, bd = 9;
+    if (myHeld === 'wrench') for (const f of fixtures.values()) {   // holding a wrench, the hydrant wins (GAME-94)
+      if (f.type !== 'hydrant') continue;
+      const d = (f.pos[0] - player.position.x) ** 2 + (f.pos[2] - player.position.z) ** 2; if (d < bd) { bd = d; best = f; }
+    }
+    if (best) return best;
     for (const f of actionables()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
@@ -661,6 +675,10 @@ const NET = (() => {
       const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
       promptMode = f ? 'act' : g ? 'grab' : null;
       if (f && (f.type === 'dumpster' || f.type === 'pile')) html = `Dig through the ${f.type === 'pile' ? 'trash' : 'dumpster'} <kbd>${keyLabel(__set.s.binds.act)}</kbd> &nbsp;${esc(FIRE.verb(f.type, 'Light it'))} <kbd>${keyLabel(__set.s.binds.light)}</kbd>`;
+      else if (f && f.type === 'hydrant') {
+        const open = meta && meta.objects[f.id]?.water;
+        html = myHeld === 'wrench' ? `${open ? 'Crank the hydrant shut' : 'Crank open the fire hydrant'} <kbd>${keyLabel(__set.s.binds.act)}</kbd>` : open ? '' : 'Fire hydrant. The valve needs a <b>wrench</b>';
+      }
       else if (f) html = `${esc(COPPER.verb(f.type, FIRE.verb(f.type, MAP.actions[f.type].verb)))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
       else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
     }
@@ -678,6 +696,7 @@ const NET = (() => {
     if (itemTarget) { send({ t: 'pickup', id: itemTarget.id }); playAnim('reach'); return; }
     const f = nearestAction(); send({ t: 'act' });
     if (f && (f.type === 'dumpster' || f.type === 'pile')) playAnim('dig');
+    if (f && f.type === 'hydrant') { if (myHeld === 'wrench') ANIM.play('wrench'); }   // GAME-94
     else if (f) { const clip = (MAP.actions[f.type] || {}).anim || ACTION_ANIM[f.type]; if (clip) ANIM.play(clip); }   // GAME-92: your hand moves on the key press
   };
   const act = () => (promptMode === 'grab' ? sendGrab : sendAct)();   // the on-screen button does whatever it says
