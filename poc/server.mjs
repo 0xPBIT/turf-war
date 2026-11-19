@@ -126,7 +126,8 @@ MAP.colliders.forEach((c, i) => {
     const yaw = c.ry !== undefined ? c.ry - Math.PI / 2 : (c.box[0] > c.box[2] ? Math.PI / 2 : 0);
     const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], 0, c.p[2]).setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }));
     [collider, ...extraColliders] = carColliders(b, 0, c.ry !== undefined ? CAR_CABIN_Z : 0);
-    c.carBody = b;
+    // Not enumerable: MAP is sent to clients as /town.json, and a physics body can't be serialised.
+    Object.defineProperty(c, 'carBody', { value: b, enumerable: false, writable: true, configurable: true });
   } else collider = colliderFor(c);
   if (!c.tag || c.tag === 'npc') return;
   const n = fixtureCount[c.tag] = (fixtureCount[c.tag] || 0) + 1;
