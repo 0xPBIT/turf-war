@@ -356,6 +356,7 @@ const NET = (() => {
     }
     else if (m.kind === 'hit') onHit(m);
     else if (m.kind === 'up') onUp(m);
+    else if (m.kind === 'flick') FIRE.onFlick(m.id === me, m.id);
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
     else FIGHT.onFx(m);
   }
@@ -450,6 +451,7 @@ const NET = (() => {
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
     for (const [id, v] of ents) if (v.kind === 'vagrant' && v.model && m.objects[id] && m.objects[id].rag && !v.rag) startRagdoll(v, [0, 0, 0], [0, 0, 0]);
+    FIRE.onMeta(m, fixtures);
     for (const [id, f] of fixtures) {
       const st = m.objects[id] || {};
       if (f.type === 'window') { const t = paneFor(f); if (st.broken) breakPane(t, true); else repairPane(t); }
@@ -567,7 +569,7 @@ const NET = (() => {
     const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
     promptMode = f ? 'act' : g ? 'grab' : null; btn.hidden = !promptMode;
     let html = '';
-    if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+    if (f) html = `${esc(FIRE.verb(f.type, MAP.actions[f.type].verb))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
     else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
     if (html && btn.innerHTML !== html) btn.innerHTML = html;
   }
@@ -607,6 +609,7 @@ const NET = (() => {
       else if (m.t === 'fx') onFx(m);
       else if (m.t === 'spawn') spawn(m.e);
       else if (m.t === 'despawn') despawn(m.id);
+      else if (m.t === 'inv') FIRE.onInv(m);
       else if (m.t === 'welcome') {
         try { localStorage.setItem('tw_token', m.token); } catch {}
         for (const id of [...ents.keys(), ...fixtures.keys()]) despawn(id);
