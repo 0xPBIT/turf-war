@@ -24,6 +24,7 @@ PROPS = (HERE / 'props.js').read_text()
 MINI = (HERE / 'minimap.js').read_text()
 FIRE = (HERE / 'fire-client.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
+ANIMJS = (HERE / 'anim.js').read_text()
 COPPER = (HERE / 'copper.js').read_text()
 CHARS = (HERE / 'characters.js').read_text()
 
@@ -138,18 +139,6 @@ rep("root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined) return;", "roo
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
 
-# GAME-87: other players' arms can move. With o.armRig, vagrant() builds each arm on its
-# own shoulder pivot (not baked into the body) so the client can swing them forward to
-# grab, push and drag things.
-rep("""  } else {
-    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""",
-"""  } else if(o.armRig){
-    for(const [i,s] of [[0,-1],[1,1]]){ const pv=new THREE.Group(), rel=v=>[v[0]-sh[i][0],v[1]-sh[i][1],v[2]-sh[i][2]], e=rel([s*.29,1.06,-.02]), w=rel([s*.3,.82,.08]);
-      limb([0,0,0],e,.06,.065,'tx:canvas|'+o.coat,pv); limb(e,w,.05,.058,'tx:canvas|'+o.coat,pv); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,pv,...w); glove(pv,rel([s*.3,.76,.09]),[0,-1,.15],o,false);
-      bake(pv); pv.position.set(...sh[i]); o.armRig.push(pv); }
-  } else {
-    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""")
-rep("  bake(head); bake(g); head.position.y=1.62; g.add(head);", "  bake(head); bake(g); head.position.y=1.62; g.add(head); if(o.armRig) for(const pv of o.armRig) g.add(pv);")
 # First-person hands reach out, grip and strain while you hold something (net-client.js vmPose).
 rep("NET.heldVisible(handKick); NET.vmAnim(dt);", "NET.heldVisible(handKick); NET.vmPose(dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);")
 
@@ -193,9 +182,15 @@ rep(",Math.sin(a)*.35*s); } }", ",Math.sin(a)*.35*s); } bake(g); g.position.set(
 # Burning plants update with the other fire effects.
 rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAct();")
 
+# Player animation (GAME-92): the first-person hand and camera take offsets from the shared
+# animation helper (tools/anim.js); other players' vagrants are posed through p.parts in net-client.
+rep("NET.vmPose(dt,ml>0);", "vm.rotation.y=0; vm.rotation.z=0; NET.vmPose(dt,ml>0); ANIM.applyFP(vm,heldBottle,dt,ml>0);")
+rep("player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()", "player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()+ANIM.camY()")
+rep("camera.rotation.set(pitch,yaw,0,'YXZ');", "camera.rotation.set(pitch+ANIM.camPitch(),yaw,0,'YXZ');")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + ANIMJS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

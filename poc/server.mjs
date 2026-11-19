@@ -415,6 +415,20 @@ function spreadFires() {
 setInterval(spreadFires, 1000);
 
 const HIT_ONLY = new Set(['window', 'car', 'crate', 'cone']);
+
+// ---------- player animations (GAME-92) ----------
+// playAnim(entity, clip, extra) shows a clip from tools/anim.js on that vagrant for everyone.
+// The player's own client plays it in first person right away and skips the echo.
+function playAnim(e, clip, extra) { broadcast({ t: 'fx', kind: 'anim', id: e.id, clip, ...(extra || {}) }); }
+// Which clip each E interaction plays (a map action can override it with "anim"). Digging in
+// dumpsters and piles, copper and lighting have their own animations in their modules.
+const ACTION_ANIM = { stop_sign: 'panhandle', fire_can: 'warm', couch: 'sit' };
+// Where you sit: the seat's centre, facing the way its front faces (local +z).
+const SEATS = new Set(['couch']);
+function seatOf(o) {
+  if (o.body) { const t = o.body.translation(), q = o.body.rotation(); return [t.x, t.z, Math.atan2(2 * (q.x * q.z + q.w * q.y), 1 - 2 * (q.x * q.x + q.y * q.y))]; }
+  return [o.fixedPos[0], o.fixedPos[2], 0];
+}
 // E does the fixture's main thing (dumpsters: dig for junk); F lights anything that burns.
 function interact(s, light) {
   const e = s.entity, p = e.player;
@@ -435,9 +449,12 @@ function interact(s, light) {
     if (fuel - 1 <= 0) { p.items.lighter = null; tell(s, 'Your lighter is out of fluid.'); }
     sendInv(s);
     broadcast({ t: 'fx', kind: 'flick', id: e.id });
+    playAnim(e, 'light', { tpOnly: true });      // others see you crouch and flick it (your own hand: fire-client)
     return ignite(target, p, now);
   }
   target.state.busyUntil = now + a.repairSec * 1000;
+  const clip = a.anim || ACTION_ANIM[target.type];
+  if (clip) playAnim(e, clip, SEATS.has(target.type) ? { seat: seatOf(target) } : undefined);
   if (a.cash) { p.cash = (p.cash || 0) + a.cash; broadcast({ t: 'fx', kind: 'say', id: e.id, text: `Spare change? (+$${a.cash})` }); }
   if (a.hangout) broadcast({ t: 'fx', kind: 'say', id: e.id, text: target.type === 'couch' ? 'comfy' : 'warming up' });
   addDamage(p, a.cost, posOf(target), a.verb);

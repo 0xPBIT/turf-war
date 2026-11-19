@@ -241,18 +241,16 @@ const NET = (() => {
     if (type) { const m = ITEMS.mesh(type, 1); ITEMS.inHand(m, type); m.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } }); heldSlot.add(m); }
   }
   // Other vagrants: a lean (pick up, dig) or an arm swing (throw) played on their model.
-  function remoteAnim(id, kind) { const v = ents.get(id); if (v && v.model) v.ranim = { kind, t: 0, dur: ANIM_DUR[kind] * 1.3 }; }
-  function stepRemoteAnim(v, dt) {
-    const a = v.ranim; if (!a) return;
-    a.t += dt; const k = Math.min(1, a.t / a.dur), g = v.model.g;
-    if (a.kind === 'throw') { g.rotation.x = -bump(k, 0, .35) * .25 + bump(k, .35, .7) * .3; if (v.heldObj) v.heldObj.position.y = .64 + bump(k, 0, .35) * .9; }
-    else { g.rotation.x = bump(k, 0, a.kind === 'dig' ? .2 : .4) * (a.kind === 'dig' ? .45 : .8); if (a.kind === 'dig') g.rotation.z = Math.sin(a.t * 16) * .05 * bump(k, 0, .2); }
-    if (k >= 1) { v.ranim = null; g.rotation.x = 0; if (v.heldObj) v.heldObj.position.y = .64; }
-  }
+  // Other players' reach / dig / throw are clips in tools/anim.js (GAME-92), posed on their arms.
+  function remoteAnim(id, kind) { ANIM.playOn(ents.get(id), kind); }
   function setRemoteHeld(v, type) {
     if (v.heldObj) { v.model.g.remove(v.heldObj); v.heldObj = null; }
     if (!type || v.kind !== 'vagrant') return;
-    v.heldObj = ITEMS.mesh(type, hash(v.id)); v.heldObj.position.set(-.31, .64, .14); v.heldObj.rotation.x = .25; v.model.g.add(v.heldObj);
+    v.heldObj = ITEMS.mesh(type, hash(v.id)); v.heldObj.rotation.x = .25;
+    // In the -x glove, on the arm (forearm if it has one) so it rises and swings with the arm.
+    const P = v.model.parts, arm = P && (P.armL.position.x < 0 ? P.armL : P.armR), fore = arm && (arm === P.armL ? P.foreL : P.foreR);
+    if (arm) { const at = new THREE.Vector3(-.31, .64, .14).sub(arm.position); if (fore) at.sub(fore.position); (fore || arm).add(v.heldObj); v.heldObj.position.copy(at); }
+    else { v.heldObj.position.set(-.31, .64, .14); v.model.g.add(v.heldObj); }
   }
   // Interaction animations: 'reach' bends down to grab junk, 'dig' rummages in a bin,
   // 'throw' winds up and lets go. They layer on top of the look test's bob and kick.
@@ -429,6 +427,7 @@ const NET = (() => {
       if (m.target === me) feed(m.rage ? 'The driver has had enough of you. <b>Move!</b>' : 'A car is honking at you. Get out of the street!');
     }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
+    else if (m.kind === 'anim') { if (m.id === me) ANIM.echo(m.clip, m); else ANIM.playOn(ents.get(m.id), m.clip, m); }
     else if (m.kind === 'held') {
       if (m.id === me) { const had = myHeld; setMyHeld(m.item); if (m.item && m.item !== had) feed(`Got a <b>${esc(ITEMS.name(m.item))}</b>. Click to throw it.`); }
       else { const v = ents.get(m.id); if (v && v.model) { if (m.item && !v.held2) remoteAnim(m.id, 'reach'); v.held2 = m.item; setRemoteHeld(v, m.item); } }
@@ -561,22 +560,7 @@ const NET = (() => {
   }
 
   // ---------- grab / push / drag animation (GAME-87) ----------
-  // Other players: both arms swing up and forward to the thing they hold, with a quick
-  // lunge as they grab it; the body leans into it and the arms pump while they haul it.
-  function animateArms(v, dt, moving) {
-    const want = v.grabbing ? 1 : 0;
-    v.reach += (want - v.reach) * (1 - Math.exp(-dt * (want ? 10 : 6)));
-    v.lunge = Math.max(0, v.lunge - dt * 3.5);
-    const lunge = Math.sin(v.lunge * Math.PI) * .35;
-    const haul = v.grabbing && moving ? Math.sin(v.walk * 1.0) * .12 : 0;
-    const swing = !v.grabbing && moving ? Math.sin(v.walk) * .35 : 0;   // normal walk arm swing
-    v.model.arms.forEach((pv, i) => {
-      const side = i ? 1 : -1;
-      pv.rotation.x = -(1.25 + lunge) * v.reach + (haul * side) + swing * side * (1 - v.reach);
-      pv.rotation.z = side * .18 * v.reach;                            // hands come in toward the middle
-    });
-    v.model.g.rotation.x = (.16 + lunge * .3) * v.reach;                 // lean into it
-  }
+  // Other players' arms reaching for what they hold: see the grab layer in ANIM.poseVagrant.
   // You (first person): the hand drops the bottle out of view, shoots forward to grab,
   // then holds a tight grip that strains and shakes a little while you drag.
   let vmGrab = 0, vmLunge = 0, vmT = 0;
@@ -609,13 +593,10 @@ const NET = (() => {
       if (v.kind === 'vagrant' || v.kind === 'npc') {
         cur.copy(v.obj.position); v.obj.position.copy(s.p);
         if (s.f !== undefined) v.obj.rotation.y = s.f;
-        const moving = cur.distanceTo(s.p) > dt * .5;
-        v.walk = (v.walk || 0) + (moving ? dt * 9 : 0);
-        v.model.g.position.y = -0.9 + (moving ? Math.abs(Math.sin(v.walk)) * .05 : 0);
-        v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
-        v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
-        stepRemoteAnim(v, dt);
-        animateArms(v, dt, moving);
+        // Ground speed, smoothed so interpolation steps don't stutter the walk cycle.
+        const sp = dt > 0 ? Math.hypot(s.p.x - cur.x, s.p.z - cur.z) / dt : 0;
+        v.spd = (v.spd || 0) + (Math.min(sp, 12) - (v.spd || 0)) * (1 - Math.exp(-dt * 8));
+        ANIM.poseVagrant(v, dt, v.spd, t);   // walk / run cycle, grab arms, interaction clips (tools/anim.js)
         FIGHT.pose(v, dt, t);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
@@ -683,6 +664,8 @@ const NET = (() => {
     btn.hidden = !html;
     if (html && btn.innerHTML !== html) btn.innerHTML = html;
   }
+  // Same clip names as ACTION_ANIM in server.mjs.
+  const ACTION_ANIM = { stop_sign: 'panhandle', fire_can: 'warm', couch: 'sit' };
   const send = m => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
   const sendGrab = () => { if (!ownRag) send({ t: 'grab' }); };
   let lastActAt = 0;
@@ -692,6 +675,7 @@ const NET = (() => {
     if (itemTarget) { send({ t: 'pickup', id: itemTarget.id }); playAnim('reach'); return; }
     const f = nearestAction(); send({ t: 'act' });
     if (f && (f.type === 'dumpster' || f.type === 'pile')) playAnim('dig');
+    else if (f) { const clip = (MAP.actions[f.type] || {}).anim || ACTION_ANIM[f.type]; if (clip) ANIM.play(clip); }   // GAME-92: your hand moves on the key press
   };
   const act = () => (promptMode === 'grab' ? sendGrab : sendAct)();   // the on-screen button does whatever it says
   let lastPointer = 'mouse';
@@ -757,7 +741,7 @@ const NET = (() => {
     el('login').addEventListener('pointerdown', e => e.stopPropagation());
     setTimeout(() => el('nameInput').focus(), 50);
   }
-  window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
+  window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p ?? pitch; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
     get held() { return myHeld; }, get busy() { return !!anim || COPPER.busy(); }, get target() { return itemTarget && itemTarget.id; }, send,
     previewHeld(t) { setMyHeld(t); },
     throwNow() { lastPointer = 'touch'; throwDir(camera.getWorldDirection(new THREE.Vector3())); },
