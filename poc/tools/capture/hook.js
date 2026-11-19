@@ -13,13 +13,21 @@ const CAP = (() => {
   st.textContent = 'html.cap-nohud body > :not([data-cap-game]), html.cap-nohud body > :not([data-cap-game]) *{visibility:hidden!important}';
   document.head.appendChild(st);
   try { renderer.domElement.dataset.capGame = '1'; } catch {}
-  const viewmodel = () => { try { return vm; } catch { return null; } };
+  // Hands off = everything parented to the camera (bottle hand, fists, ...) skips each render
+  // call. Done at render time because game code sets those objects' visibility every frame.
+  let hands = true;
+  const render = renderer.render.bind(renderer);
+  renderer.render = (sc, c) => {
+    if (hands) return render(sc, c);
+    const kids = camera.children.filter(k => k.visible); kids.forEach(k => { k.visible = false; });
+    try { return render(sc, c); } finally { kids.forEach(k => { k.visible = true; }); }
+  };
   const api = {
     // Fixed camera: x, y (eye height, ~1.6 for a standing player), z, yaw, pitch (radians).
     cam(x, y, z, yaw = 0, pitch = 0) { cam = { x, y, z, yaw, pitch }; },
     free() { cam = null; },
     hud(on) { document.documentElement.classList.toggle('cap-nohud', !on); },
-    hands(on) { const v = viewmodel(); if (v) v.visible = !!on; },
+    hands(on) { hands = !!on; },
     get frames() { return frames; },
     get pose() { return { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw: camera.rotation.y, pitch: camera.rotation.x }; },
     // Clip recording: stepMode(dt) stops the free-running loop; each step() runs exactly one
