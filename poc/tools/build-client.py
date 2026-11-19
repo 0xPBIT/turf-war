@@ -16,6 +16,7 @@ OUT = HERE.parent / 'public' / 'index.html'
 NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
+PROPS = (HERE / 'props.js').read_text()
 
 s = SRC.read_text()
 
@@ -41,6 +42,13 @@ rep('<div id="joy"><span></span></div>', '<div id="joy"><span></span></div>\n' +
 
 # No local props: the server owns crates and cones.
 rep('spawnProps();\nconst starTex', 'const starTex')
+# GAME-87: the couch, mattress and shopping cart under the bridge are movable props the
+# server simulates (tools/props.js draws them). Drop their static copies, keep the cardboard.
+a = s.index('  // couch (cushions, arms, sag)\n')
+b = s.index("  staticBox(X-.8,.5,12.4,.35,.5,.5);\n") + len("  staticBox(X-.8,.5,12.4,.35,.5,.5);\n")
+if not (0 < b - a < 6000) or 'const cart=grp(city' not in s[a:b] or 'const mt=grp(city' not in s[a:b]:
+    raise SystemExit('look test changed around the couch / mattress / cart block')
+s = s[:a] + "  put(B(1.0,.03,.8),0xB08A5A,city,X-.4,.03,8.6,{ry:.4,ns:true}); put(B(.7,.03,.6),0xA07E52,city,X+.7,.05,9.1,{ry:-.2,ns:true});\n" + s[b:]
 # Debris never pushes the predicted player around.
 rep('function addDebris(m,b){ debris.push({m,b});', 'function addDebris(m,b){ if(b){ b.collisionFilterGroup=4; } debris.push({m,b});')
 # The player sphere only collides with the static town, like the server's character controller.
@@ -75,9 +83,24 @@ rep("vm.position.set(.2+Math.cos(bobT*.5)*.008,-.17+Math.abs(Math.sin(bobT*.5))*
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
 
+# GAME-87: other players' arms can move. With o.armRig, vagrant() builds each arm on its
+# own shoulder pivot (not baked into the body) so the client can swing them forward to
+# grab, push and drag things.
+rep("""  } else {
+    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""",
+"""  } else if(o.armRig){
+    for(const [i,s] of [[0,-1],[1,1]]){ const pv=new THREE.Group(), rel=v=>[v[0]-sh[i][0],v[1]-sh[i][1],v[2]-sh[i][2]], e=rel([s*.29,1.06,-.02]), w=rel([s*.3,.82,.08]);
+      limb([0,0,0],e,.06,.065,'tx:canvas|'+o.coat,pv); limb(e,w,.05,.058,'tx:canvas|'+o.coat,pv); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,pv,...w); glove(pv,rel([s*.3,.76,.09]),[0,-1,.15],o,false);
+      bake(pv); pv.position.set(...sh[i]); o.armRig.push(pv); }
+  } else {
+    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""")
+rep("  bake(head); bake(g); head.position.y=1.62; g.add(head);", "  bake(head); bake(g); head.position.y=1.62; g.add(head); if(o.armRig) for(const pv of o.armRig) g.add(pv);")
+# First-person hands reach out, grip and strain while you hold something (net-client.js vmPose).
+rep("heldBottle.visible=handKick<.6;", "heldBottle.visible=handKick<.6; NET.vmPose(dt,ml>0);")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + NET + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + NET + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
