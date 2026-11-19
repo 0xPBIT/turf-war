@@ -22,9 +22,6 @@ export function initCopper(ctx) {
   for (const l of MAP.lampposts || []) {
     lamps.push(addEntity({ id: l.id, kind: 'fixture', type: 'lamppost', fixedPos: [l.p[0], 0.9, l.p[2]], state: {} }));
   }
-  for (const s of MAP.shops || []) {
-    addEntity({ id: s.id, kind: 'fixture', type: s.sells === 'pliers' ? 'buy_pliers' : 'shop', fixedPos: s.p, state: {} });
-  }
 
   // ---------- tools ----------
   const items = p => (p.items ||= {});
@@ -38,27 +35,16 @@ export function initCopper(ctx) {
   function giveTool(p, uses = PLIERS_USES) { items(p).pliers = { uses: Math.max(usesOf(p), uses) }; sendInv(p); }
   function useTool(p) {
     const left = usesOf(p) - 1;
-    if (left <= 0) items(p).pliers = undefined; else items(p).pliers.uses = left;
+    items(p).pliers = left > 0 ? { uses: left } : undefined;
     sendInv(p);
     return Math.max(0, left);
   }
   // Private line for one player (shows in their feed); public lines pop over the vagrant.
   function tell(s, text) { if (s.ws && s.ws.readyState === 1) s.ws.send(JSON.stringify({ t: 'fx', kind: 'say', id: s.entity.id, text })); }
 
-  // Buying pliers at Sunny Mart: the "acquire" route. Panhandling pays for it.
-  function buy(s, shop) {
-    const e = s.entity, p = e.player, price = ACTIONS.buy_pliers.price;
-    if (hasTool(p)) return tell(s, 'You already have pliers.');
-    if ((p.cash || 0) < price) return tell(s, `Pliers cost $${price}. Go panhandle at the stop sign.`);
-    p.cash -= price;
-    giveTool(p);
-    tell(s, `Bought pliers for $${price}. Good for ${PLIERS_USES} lampposts.`);
-  }
-
   // ---------- stripping ----------
   function start(s, lamp) {
     const e = s.entity, p = e.player, now = Date.now();
-    if (lamp.type === 'buy_pliers') return buy(s, lamp);
     if (lamp.type !== 'lamppost') return;
     if (now < (lamp.state.strippedUntil || 0)) return tell(s, 'Somebody already picked this one clean.');
     if (lamp.state.by && lamp.state.by !== e.id) return tell(s, 'Someone is already stripping this one.');
@@ -79,11 +65,11 @@ export function initCopper(ctx) {
   function finish(s, now) {
     const st = s.strip, lamp = st.lamp, e = s.entity, p = e.player;
     s.strip = null; lamp.state.by = null;
-    lamp.state.strippedUntil = now + A.repairSec * 1000;
+    lamp.state.strippedUntil = lamp.state.busyUntil = now + A.repairSec * 1000;   // busy: E skips it
     const left = useTool(p);
     p.cash = (p.cash || 0) + A.cash;
     p.copper = (p.copper || 0) + 1;
-    addDamage(p, A.cost, posOf(lamp), A.verb);
+    addDamage(p, A.cost, posOf(lamp), A.label || A.verb);
     broadcast({ t: 'fx', kind: 'strip', phase: 'done', id: e.id, lamp: lamp.id, cash: A.cash, left });
   }
 

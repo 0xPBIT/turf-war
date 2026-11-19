@@ -94,8 +94,9 @@ const COPPER = (() => {
 
   // ---------- HUD: pliers chip and the strip progress bar ----------
   const css = document.createElement('style');
-  css.textContent = `#pliersChip{position:fixed;z-index:5;right:max(12px,env(safe-area-inset-right,0px));top:calc(112px + env(safe-area-inset-top,0px));background:rgba(255,255,255,.92);border-radius:14px;padding:5px 12px;font-size:13px;font-weight:700;box-shadow:0 3px 0 rgba(20,60,140,.2);pointer-events:none;display:none}
-#pliersChip b{color:#E8343F}
+  css.textContent = `#pliersChip{position:fixed;z-index:5;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(136px + env(safe-area-inset-bottom,0px));background:rgba(255,255,255,.94);border-radius:14px;padding:6px 14px;font-size:13.5px;font-weight:700;gap:8px;align-items:center;box-shadow:0 3px 0 rgba(20,60,140,.2);pointer-events:none;display:none}
+#pliersChip i{width:9px;height:16px;border-radius:3px;background:linear-gradient(#9AA0B6 0 30%,#E8343F 30%)}
+#pliersChip em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
 #stripBar{position:fixed;z-index:6;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:rgba(255,255,255,.94);border-radius:16px;padding:8px 14px 10px;font-family:var(--display);font-weight:600;font-size:15px;box-shadow:0 3px 0 rgba(20,60,140,.25);display:none;text-align:center;pointer-events:none;min-width:220px}
 #stripBar i{display:block;height:10px;border-radius:6px;margin-top:6px;background:#F1E7D8;overflow:hidden}
 #stripBar i u{display:block;height:100%;width:0;background:linear-gradient(90deg,#D9823B,#FFB86B);border-radius:6px}
@@ -106,9 +107,10 @@ const COPPER = (() => {
   function inv(m) {
     if (m.pliers === undefined) return;
     const had = pliers; pliers = m.pliers;
-    chip.style.display = pliers > 0 ? 'block' : 'none';
-    chip.innerHTML = `<b>Pliers</b> · ${pliers} ${pliers === 1 ? 'use' : 'uses'} left`;
+    chip.style.display = pliers > 0 ? 'flex' : 'none';
+    chip.innerHTML = `<i></i>Pliers <em>${pliers}</em>`; chip.title = `${pliers} lampposts left in them`;
     if (had > 0 && pliers === 0) feed('Your pliers snapped. Find another pair.');
+    else if (!had && pliers > 0) feed('You have pliers. Find a lamppost and press <kbd>E</kbd> to strip its copper wire.');
   }
 
   // ---------- first-person pliers ----------
@@ -149,6 +151,7 @@ const COPPER = (() => {
       v.model.g.rotation.x = .5 - yank * .22;                         // leaning in, rocking back on each yank
       v.model.g.rotation.z = Math.sin(t * 9) * .03;
       v.model.head.rotation.x = .25;
+      if (v.model.arms) v.model.arms.forEach((pv, i) => { pv.rotation.x = -1.15 + yank * .5; pv.rotation.z = (i ? 1 : -1) * .22; });   // both hands on the wire
       v.pliers.visible = true; snip(v.pliers, cyc < .35 ? Math.sin(cyc / .35 * Math.PI) : 0);
       if (L && Math.random() < dt * 5) spark(L.base, 2, .7);
     }
@@ -156,7 +159,7 @@ const COPPER = (() => {
   }
   function stopWatching(id) {
     const v = window.__net && window.__net.ents.get(id);
-    if (v && v.model) { v.model.g.rotation.x = 0; v.model.head.rotation.x = 0; if (v.pliers) v.pliers.visible = false; }
+    if (v && v.model) { v.model.g.rotation.x = 0; v.model.head.rotation.x = 0; if (v.pliers) v.pliers.visible = false; if (v.model.arms) v.model.arms.forEach(pv => { pv.rotation.x = 0; pv.rotation.z = 0; }); }
     watching.delete(id);
   }
 
@@ -179,13 +182,9 @@ const COPPER = (() => {
   function meta(m) { for (const id of lamps.keys()) setStripped(id, !!(m.objects[id] && m.objects[id].stripped)); }
 
   // Prompt text for the E button. Returns null for things that are not ours.
-  function prompt(f, a) {
-    if (f.type === 'buy_pliers') return `${a.verb} ($${a.price})`;
-    if (f.type === 'lamppost') return pliers > 0 ? a.verb : `${a.verb} (need pliers)`;
-    return null;
-  }
+  function verb(type, base) { return type === 'lamppost' && !pliers ? base + ' (need pliers)' : base; }
   const busy = () => !!strip;
 
   window.__copper = { lamps, get pliers() { return pliers; }, get strip() { return strip; }, setStripped };
-  return { fx, meta, inv, prompt, frame, viewmodel, busy, pliersMesh };
+  return { fx, meta, inv, verb, frame, viewmodel, busy, pliersMesh };
 })();
