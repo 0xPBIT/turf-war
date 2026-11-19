@@ -129,9 +129,24 @@ MAP.colliders.forEach((c, i) => {
   const id = c.tag === 'pile' ? 'pile:' + c.pile : `f:${c.tag}${n}`;
   addEntity({ id, kind: 'fixture', type: c.tag, collider, extraColliders, fixedPos: c.p, index: c.pile, state: {} });
 });
+// Broken windows survive restarts: { brokenUntil, boardAt, glass: { s: seed, h: [[u, v], ...] } }.
+save.windows ||= {};
 for (const w of MAP.windows) {
   const collider = colliderFor({ p: w.p, q: w.q, box: w.half });
-  addEntity({ id: w.id, kind: 'fixture', type: 'window', collider, fixedPos: w.p, index: w.gi, value: w.value, state: {} });
+  const st = save.windows[w.id] && save.windows[w.id].brokenUntil > Date.now() ? save.windows[w.id] : {};
+  addEntity({ id: w.id, kind: 'fixture', type: 'window', collider, fixedPos: w.p, rot: w.q, half: w.half, index: w.gi, value: w.value, state: st });
+}
+// Where on the pane a hit landed, as u, v in -1..1 (GAME-84: cracks start there).
+function paneUV(win, at) {
+  const [qx, qy, qz, qw] = win.rot || [0, 0, 0, 1];
+  const vx = at[0] - win.fixedPos[0], vy = at[1] - win.fixedPos[1], vz = at[2] - win.fixedPos[2];
+  // rotate by the inverse quaternion
+  const ix = -qx, iy = -qy, iz = -qz;
+  const tx = 2 * (iy * vz - iz * vy), ty = 2 * (iz * vx - ix * vz), tz = 2 * (ix * vy - iy * vx);
+  const lx = vx + qw * tx + (iy * tz - iz * ty), ly = vy + qw * ty + (iz * tx - ix * tz), lz = vz + qw * tz + (ix * ty - iy * tx);
+  const cl = (n) => Math.max(-1, Math.min(1, n));
+  // Third value: which face it hit (1 = the street side the pane faces, -1 = from inside).
+  return [+cl(lx / win.half[0]).toFixed(3), +cl(ly / win.half[1]).toFixed(3), lz >= 0 ? 1 : -1];
 }
 // ---------- loose props (GAME-87) ----------
 // Everything that is not fixed to the world is a dynamic body the server simulates:
@@ -447,7 +462,23 @@ function onBottleHit(bottle, other) {
   const vel = bottle.body.linvel();
   if (other && (other.kind === 'vagrant' || other.kind === 'npc')) {
     combat.itemHit(bottle.by, other, vel, 0.4);       // GAME-85: people react, NPCs fight back
-  } else if (other && (other.type === 'window' || other.type === 'car')) {
+  } else if (other && other.type === 'window') {
+    // Shatter from the hit point; a broken pane takes two more hits before it's empty,
+    // then gets boarded up, then reglazed (GAME-84).
+    const a = ACTIONS.window, st = other.state, uv = paneUV(other, at), v = [vel.x, vel.y, vel.z];
+    if (now >= (st.brokenUntil || 0)) {
+      st.brokenUntil = now + a.repairSec * 1000;
+      st.boardAt = now + (a.boardSec || a.repairSec * .3) * 1000;
+      st.glass = { s: Math.floor(Math.random() * 2 ** 31), h: [uv] };
+      save.windows[other.id] = st;
+      addDamage(p, other.value || a.cost, posOf(other), a.verb);
+      broadcast({ t: 'fx', kind: 'break', id: other.id, at, v, g: st.glass });
+    } else if (now >= st.boardAt) addDamage(p, 5, at, 'Bottled the plywood');
+    else {
+      if (st.glass && st.glass.h.length < 3) { st.glass.h.push(uv); broadcast({ t: 'fx', kind: 'break', id: other.id, at, v, g: st.glass }); }
+      addDamage(p, 15, at, 'More glass');
+    }
+  } else if (other && other.type === 'car') {
     const a = ACTIONS[other.type];
     if (now >= (other.state.brokenUntil || 0)) {
       other.state.brokenUntil = now + a.repairSec * 1000;
@@ -842,7 +873,10 @@ function metaPayload() {
     const o = {};
     if ((st.fireUntil || 0) > now) o.fire = 1;
     else if ((st.burntUntil || 0) > now) o.burnt = 1;
-    if ((st.brokenUntil || 0) > now) o.broken = 1;
+    if ((st.brokenUntil || 0) > now) {
+      o.broken = 1;
+      if (st.glass) { o.g = st.glass; if (now >= st.boardAt) o.board = 1; }
+    } else if (st.glass) { delete st.glass; delete save.windows[e.id]; }
     if (st.braking) o.brake = 1;
     if (st.angry) o.angry = 1;
     if (st.down) o.down = 1;
