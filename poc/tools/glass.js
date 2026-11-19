@@ -7,7 +7,8 @@
 //
 // Usage, for any THREE.Mesh whose geometry is a Box/PlaneGeometry in its local XY plane:
 //   GLASS.shatter(mesh, { seed, hits: [[u, v], ...], quiet, dir, hi })
-//     u, v in -1..1 across the pane (0,0 is the centre). quiet = build it already
+//     u, v in -1..1 across the pane (0,0 is the centre); optional 3rd value: 1 if hit from
+//     the side the mesh's +Z faces (default), -1 from behind. Fallen glass lands on the hit side. quiet = build it already
 //     broken (late join), with the fallen glass lying on the ground instead of flying.
 //   GLASS.board(mesh)    plywood over the hole while the town gets round to it
 //   GLASS.restore(mesh)  fresh glass, debris swept up
@@ -243,7 +244,7 @@ const GLASS = (() => {
     const q = mesh.getWorldQuaternion(new THREE.Quaternion());
     const nrm = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
     // Glass mostly lands on the side it was hit from: the street, not the (painted-on) shop interior.
-    const outward = nrm.clone().multiplyScalar(dir.dot(nrm) > 0 ? -1 : 1);
+    const outward = nrm.clone().multiplyScalar(p.side);
     if (p.floor === undefined) p.floor = floorAt(mesh, outward);
     const r = rng(p.seed ^ (p.hits.length * 2654435761));
     pieces.sort((a, b) => a.dist - b.dist);
@@ -277,7 +278,7 @@ const GLASS = (() => {
       b.position.set(wp.x, wp.y, wp.z); b.quaternion.set(q.x, q.y, q.z, q.w);
       // Close to the hit: punched through along the throw. Further out: mostly just drops.
       const kick = Math.max(.15, 1 - pc.dist / .8);
-      const v = outward.clone().multiplyScalar(.3 + r() * 1.6 * kick).addScaledVector(dir, .5 * kick);
+      const v = outward.clone().multiplyScalar(.3 + r() * 1.6 * kick).addScaledVector(dir, .3 * kick);
       b.velocity.set(v.x + (r() - .5) * .8, v.y + r() * .8 * kick, v.z + (r() - .5) * .8);
       b.angularVelocity.set((r() - .5) * 14 * kick + (r() - .5) * 2, (r() - .5) * 8 * kick, (r() - .5) * 14 * kick + (r() - .5) * 2);
       world.addBody(b);
@@ -305,11 +306,12 @@ const GLASS = (() => {
       const [w, h] = dims(mesh);
       const [u, v] = hits[0];
       const fr = fracture(w, h, u * w / 2 * .92, v * h / 2 * .92, seed);
-      p = { mesh, seed, size: [w, h], pieces: fr.pieces, holeJit: fr.rnd(), hits: [], ground: [], group: null, hi, boarded: false, boards: null };
+      p = { mesh, seed, side: hits[0][2] || 1, size: [w, h], pieces: fr.pieces, holeJit: fr.rnd(), hits: [], ground: [], group: null, hi, boarded: false, boards: null };
       panes.set(mesh, p);
       mesh.visible = false; if (hi) hi.visible = false;
     }
-    const d = dir ? dir.clone().normalize() : new THREE.Vector3(0, 0, -1).applyQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
+    // Kick direction: through the glass, away from whoever threw it.
+    const d = new THREE.Vector3(0, 0, -p.side).applyQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
     for (let k = p.hits.length; k < hits.length; k++) {
       const [u, v] = hits[k], [w, h] = p.size;
       p.hits.push([u * w / 2 * .92, v * h / 2 * .92]);
@@ -360,5 +362,7 @@ const GLASS = (() => {
   }
 
   function state(mesh) { const p = panes.get(mesh); return p ? { seed: p.seed, hits: p.hits.length, boarded: p.boarded, standing: p.pieces.filter(pc => !pc.out).length, fallen: p.pieces.filter(pc => pc.out).length, floor: p.floor } : null; }
-  return { shatter, board, restore, update, state, fracture, get flying() { return flying.length; } };
+  // For the shader prewarm (tools/prewarm.js): [material, needs RGBA vertex colours].
+  const materials = [[crackedMat, true], [flyMat], [groundMat], [crackMat], [crackInkMat], [plyMat], [battenMat], [nailMat]];
+  return { shatter, board, restore, update, state, fracture, materials, get flying() { return flying.length; } };
 })();
