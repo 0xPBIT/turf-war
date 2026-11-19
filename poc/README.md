@@ -22,6 +22,8 @@ python3 tools/build-client.py [path/to/look-test/index.html]   # writes public/i
 
 `tools/net-client.js` is the multiplayer layer, `tools/settings.js` the settings menu and `tools/net-hud.html` the HUD; the script fails loudly if the look test changes under it.
 
+Capture stills, clips and before/after comparisons of the real game (GAME-90): see `tools/capture/README.md`, e.g. `node tools/capture/capture.mjs compare --name my-change --before origin/claude/project-thread-49r4j8`.
+
 Run it:
 
 ```
