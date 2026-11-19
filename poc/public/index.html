@@ -159,7 +159,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 #settings .brow button.wait{background:#FFC93C}
 #settings .sfoot{display:flex;gap:8px;justify-content:space-between}
 #settings #sResume{background:var(--candy);color:#fff;font-size:16px;padding:9px 22px}
-#inv{position:fixed;z-index:5;left:50%;bottom:calc(12px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:rgba(255,255,255,.94);border-radius:14px;padding:6px 14px;font-size:13.5px;font-weight:700;display:flex;gap:8px;align-items:center;box-shadow:0 3px 0 rgba(20,60,140,.2)}
+#inv{position:fixed;z-index:8;right:calc(max(12px,env(safe-area-inset-right,0px)) + 50px);top:calc(64px + env(safe-area-inset-top,0px));height:40px;box-sizing:border-box;background:rgba(255,255,255,.94);border-radius:14px;padding:6px 14px;font-size:13.5px;font-weight:700;display:flex;gap:8px;align-items:center;box-shadow:0 3px 0 rgba(20,60,140,.2)}
 #inv[hidden]{display:none}
 #inv i{width:9px;height:16px;border-radius:3px;background:linear-gradient(#9AA0B6 0 28%,#D8343F 28%)}
 #inv em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
@@ -1408,9 +1408,9 @@ const FIRE = (() => {
   // Charred stages share cached materials (same shader as the living leaves, new colour),
   // so a fire never compiles a new program mid-game.
   const STAGES = [
-    { leafA: 'tx:leafA|' + 0x9C7A3A, leafB: 'tx:leafB|' + 0x8A6430, pole: 'tx:pole|' + 0x6A5040 },   // scorched, browning
-    { leafA: 'tx:leafA|' + 0x4A3A2C, leafB: 'tx:leafB|' + 0x3E3026, pole: 'tx:pole|' + 0x3A2E28 },   // charring
-    { leafA: 'tx:leafA|' + 0x24201E, leafB: 'tx:leafB|' + 0x1C1918, pole: 'tx:pole|' + 0x221D1B },   // burnt black
+    { leafA: 'tx:leafA|' + 0xA88A48, leafB: 'tx:leafB|' + 0x967238, pole: 'tx:pole|' + 0x7A604C },   // scorched, browning
+    { leafA: 'tx:leafA|' + 0x6E5440, leafB: 'tx:leafB|' + 0x5A4434, pole: 'tx:pole|' + 0x4E423A },   // charring
+    { leafA: 'tx:leafA|' + 0x6A625C, leafB: 'tx:leafB|' + 0x4A4440, pole: 'tx:pole|' + 0x3A3330 },   // burnt: ash-grey husk, still shaded so the ink lines read
   ];
   for (const st of STAGES) for (const k of Object.values(st)) getMat(k);   // same shader as live leaves: no new program
   const partOf = key => typeof key === 'string' ? key.slice(3).split('|')[0] : null;
@@ -1427,7 +1427,7 @@ const FIRE = (() => {
       }
       b.parts.push({ m, part, key: m.userData.c, leaf });
     }
-    const top = b.type === 'tree' ? 2.9 * b.s : .45 * b.s;
+    const top = b.type === 'tree' ? 3.9 * b.s : .6 * b.s;   // flames start at the outside of the canopy, not hidden inside it
     b.canopy = new THREE.Vector3(b.x, top, b.z);
     b.scorch = decal(scorchTex, b.x, b.z, b.type === 'tree' ? 2.2 * b.s : 1.3 * b.s, 0);
   }
@@ -1441,24 +1441,50 @@ const FIRE = (() => {
   function ignite(b) {
     prepare(b);
     if (b.state === 'burning') return;
-    b.state = 'burning'; b.t = 0;
+    b.state = 'burning'; b.t0 = performance.now(); b.t = 0;
     const tree = b.type === 'tree';
     // Fires share the fixed FIRE_LIGHTS pool (never a new light, so no shader recompile).
-    b.fx = emitter(b.canopy, { radius: (tree ? 1.1 : .55) * b.s, fire: .1, smoke: .2 });
+    b.fx = emitter(b.canopy, { radius: (tree ? .9 : .75) * b.s, fire: .1, smoke: .2 });
+    if (tree) b.skirt = emitter(new THREE.Vector3(b.x, 2.2 * b.s, b.z), { radius: 1.35 * b.s, fire: .1, smoke: 0, light: false });   // flames licking up the sides
     if (tree) b.base = emitter(new THREE.Vector3(b.x, .15, b.z), { radius: .3 * b.s, fire: .1, smoke: 0, light: false });   // trunk flames: glow comes from the canopy fire
+  }
+  // Daylight flames: the look test's additive flames vanish against a bright sky, so burning
+  // plants also shed solid, normal-blended tongues of flame off the canopy surface. They go
+  // through the same particle list, so they age yellow -> orange -> sooty red like the rest.
+  const _v = new THREE.Vector3();
+  { // compile the tongue shader at load: prewarm.js (runs after this file) compiles the whole scene once
+    const w = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, transparent: true, depthWrite: false, toneMapped: false }));
+    w.layers.set(1); w.scale.setScalar(.001); camera.updateMatrixWorld(); w.position.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3())); scene.add(w);
+    let n = 0; (function drop() { if (++n < 5) return requestAnimationFrame(drop); scene.remove(w); })();
+  }
+  function tongues(b, dt, amount) {
+    b.accT = (b.accT || 0) + dt * amount * (b.type === 'tree' ? 110 : 40);
+    const tree = b.type === 'tree', k = 1 - (b.shrunk || 0) * (tree ? .38 : .55);
+    const cy = tree ? 3.0 * b.s : .45 * b.s, r = (tree ? 1.35 : .6) * b.s * k;
+    while (b.accT > 1) {
+      b.accT--;
+      const a = Math.random() * 6.28, up = Math.random() * .9 - .15;   // sides and top of the canopy
+      _v.set(b.x + Math.cos(a) * r * Math.sqrt(1 - up * up), cy + up * r * .9, b.z + Math.sin(a) * r * Math.sqrt(1 - up * up));
+      const hot = Math.random();
+      const mat = new THREE.SpriteMaterial({ map: flameTex, color: hot < .25 ? 0xFFB020 : hot < .8 ? 0xFF5A12 : 0xC8280A, transparent: true, depthWrite: false, opacity: .95, rotation: Math.random() * 6.28, toneMapped: false });
+      const sp = new THREE.Sprite(mat); sp.layers.set(1); sp.position.copy(_v); const s0 = (.45 + Math.random() * .45) * (tree ? b.s : .7 * b.s); sp.scale.setScalar(s0); scene.add(sp);
+      // kind 'tongue' takes the smoke path in updateFX: fixed colour, fade in then out, slows as it rises.
+      parts.push({ s: sp, kind: 'tongue', vel: new THREE.Vector3((Math.random() - .5) * .5, 1.4 + Math.random() * 1.2, (Math.random() - .5) * .5), life: .55 + Math.random() * .45, t: 0, size0: s0, size1: s0 * .3, opacity: 1.7, spin: (Math.random() - .5) * 1.2 });
+    }
   }
   function stop(e) { if (!e) return; e.fire = 0; e.smoke = 0; const i = emitters.indexOf(e); if (i >= 0) emitters.splice(i, 1); }
   function charNow(b) {         // seen already burnt (joined late): go straight to the husk
-    prepare(b); stop(b.fx); stop(b.base); b.fx = b.base = null;
+    prepare(b); stop(b.fx); stop(b.base); stop(b.skirt); b.fx = b.base = b.skirt = null;
     b.state = 'burnt'; setStage(b, 2); shrink(b, 1); b.scorch.material.opacity = .9;
   }
   function shrink(b, u) {
     const k = 1 - u * (b.type === 'tree' ? .38 : .55);
+    b.shrunk = u;
     for (const p of b.parts) if (p.leaf) p.m.scale.set(k, k * (1 - u * .1), k);
   }
   function replant(b) {
     if (!b.parts || b.state === 'idle' || !b.state) return;
-    stop(b.fx); stop(b.base); b.fx = b.base = null;
+    stop(b.fx); stop(b.base); stop(b.skirt); b.fx = b.base = b.skirt = null;
     b.state = 'idle'; setStage(b, -1); shrink(b, 0); b.scorch.material.opacity = 0;
   }
   function burnLen(b) { return ((MAPA && MAPA.actions[b.type] && MAPA.actions[b.type].burnSec) || 30); }
@@ -1467,17 +1493,18 @@ const FIRE = (() => {
   function update(dt) {
     for (const b of BURN) {
       if (b.state !== 'burning' && b.state !== 'smolder') continue;
-      b.t += dt;
+      b.t = (performance.now() - b.t0) / 1000;   // wall clock, so a slow frame or hidden tab keeps pace with the server
       const L = burnLen(b), tree = b.type === 'tree';
       if (b.state === 'burning') {
         const ramp = Math.min(1, b.t / (tree ? 5 : 2.5)), fade = Math.max(0, Math.min(1, (L - b.t) / 6));
         b.fx.fire = (.1 + ramp * (tree ? 2.1 : 1.4)) * fade; b.fx.smoke = (.3 + ramp * (tree ? 2.2 : 1.4)) * Math.max(.4, fade);
-        if (b.base) { b.base.fire = Math.min(1, b.t / 2) * .8 * fade; }
+        if (b.base) { b.base.fire = Math.min(1, b.t / 2) * .8 * fade; b.skirt.fire = ramp * 1.6 * fade; }
         const u = Math.min(1, b.t / (L * .8));
         setStage(b, u < .15 ? -1 : u < .4 ? 0 : u < .75 ? 1 : 2);
         shrink(b, Math.max(0, (u - .2) / .8));
         b.scorch.material.opacity = Math.min(.9, b.t / 8);
-        if (b.t > L) { b.state = 'smolder'; b.t = 0; stop(b.base); b.base = null; b.fx.fire = 0; b.fx.smoke = .7; setStage(b, 2); shrink(b, 1); }
+        tongues(b, dt, ramp * fade);
+        if (b.t > L) { b.state = 'smolder'; b.t0 = performance.now(); b.t = 0; stop(b.base); stop(b.skirt); b.base = b.skirt = null; b.fx.fire = 0; b.fx.smoke = .7; setStage(b, 2); shrink(b, 1); }
       } else {
         b.fx.smoke = Math.max(0, .7 - b.t / 25);
         if (b.t > 18) { stop(b.fx); b.fx = null; b.state = 'burnt'; }
@@ -1489,7 +1516,7 @@ const FIRE = (() => {
       flickT = Math.max(0, flickT - dt);
       const u = 1 - flickT / FLICK;                     // 0..1
       const up = u < .2 ? u / .2 : u > .8 ? (1 - u) / .2 : 1;
-      lg.position.set(-.95, -.95 + up * .8, .1); lg.rotation.set(-.2, .35, .18 - up * .1);
+      lg.position.set(-.9, -.95 + up * .9, .1); lg.rotation.set(-.2, .35, .18 - up * .1);
       lg.visible = up > 0;
       const lit = u > .28 && u < .85;
       flame.visible = lit; if (lit) { const f = .8 + Math.random() * .35; flame.scale.set(.09 * f, .16 * f, 1); }
@@ -1572,7 +1599,8 @@ const FIRE = (() => {
   const stick = sign(['LIGHTERS $5'], 1.1, .3, '#E8343F', '#FFFFFF', scene, 4.2, 1.75, -5.93);
   stick.material.toneMapped = false;
 
-  window.__look = (y, p) => { yaw = y; pitch = p; };   // test hook: aim the camera for in-engine screenshots
+  window.__look = (y, p) => { yaw = y; pitch = p; };   // test hooks for in-engine screenshots
+  window.__burn = BURN;
   return { update, onMeta, onInv, onFlick, verb, get lighter() { return lighter; } };
 })();
 
