@@ -177,7 +177,7 @@ const NET = (() => {
     const p = new THREE.Vector3(...at);
     for (let k = 0; k < 7; k++) {
       const len = s * (.5 + Math.random() * .5), wd = s * (.14 + Math.random() * .12);
-      const pm = new THREE.Mesh(new THREE.BoxGeometry(len, s * .07, wd), k % 3 === 0 ? getMat(hex) : woodMat); if (k % 3 === 0) pm.userData.c = hex; pm.castShadow = pm.receiveShadow = true;
+      const pm = new THREE.Mesh(new THREE.BoxGeometry(len, s * .07, wd), k % 3 === 0 ? getMat(hex) : woodMat); pm.userData.ownGeo = true; if (k % 3 === 0) pm.userData.c = hex; pm.castShadow = pm.receiveShadow = true;
       pm.position.set(p.x + (Math.random() - .5) * s, p.y + (Math.random() - .5) * s, p.z + (Math.random() - .5) * s);
       const pb = new CANNON.Body({ mass: .25, shape: new CANNON.Box(new CANNON.Vec3(len / 2, s * .035, wd / 2)) }); pb.position.set(pm.position.x, pm.position.y, pm.position.z);
       pb.quaternion.setFromEuler(Math.random() * 3, Math.random() * 3, Math.random() * 3);
