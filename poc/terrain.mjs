@@ -15,12 +15,13 @@ export const TERRAIN = (() => {
     [-72, 147, 5.6, 22],   // Gazebo Hill (the gazebo sits on top)
     [-13, 102, 3.0, 14],   // east lawn mound by Creek Rd
     [-70, 95, 2.4, 13],    // picnic knoll
-    [-38, 170, 4.6, 22],   // sledding slope along the north edge
+    [-50, 175, 4.8, 22],   // sledding slope along the north edge (clear of the playground)
     [-94, 116, 3.6, 18],   // west bank against the town edge
   ];
-  // The rise starts behind the Creek Rd sidewalks and fades out west across the greenbelt, low enough
-  // under the Skyway deck to keep headroom.
-  const SUB = { amp: 7, z0: 76, z1: 146, x0: 17, x1: 30 };
+  // The rise starts behind the Creek Rd sidewalks. On the west it steps down at the Maple Row
+  // retaining wall (x 27.6..28.2, built in town-build.js), so the Skyway greenbelt and the ground
+  // under the deck stay flat and keep their headroom.
+  const SUB = { amp: 7, z0: 76, z1: 146, x0: 27.6, x1: 28.2 };
   function park(x, z) {
     // Fade out toward Creek Rd (south edge) and the east edge; keep the pond basin level.
     const m = ss(PARK.z0 + 3, PARK.z0 + 13, z) * (1 - ss(PARK.x1 - 10, PARK.x1 + 2, x));
@@ -50,5 +51,7 @@ export const TERRAIN = (() => {
   }
   // Where the terrain is not flat (for building the physics heightfield and fine ground mesh).
   const AREA = { minX: -150, maxX: 220, minZ: 70, maxZ: 240 };
-  return { h, normal, range, AREA };
+  // Ground-mesh grid lines that must exist exactly (the retaining-wall step).
+  const BREAK_X = [SUB.x0, SUB.x1];
+  return { h, normal, range, AREA, BREAK_X };
 })();

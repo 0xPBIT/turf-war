@@ -194,6 +194,11 @@ rep("scene.fog = new THREE.Fog(P.horizon, 70, 260);", "scene.fog = new THREE.Fog
 # GAME-81: baked town chunks (vertex-colour materials) follow the look switch too.
 rep("if(o.isMesh && o.userData.c !== undefined) o.material = getMat(o.userData.c, mode); });",
     "if(o.isMesh && o.userData.c !== undefined) o.material = getMat(o.userData.c, mode); else if(o.isMesh && o.userData.vc !== undefined) o.material = vcMat(o.userData.vc, mode); });")
+# GAME-97: look-test placements that clash with the full town (GAME-81).
+# The fifth Main St cobra lamp (x=34) stood in the mouth of Maple Row; it moves to the corner past it.
+rep("for(let x=-34;x<=34;x+=17){ const g=grp(city,x,0,5.5);", "for(const x of [-34,-17,0,17,41.5]){ const g=grp(city,x,0,5.5);")
+# The x=24 power pole ran up through the Route 9 Skyway deck; the line now hops the deck between poles on either side.
+rep("for(const x of [-40,-24,8,24,40]){ const g=grp(city,x,0,-5.55);", "for(const x of [-40,-24,8,15,30,40]){ const g=grp(city,x,0,-5.55);")
 rep('\nbake(city);\n', '\n' + TOWN_JS + '\nTOWN.build();\nbakeGrid(city, 64);\n')
 i = s.index("\n", s.index("vagrant({x:21.8,z:9.3,ry:-2.4,"))
 s = s[:i] + "\nTOWN.afterPeople();" + s[i:]

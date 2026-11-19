@@ -36,7 +36,7 @@
     2,
     1.6,
     3.2,
-    3.0,
+    3,
     0.08
    ],
    "note": "Sunnyside School side of Main St"
@@ -343,6 +343,56 @@
    ],
    "note": "under the Route 9 Skyway, north of Main St (GAME-81)"
   },
+  "maple-mouth": {
+   "cam": [
+    26,
+    1.6,
+    -2,
+    -2.356,
+    -0.02
+   ],
+   "note": "GAME-97: where Maple Row meets Main St (a look-test lamppost used to stand in the lane mouth)"
+  },
+  "skyway-pole": {
+   "cam": [
+    13,
+    1.6,
+    2.5,
+    -0.93,
+    0.22
+   ],
+   "note": "GAME-97: Main St under the Skyway, north side power line (a pole used to run up through the deck)"
+  },
+  "cinema-front": {
+   "cam": [
+    -53,
+    1.6,
+    -0.6,
+    0.25,
+    -0.08
+   ],
+   "note": "GAME-97: Cinema front and the Main St sidewalk (a bench used to sit inside the wall)"
+  },
+  "bus-stop": {
+   "cam": [
+    -39,
+    1.6,
+    -0.8,
+    0.2,
+    -0.12
+   ],
+   "note": "GAME-97: downtown bus stop, mailbox and meters on Main St"
+  },
+  "bluebell-bins": {
+   "cam": [
+    110,
+    6.3,
+    119,
+    3.1416,
+    -0.15
+   ],
+   "note": "GAME-97: Bluebell Ct bulb (a curb bin used to sit on the asphalt) (eye height on Bluebell Heights since GAME-96)"
+  },
   "oak-hill": {
    "cam": [
     75.6,
@@ -366,9 +416,9 @@
   "hill-top": {
    "cam": [
     75.6,
-    7.6,
+    8.7,
     150,
-    0.0,
+    0,
     -0.12
    ],
    "note": "GAME-96: looking back down Oak Ave from the top of Bluebell Heights"
@@ -402,6 +452,114 @@
     -0.42
    ],
    "note": "GAME-96: Puddle Park and Bluebell Heights from above Creek Rd"
+  },
+  "heights-wall": {
+   "cam": [
+    22,
+    1.6,
+    82,
+    3.1416,
+    0.08
+   ],
+   "note": "GAME-96: under the Skyway's north end, the retaining wall stepping up to Bluebell Heights"
+  },
+  "oak-climb": {
+   "path": [
+    [
+     75.4,
+     1.6,
+     66,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     1.6,
+     72,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     1.62,
+     78,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     1.85,
+     84,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     2.33,
+     90,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     2.99,
+     96,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     3.78,
+     102,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     4.65,
+     108,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     5.55,
+     114,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     6.42,
+     120,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     7.21,
+     126,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     7.87,
+     132,
+     3.1416,
+     0.05
+    ],
+    [
+     75.4,
+     8.35,
+     138,
+     3.1416,
+     0.05
+    ]
+   ],
+   "seconds": 8,
+   "optional": true,
+   "note": "GAME-96: walking up Oak Ave onto Bluebell Heights"
   }
  }
 }
