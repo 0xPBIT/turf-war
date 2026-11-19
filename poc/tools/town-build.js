@@ -7,7 +7,7 @@
 // id "t:N" in build order) and stay out of the grid bake as their own small baked groups.
 function burnReg(type,g,x,z,s){ BURN.push({id:'t:'+BURN.length,type,g,x,z,s}); g.userData.nobake=true; }
 // Lampposts copper can be stripped from (GAME-91): the look test's five on Main St, then ours.
-const LAMPS=[0,1,2,3,4].map(i=>({id:'lamp:'+i,p:[-34+i*17,0,5.5],ry:0,style:'cobra'}));
+const LAMPS=[-34,-17,0,17,41.5].map((x,i)=>({id:'lamp:'+i,p:[x,0,5.5],ry:0,style:'cobra'}));   // x=34 moved out of Maple Row (GAME-97)
 // Merge a group's meshes per material in the group's own space (bake() assumes a root at the origin).
 function bakeLocal(root){
   root.updateMatrixWorld(true); const inv=new THREE.Matrix4().copy(root.matrixWorld).invert(), groups=new Map(), kill=[], m4=new THREE.Matrix4();
@@ -68,8 +68,8 @@ function bmeta(x,z,hw,hd,ry,wall,roof,name){ META.buildings.push({x:+x.toFixed(2
 // ---------- small helpers ----------
 const G=(x,z,face=0)=>grp(city,x,0,z,typeof face==='number'?face:FACE[face]);
 const _v=new THREE.Vector3();
-function L(g,x,y,z){ g.updateMatrixWorld(true); return _v.set(x,y,z).applyMatrix4(g.matrixWorld).clone(); }
-function solid(g,lx,ly,lz,hx,hy,hz,tag){ const p=L(g,lx,ly,lz); const b=staticBox(p.x,p.y,p.z,hx,hy,hz,g.rotation.y); if(tag) b.twTag=tag; return b; }
+function L(g,x,y,z){ g.updateWorldMatrix(true,false); return _v.set(x,y,z).applyMatrix4(g.matrixWorld).clone(); }
+function solid(g,lx,ly,lz,hx,hy,hz,tag){ const p=L(g,lx,ly,lz); const q=g.getWorldQuaternion(new THREE.Quaternion()); const b=staticBox(p.x,p.y,p.z,hx,hy,hz,2*Math.atan2(q.y,q.w)); if(tag) b.twTag=tag; return b; }
 function postBody(x,z,r,h,tag){ const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(r,r,h,8)}); b.position.set(x,h/2,z); world.addBody(b); if(tag) b.twTag=tag; return b; }
 const lastBody=()=>world.bodies[world.bodies.length-1];
 function T(x,z,s=1,leaf){ tree(x,z,s,leaf||(rnd()<.35?'tx:leafB':'tx:leafA')); }
@@ -363,11 +363,11 @@ function streetFurniture(){
       const ry=r.axis==='x'?(side>0?0:Math.PI):side*HP; cobra(x,z,ry);
     } }
   // hydrants, news boxes, mailboxes, bus stops, trash cans
-  for(const [x,z] of [[-30,-5.0],[-58,5.0],[48,-5.0],[90,5.0],[-12+5.0,40],[-12-5.0,-40],[72-5,-30],[72+5,30],[60,72-5],[100,-76+5],[-40,72-5],[-40,-76+5],[30,72+5],[110,-76-5]]) hydrant(x,z);
+  for(const [x,z] of [[-28,-5.0],[-58,5.0],[48,-5.0],[90,5.0],[-12+5.0,40],[-12-5.0,-40],[72-5,-30],[72+5,30],[60,72-5],[100,-76+5],[-40,72-5],[-40,-76+5],[30,72+5],[110,-76-5]]) hydrant(x,z);
   for(const [x,z,ry] of [[-22,5.2,Math.PI],[-60,-5.2,0],[-7.2,-24,HP],[68,5.2,Math.PI]]){ newsBox(x,z,ry); newsBox(x+.6,z,ry,0xFF6E9E,'FREE'); }
-  mailbox(-40,-5.1,0); mailbox(64,5.1,Math.PI);
-  busStop(-38.5,-5.3,0,'DOWNTOWN'); busStop(46,5.4,Math.PI,'PLAZA'); busStop(-17.6,-48,HP,'SCHOOL');
-  for(const [x,z] of [[-26,-5.1],[-52,5.1],[-70,-5.1],[-7.2,30],[-16.8,-30],[60,-5.1],[80,5.1],[-7.2,-60]]) trashCan(x,z);
+  mailbox(-43.5,-5.1,0); mailbox(64,5.1,Math.PI);
+  busStop(-36.5,-5.3,0,'DOWNTOWN'); busStop(46,5.4,Math.PI,'PLAZA'); busStop(-17.6,-48,HP,'SCHOOL');
+  for(const [x,z] of [[-26,-5.1],[-54.5,5.1],[-70,-5.1],[-7.2,30],[-16.8,-30],[60,-5.1],[80,5.1],[-7.2,-60]]) trashCan(x,z);
 }
 
 // ---------- downtown (north of Elm) ----------
@@ -419,7 +419,7 @@ function downtown(){
   // sidewalk dressing along Main
   for(const x of [-28,-34,-40,-48,-54,-62]){ meter(x,-5.25,0); meter(x+1,5.25,Math.PI); }
   for(const x of [-30,-44,-58,-76]){ T(x,-4.9,.75); } for(const x of [-34,-52,-80]) T(x,4.9,.75);
-  for(const x of [-33,-50]) bench(x,6.6,Math.PI); for(const x of [-60,-76]) bench(x,-6.6,0);
+  for(const x of [-33,-50]) bench(x,6.6,Math.PI); bench(-51,-4.9,0); bench(-76,-6.6,0);
   planter(-20,6.4,1); planter(-20,-6.4,1); planter(-64,-6.6,.9);
   for(const z of [-30,-44,-58]){ bollard(-18.6,z-1); }
 }
@@ -653,7 +653,10 @@ function suburbHouse(x,z,face,i){
   // a car on some driveways
   if(i%4===0||i%4===3){ const p=L(g,dx,0,fz-2.9); car(p.x,p.z,ry+HP,pick(CARS)); lastBody().twTag='car'; }
   // curbside bins, basketball hoop, kiddie pool, garden gnome, porch chair, bike, flower bed, tree
-  const bp=L(g,dx+1.9,0,fz+.6); binCurb(bp.x,bp.z,ry,i%2?0x2FAE6A:0x3F7FD0);
+  // curbside bin: step it along the curb off a street lamp, and back out of the Bluebell Ct asphalt
+  let bp=L(g,dx+1.9,0,fz+.6); if(LAMPS.some(l=>Math.hypot(l.p[0]-bp.x,l.p[2]-bp.z)<1.2)) bp=L(g,dx+3.2,0,fz+.6);
+  { const ox=bp.x-110, oz=bp.z-134, r=Math.hypot(ox,oz); if(r<11) bp.set(110+ox/r*11,0,134+oz/r*11); }
+  binCurb(bp.x,bp.z,ry,i%2?0x2FAE6A:0x3F7FD0);
   if(i%5===2){ const hp=grp(g,dx+1.4,0,1.5); put(CYL(.06,.06,3.0,8),0x8E95AE,hp,0,1.5,0); put(B(1.0,.65,.04),0xFFFFFF,hp,0,3.05,-.15); put(new THREE.TorusGeometry(.22,.02,6,16),0xFF6A1E,hp,0,2.8,-.45,{rx:HP}); }
   if(i%6===1){ const kp=grp(g,-w/2-1.2,0,-2.8); put(CYL(.9,.9,.3,24,1),0x3FB8FF,kp,0,.15,0); const wt=new THREE.Mesh(new THREE.CircleGeometry(.8,24),new THREE.MeshPhysicalMaterial({color:0x8FE0FF,roughness:.05,clearcoat:1})); wt.rotation.x=-HP; wt.position.y=.28; kp.add(wt); }
   if(i%4===2){ const gn=grp(g,-w*.3,0,d/2+1.4); put(new THREE.ConeGeometry(.09,.25,8),0xE8343F,gn,0,.42,0); put(new THREE.SphereGeometry(.07,8,6),0xFFD9B8,gn,0,.27,0); put(new THREE.ConeGeometry(.08,.12,8),0xFFFFFF,gn,0,.2,.04,{rx:.4}); put(CYL(.07,.08,.18,8),0x3FB8FF,gn,0,.09,0); }
@@ -673,7 +676,7 @@ function suburbs(){
   for(const z of [...cols1,...cols2.slice(0,3)]) suburbHouse(123.2,z,'-x',n++);
   // Bluebell Ct: cul-de-sac bulb at the west end of Birch with three houses around it
   const cx=110, cz=134; const bulb=new THREE.CylinderGeometry(10,10,.06,40); put(bulb,'tx:asphalt',city,cx,.033,cz,{ns:true});
-  const ring=new THREE.CylinderGeometry(12.2,12.2,.16,40,1,true); put(new THREE.RingGeometry(10,12.2,40),'tx:walk',city,cx,.165,cz,{rx:-HP,ns:true}); put(new THREE.CylinderGeometry(3,3,.3,24),'tx:curb',city,cx,.15,cz); put(new THREE.CylinderGeometry(2.8,2.8,.32,24),'tx:mulch',city,cx,.16,cz); T(cx,cz,1.1);
+  const ring=new THREE.CylinderGeometry(12.2,12.2,.16,40,1,true); put(new THREE.RingGeometry(10,12.2,40,1,HP+.33,Math.PI*2-.66),'tx:walk',city,cx,.165,cz,{rx:-HP,ns:true}); /* gap where Birch Ln drives in (GAME-97) */ put(new THREE.CylinderGeometry(3,3,.3,24),'tx:curb',city,cx,.15,cz); put(new THREE.CylinderGeometry(2.8,2.8,.32,24),'tx:mulch',city,cx,.16,cz); T(cx,cz,1.1);
   rect(META.roads,cx-10,cz-10,cx+10,cz+10,{name:'BLUEBELL CT',kind:'lane'});
   suburbHouse(cx,cz+12.2+7.4,'-z',n++); suburbHouse(cx-17.5,cz+9,'+x',n++); suburbHouse(cx+17.5,cz+9,'-x',n++);
   txt(['BLUEBELL CT'],2.4,.5,'#1F8A5A','#FFFFFF',city,cx-5,2.8,cz-13).rotation.y=HP;
@@ -883,10 +886,10 @@ function props(){
   let n=13;
   const crate=(x,z,s,hex,y=.36)=>PROPS.push({ id:'o:crate'+(n++), type:'crate', p:[x,y*(s/.7),z], s, hex });
   const cone=(x,z)=>PROPS.push({ id:'o:cone'+(n++), type:'cone', p:[x,.38,z] });
-  crate(-37.5,22.2,.7,P.sunny); crate(-38.4,22.2,.7,P.gum); crate(-46,-22.5,.7,P.sky);
+  crate(-37.5,22.2,.7,P.sunny); crate(-38.4,22.2,.7,P.gum); crate(-46,-25.3,.7,P.sky);
   crate(25.3,-11.2,.7,P.sunny); crate(25.3,-12.1,.7,P.mint); crate(25.3,-11.65,.7,P.gum,1.06);
   crate(45,-111.2,.7,P.sunny); crate(46,-111.2,.7,P.sky); crate(-36,-112,.6,P.gum);
-  for(const [x,z] of [[-2,-47.6],[0,-47.6],[2.2,-47.6],[14,-47.6],[15.5,-47.4],[-5.6,-57],[10,-46.5],[70,-3.8],[73.5,3.8],[-12,-3.8]]) cone(x,z);
+  for(const [x,z] of [[-2,-47.6],[0,-47.6],[2.2,-47.6],[14,-47.6],[15.5,-47.4],[-5.6,-57],[10,-46.5],[66.9,-4.6],[76.9,4.6],[-16.2,-4.8]]) cone(x,z);
   crate(9,64,.7,P.sunny); crate(29,-30,.7,P.gum);
 }
 // Townsfolk are server-driven NPCs now (GAME-85/93, npcs.json); the town only says where its camp is.
