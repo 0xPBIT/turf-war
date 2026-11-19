@@ -852,7 +852,12 @@ function vagrant(o){
   for(const s of [-1,1]){ put(B(.025,.21,.02),0x3B2C26,g,s*.16,1.42,-.24,{s:[1,1,1]}); put(B(.04,.36,.012),0x3B2C26,g,s*.11,1.18,.1,{rx:-.08}); }
   // arms: jacket sleeves, cuffs, gloves
   const sh=[[-.24,1.34,0],[.24,1.34,0]];
-  if(o.sign){
+  if(o.sign && o.armRig){
+    for(const [i,s] of [[0,-1],[1,1]]){ const pv=new THREE.Group(), rel=v=>[v[0]-sh[i][0],v[1]-sh[i][1],v[2]-sh[i][2]], e=rel([s*.27,1.08,.1]), w=rel([s*.17,1.0,.33]);
+      limb([0,0,0],e,.06,.065,'tx:canvas|'+o.coat,pv); limb(e,w,.05,.058,'tx:canvas|'+o.coat,pv); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,pv,...w); glove(pv,rel([s*.2,1.0,.39]),[0,1,.2],o,false);
+      bake(pv); pv.position.set(...sh[i]); o.armRig.push(pv); }
+    const sg=new THREE.Mesh(new THREE.BoxGeometry(.66,.42,.012),[0,0,0,0,new THREE.MeshLambertMaterial({map:labelTex(o.sign,512,330,'#D9A866','#3A2410',42)}),0].map(m=>m||new THREE.MeshLambertMaterial({color:0xB98A50}))); sg.position.set(0,1.02,.4); sg.rotation.set(-.15,0,-.05); g.add(sg); sg.castShadow=true; o._sign=sg;
+  } else if(o.sign){
     for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.27,1.08,.1], w=[s*.17,1.0,.33]; limb(sh[i],e,.06,.065,'tx:canvas|'+o.coat,g); limb(e,w,.05,.058,'tx:canvas|'+o.coat,g); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,g,...w); }
     const sg=new THREE.Mesh(new THREE.BoxGeometry(.66,.42,.012),[0,0,0,0,new THREE.MeshLambertMaterial({map:labelTex(o.sign,512,330,'#D9A866','#3A2410',42)}),0].map(m=>m||new THREE.MeshLambertMaterial({color:0xB98A50}))); sg.position.set(0,1.02,.4); sg.rotation.set(-.15,0,-.05); g.add(sg); sg.castShadow=true;
     g.updateMatrixWorld(true); for(const s of [-1,1]) glove(g,[s*.2,1.0,.39],[0,1,.2],o,false);
@@ -894,7 +899,7 @@ function vagrant(o){
   bake(head); bake(g); head.position.y=1.62; g.add(head); if(o.armRig) for(const pv of o.armRig) g.add(pv);
   g.position.set(o.x,0,o.z); g.rotation.y=o.ry??0; scene.add(g);
   const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.3,.3,1.85,10)}); b.position.set(o.x,.93,o.z); world.addBody(b);
-  const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62}; b.tw={type:'person',p}; people.push(p); return p;
+  const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62,sign:o._sign||null}; b.tw={type:'person',p}; people.push(p); return p;
 }
 vagrant({x:-9.4,z:-4.4,ry:.5,coat:0xE07A2E,coatSh:0xB85E1E,hat:0xFF5D8F,hatSh:0xE03A72,pants:0x4D6FC9,hoodie:0x9AA3B8,scarf:0,sign:['ANYTHING','HELPS :)']});
 vagrant({x:19.4,z:8.6,ry:2.2,coat:0x5FA88A,coatSh:0x4A8A70,hat:0xF2C230,hatSh:0xD9A400,pants:0x5A4C80,hoodie:0x7A3E4E,skin:0xC98A5E,skinSh:0xA86F48,beard:0x2E221A,pack:0x8A6A44,packSh:0x6E5434,roll:0x3E6A9A});
@@ -1257,6 +1262,7 @@ function tick(){
   bobT+=dt*(ml>0?speed*2.2:0);
   camera.position.set(player.position.x, player.position.y+1.25+Math.sin(bobT)*.04*SET.bob(), player.position.z);
   camera.rotation.set(pitch,yaw,0,'YXZ');
+  FIGHT.afterCamera(dt, t);
   // viewmodel
   handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6; NET.vmPose(dt,ml>0);
   // ambient life
@@ -1280,7 +1286,7 @@ const SET = (() => {
   const KEY = 'tw_settings';
   const BIND_ACTIONS = [
     ['fwd', 'Walk forward', 'KeyW'], ['back', 'Walk back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
-    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'],
+    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'], ['punch', 'Punch', 'KeyV'],
     ['map', 'Big town map', 'KeyM'],
   ];
   // Arrow keys and the right-hand Shift always work too, whatever the bindings say.
@@ -1323,7 +1329,7 @@ const SET = (() => {
   function applyHud() {
     const show = (id, on) => { const e = el(id); if (e) e.style.visibility = on ? '' : 'hidden'; };
     show('help', s.help); show('board', s.board); show('xh', s.xhair);
-    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
+    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle (punches with empty hands) · <kbd>${keyName(s.binds.punch)}</kbd> punch · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
   }
   function applyAll() { applyVideo(); applyHud(); }
 
@@ -1531,6 +1537,9 @@ const NET = (() => {
   // The server has walls at the town edge; mirror them so prediction agrees.
   for (const [x, z, hx, hz] of [[-60.5, 0, .5, 70], [60.5, 0, .5, 70], [0, -60.5, 70, .5], [0, 60.5, 70, .5]]) staticBox(x, 5, z, hx, 10, hz);
 
+  // The look test's three static vagrants are server-driven NPCs now (GAME-85).
+  for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
+
   // ---------- entities ----------
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
   const fixtures = new Map();        // fixture id -> desc
@@ -1553,7 +1562,7 @@ const NET = (() => {
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
   function buildVagrant(e) {
     const armRig = [];
-    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e), armRig });
+    const p = vagrant({ x: 0, z: 0, ry: 0, ...(e.kind === 'npc' ? e.look : vagrantLook(e)), armRig });
     p.arms = armRig;
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
@@ -1595,10 +1604,10 @@ const NET = (() => {
     if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
     if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); return; }
     let obj, extra = {};
-    if (e.kind === 'vagrant' || e.kind === 'sleeper') {
+    if (e.kind === 'vagrant' || e.kind === 'sleeper' || e.kind === 'npc') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
-      const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag);
-      extra = { model: v, tag, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
+      extra = { model: v, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
+      if (e.kind !== 'npc') { const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag); extra.tag = tag; }
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
     } else if (e.kind === 'traffic') obj = buildCar(e.color);
     else if (e.kind === 'prop') obj = buildProp(e);
@@ -1648,8 +1657,10 @@ const NET = (() => {
     const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
     if (!haveAck) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us
+    if (FIGHT.isDown()) player.velocity.y = Math.min(player.velocity.y, 0);   // no jumping while knocked out
   }
   function afterStep(dt) {
+    FIGHT.afterStep(dt);
     // Blend in any correction over a few frames so it never reads as a snap.
     if (corr.lengthSq() > 1e-6) { const k = 1 - Math.exp(-dt * 8); player.position.x += corr.x * k; player.position.z += corr.z * k; corr.multiplyScalar(1 - k); }
     sendAcc += dt;
@@ -1675,7 +1686,7 @@ const NET = (() => {
       corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
     }
   }
-  const speedScale = () => { const g = grabbing && ents.get(grabbing); return !g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1); };
+  const speedScale = () => { const g = grabbing && ents.get(grabbing); return (!g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1)) * FIGHT.speedScale(); };
 
   // ---------- fixtures and effects ----------
   let dumpFire = null;
@@ -1738,9 +1749,10 @@ const NET = (() => {
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
     }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
+    else FIGHT.onFx(m);
   }
   function onMeta(m) {
-    meta = m; damage = m.town;
+    meta = m; damage = m.town; FIGHT.onMeta(m);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
@@ -1796,7 +1808,7 @@ const NET = (() => {
       if (!v.obj) continue;
       if (v.tag) v.tag.visible = showTags;
       const s = sampleBuf(v, rt); if (!s) continue;
-      if (v.kind === 'vagrant') {
+      if (v.kind === 'vagrant' || v.kind === 'npc') {
         cur.copy(v.obj.position); v.obj.position.copy(s.p);
         if (s.f !== undefined) v.obj.rotation.y = s.f;
         const moving = cur.distanceTo(s.p) > dt * .5;
@@ -1805,6 +1817,7 @@ const NET = (() => {
         v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
         v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
         animateArms(v, dt, moving);
+        FIGHT.pose(v, dt, t);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
@@ -1863,6 +1876,7 @@ const NET = (() => {
   function throwDir(dir) {
     if (lastPointer === 'mouse' && document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
     if (document.pointerLockElement === canvas) camera.getWorldDirection(dir);
+    if (!FIGHT.holding()) return FIGHT.punch(dir);   // empty hands: punch (GAME-85)
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'throw', dir: { x: dir.x, y: dir.y, z: dir.z } }));
     handKick = 1;
   }
@@ -1874,6 +1888,7 @@ const NET = (() => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
     if (SET.isBind('act', e.code) || e.code === 'KeyF') sendAct();
     if (SET.isBind('grab', e.code)) sendGrab();
+    if (SET.isBind('punch', e.code)) FIGHT.punch(camera.getWorldDirection(new THREE.Vector3()));
   });
 
   // ---------- connection ----------
@@ -1915,7 +1930,225 @@ const NET = (() => {
   window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view };
+  const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money };
+})();
+
+// ===================== fist fights and hit reactions (GAME-85) =====================
+// Punching with empty hands, being hit (by fists, thrown things or cars), knockouts,
+// and the arm poses that let other vagrants and townsfolk throw hands.
+const FIGHT = (() => {
+  const MAX_HP = 100;
+  const own = { hp: MAX_HP, downUntil: 0, staggerUntil: 0, lastHit: 0, lastPunch: 0, punchT: 0, hand: 'R', flash: 0, shake: 0, ko: 0, kb: new THREE.Vector3() };
+  const now = () => performance.now();
+
+  // ---------- HUD: health pill, hurt vignette, knocked-out card ----------
+  const css = document.createElement('style');
+  css.textContent = `
+#hpWrap{position:fixed;z-index:5;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.92);border-radius:999px;padding:5px 12px 5px 10px;box-shadow:0 3px 0 rgba(20,60,140,.22);pointer-events:none;font-family:var(--display);font-weight:700;font-size:13px;color:var(--ink);transition:opacity .4s}
+#hpWrap.full{opacity:.55}
+#hpBar{width:120px;height:10px;border-radius:999px;background:#F1E4EC;overflow:hidden}
+#hpBar i{display:block;height:100%;width:100%;border-radius:999px;background:linear-gradient(90deg,#FF6E9E,#FFC93C);transition:width .15s}
+#hurtVig{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(255,60,80,0) 45%,rgba(200,20,50,.55) 100%)}
+#koCard{position:fixed;z-index:6;left:50%;top:38%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;display:none}
+#koCard b{display:block;font-family:var(--display);font-weight:700;font-size:44px;color:#fff;-webkit-text-stroke:6px #E8343F;paint-order:stroke fill;letter-spacing:1px}
+#koCard span{display:inline-block;margin-top:6px;background:rgba(255,255,255,.94);border-radius:14px;padding:5px 12px;font-weight:700;font-size:14px;color:var(--ink)}
+.pop.pow{color:#FFC93C;font-size:30px;-webkit-text-stroke:6px #E8343F}
+.pop.paid{color:#26B07A;font-size:24px}
+@media (pointer:coarse){ #hpWrap{bottom:calc(150px + env(safe-area-inset-bottom,0px))} }`;
+  document.head.appendChild(css);
+  const hud = document.createElement('div');
+  hud.innerHTML = `<div id="hpWrap" class="full">♥<div id="hpBar"><i></i></div></div><div id="hurtVig"></div><div id="koCard"><b>KNOCKED OUT</b><span id="koSub"></span></div>`;
+  document.body.append(...hud.children);
+  const $ = id => document.getElementById(id);
+  let koPaid = 0;
+  function drawHp() {
+    $('hpBar').firstChild.style.width = Math.max(0, own.hp) + '%';
+    $('hpWrap').classList.toggle('full', own.hp >= MAX_HP);
+  }
+
+  // ---------- sounds ----------
+  let ac = null;
+  function sfx(kind, at) {
+    const d = at ? camera.position.distanceTo(new THREE.Vector3(...at)) : 0; if (d > 35) return;
+    try { ac ||= new AudioContext(); } catch { return; }
+    const vol = (1 - d / 35) * SET.vol(); if (vol <= 0) return;
+    const len = kind === 'swoosh' ? .16 : .12, buf = ac.createBuffer(1, ac.sampleRate * len, ac.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / ch.length, kind === 'swoosh' ? 1.5 : 4);
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = kind === 'swoosh' ? 'bandpass' : 'lowpass'; f.frequency.value = kind === 'swoosh' ? 1400 : kind === 'bonk' ? 900 : 420;
+    const g = ac.createGain(); g.gain.value = (kind === 'swoosh' ? .05 : .32) * vol;
+    src.connect(f); f.connect(g); g.connect(ac.destination); src.start();
+    if (kind !== 'swoosh') { const o = ac.createOscillator(), og = ac.createGain(); o.frequency.setValueAtTime(kind === 'bonk' ? 520 : 140, ac.currentTime); o.frequency.exponentialRampToValueAtTime(60, ac.currentTime + .12); og.gain.value = .12 * vol; og.gain.exponentialRampToValueAtTime(.001, ac.currentTime + .14); o.connect(og); og.connect(ac.destination); o.start(); o.stop(ac.currentTime + .15); }
+  }
+
+  // ---------- first-person fists ----------
+  // Same fingerless knit gloves and orange canvas sleeves as the bottle hand.
+  const HAND = { glove: 0x7C8299, skin: 0xF2C6A0 };
+  function fist(side) {
+    const root = new THREE.Group();
+    const h = glove(root, [0, 0, 0], [0, 1, 0], HAND, false);
+    // knuckles forward (glove +y -> -z), palm down (glove +z -> -y), turned in a little
+    h.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0)))
+      .premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, side * .25, side * -.35)));
+    h.scale.setScalar(1.2);
+    const end = new THREE.Vector3(side * .1, -.3, .34);                  // forearm runs back and down out of view
+    limb([0, -.004, .05], end.toArray(), .034, .044, 'tx:canvas|' + 0xE07A2E, root, 14);
+    put(CYL(.05, .05, .035, 12), 'tx:knit|' + 0x9AA3B8, root, 0, -.002, .055, { rx: Math.PI / 2 - .55 });  // hoodie cuff
+    put(CYL(.043, .043, .025, 14), 0xB85E1E, root, side * .008, -.02, .09, { rx: Math.PI / 2 - .6 });     // sleeve hem
+    root.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } });
+    camera.add(root); root.visible = false; return root;
+  }
+  const fists = { L: fist(-1), R: fist(1) };
+  const REST = { L: new THREE.Vector3(-.15, -.2, -.42), R: new THREE.Vector3(.15, -.195, -.41) };
+  const HIT = { L: new THREE.Vector3(-.04, -.09, -.66), R: new THREE.Vector3(.04, -.09, -.66) };
+  const _v = new THREE.Vector3();
+
+  // Until items can be put down (GAME-82), the bottle is always in hand.
+  const holding = () => (window.__net && 'held' in window.__net) ? window.__net.held != null : true;
+  const isDown = () => now() < own.downUntil;
+
+  function punch(dir) {
+    const t = now();
+    if (isDown() || t - own.lastPunch < 420 || !NET.me) return;
+    own.lastPunch = t;
+    own.hand = holding() ? 'L' : (own.hand === 'L' ? 'R' : 'L');   // bottle in the right hand: jab with the left
+    own.punchT = 1;
+    sfx('swoosh');
+    NET.send({ t: 'punch', dir: { x: dir.x, y: dir.y, z: dir.z } });
+  }
+
+  // ---------- movement while hurt (mirrors combat.mjs moveMod) ----------
+  function speedScale() { const t = now(); return t < own.downUntil ? 0 : t < own.staggerUntil ? .35 : 1; }
+  function afterStep(dt) {
+    if (own.kb.lengthSq() > 1e-4) {
+      player.position.x += own.kb.x * dt; player.position.z += own.kb.z * dt;
+      own.kb.multiplyScalar(Math.exp(-dt * 7));
+    }
+    if (isDown()) player.velocity.y = Math.min(player.velocity.y, 0);
+  }
+
+  // ---------- events from the server ----------
+  function stars() {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96; const g = cv.getContext('2d');
+    g.font = '700 64px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineWidth = 10; g.strokeStyle = '#fff'; g.fillStyle = '#FFC93C';
+    g.strokeText('✦ ✦ ✦', 128, 50); g.fillText('✦ ✦ ✦', 128, 50);
+    const tx = new THREE.CanvasTexture(cv); tx.colorSpace = THREE.SRGBColorSpace;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, depthWrite: false, transparent: true, fog: false })); s.scale.set(.75, .28, 1); fxl(s); return s;
+  }
+  const headAt = v => [v.obj.position.x, v.obj.position.y + (v.down ? -.4 : 1.1), v.obj.position.z];
+  const fx = v => v.fight || (v.fight = { punch: 0, hand: 'R', hurt: 0, fall: v.down ? 1 : 0, guardUntil: 0 });
+  function onFx(m) {
+    const meId = NET.me, v = NET.ents.get(m.id);
+    if (m.kind === 'punch') {
+      if (m.id === meId || !v || !v.model) return;
+      const F = fx(v); F.punch = 1; F.hand = m.hand; F.guardUntil = now() + 4000;
+      sfx('swoosh', headAt(v));
+    } else if (m.kind === 'hurt') {
+      const bonk = m.cause === 'item';
+      if (m.id === meId) {
+        own.hp = m.hp; own.lastHit = now(); own.staggerUntil = now() + 350; own.flash = 1; own.shake = bonk ? .05 : .035;
+        if (m.push) own.kb.add(new THREE.Vector3(m.push[0], 0, m.push[2]));
+        if (m.paid) { koPaid += m.paid; const at = camera.getWorldDirection(_v).multiplyScalar(1.2).add(camera.position); NET.popText('+' + NET.money(m.paid), [at.x, at.y - .2, at.z], 'paid'); }
+        if (m.cause === 'car') NET.feed(`Hit by a car! <b>+${NET.money(m.paid)}</b> for your pain and suffering.`);
+        drawHp(); sfx(bonk ? 'bonk' : 'thud');
+      } else if (v && v.model) {
+        const F = fx(v); F.hurt = 1;
+        const at = headAt(v);
+        NET.popText(m.cause === 'punch' ? ['POW!', 'BAM!', 'WHAP!', 'OOF!'][Math.floor(Math.random() * 4)] : m.cause === 'car' ? 'WHAM!' : 'BONK!', [at[0], at[1] + .5, at[2]], 'pow');
+        sfx(bonk ? 'bonk' : 'thud', at);
+        dust(new THREE.Vector3(at[0], at[1] - .1, at[2]), 3, 0xE8E0D0);
+        if (m.by === meId && m.paid === 0 && v.kind === 'vagrant') NET.feed(`You hit <b>${NET.esc(v.name)}</b>. They got paid for it.`);
+      }
+    } else if (m.kind === 'ko') {
+      if (m.id === meId) {
+        own.downUntil = now() + m.ms; own.hp = 0; drawHp();
+        $('koSub').textContent = koPaid ? `+${NET.money(koPaid)} in damages. Getting up in a sec...` : 'Getting up in a sec...';
+        $('koCard').style.display = 'block';
+      } else if (v && v.model) {
+        v.down = 1; NET.popText('K.O.!', headAt(v), 'pow');
+        if (m.by === meId) NET.feed(`You knocked out <b>${NET.esc(v.name || 'someone')}</b>!`);
+      }
+    } else if (m.kind === 'koup') {
+      if (m.id === meId) { own.downUntil = 0; own.hp = MAX_HP; koPaid = 0; drawHp(); $('koCard').style.display = 'none'; }
+      else if (v) v.down = 0;
+    } else if (m.kind === 'thud') { sfx('thud', m.at); dust(new THREE.Vector3(...m.at), 3, 0xE8E0D0); }
+  }
+  function onMeta(m) {
+    for (const v of NET.ents.values()) {
+      if (v.kind !== 'npc' && v.kind !== 'vagrant') continue;
+      const st = m.objects[v.id] || {};
+      v.angry = !!st.angry; if (!v.own) v.down = !!st.down;
+    }
+  }
+
+  // ---------- poses for other vagrants and townsfolk ----------
+  const ease = k => 1 - Math.pow(1 - k, 3);
+  function pose(v, dt, t) {
+    const m = v.model; if (!m) return;
+    const F = fx(v), g = m.g;
+    F.punch = Math.max(0, F.punch - dt / (F.hand === 'T' ? .5 : .3));
+    F.hurt = Math.max(0, F.hurt - dt * 3);
+    F.fall = Math.min(1, Math.max(0, F.fall + (v.down ? dt * 3.2 : -dt * 1.6)));
+    const guard = v.angry || now() < F.guardUntil;
+    const k = F.punch > 0 ? Math.sin((1 - F.punch) * Math.PI) : 0;
+    if (m.sign) m.sign.visible = !guard && !v.down && F.fall === 0;
+    if (F.stars) F.stars.visible = !!v.down;
+    // Not fighting: leave the walk / grab arm animation alone.
+    if (!guard && !v.down && F.punch === 0 && F.hurt === 0 && F.fall === 0) return;
+    if (m.arms && m.arms.length === 2) {
+      const [L, R] = m.arms, base = guard ? -.95 : 0;
+      L.rotation.set(base, 0, guard ? .32 : 0); R.rotation.set(base, 0, guard ? -.32 : 0);
+      if (F.punch > 0) {
+        if (F.hand === 'T') { const p = 1 - F.punch; R.rotation.x = p < .4 ? -2.8 * (p / .4) : -2.8 + 2.0 * ((p - .4) / .6); R.rotation.z = -.1; }
+        else { const A = F.hand === 'L' ? L : R; A.rotation.x = base + (-1.6 - base) * k; A.rotation.z *= 1 - k * .7; }
+      }
+      if (v.down) { L.rotation.set(-2.6, 0, .5); R.rotation.set(-2.4, 0, -.6); }   // sprawled
+    }
+    const twist = F.punch > 0 && F.hand !== 'T' ? (F.hand === 'R' ? -1 : 1) * .35 * k : 0;
+    g.rotation.y = twist;
+    g.rotation.x = (guard ? .1 : 0) + .15 * k - .4 * F.hurt - Math.PI / 2 * ease(F.fall);
+    g.rotation.z += Math.sin(t * 18) * F.hurt * .18;
+    if (F.fall > 0) g.position.y = -.9 + .12 * ease(F.fall);
+    if (v.down && !F.stars) { F.stars = stars(); F.stars.position.set(0, 2.0, 0); g.add(F.stars); }
+    if (F.stars) { F.stars.visible = !!v.down; F.stars.material.rotation = Math.sin(t * 3) * .3; F.stars.position.x = Math.sin(t * 4) * .08; }
+  }
+
+  // ---------- camera: hurt shake, knocked-out view, fists ----------
+  function afterCamera(dt, t) {
+    const down = isDown();
+    own.ko = Math.min(1, Math.max(0, own.ko + (down ? dt * 3 : -dt * 1.5)));
+    if (own.ko > 0) {
+      const k = ease(own.ko);
+      camera.position.y -= 1.0 * k;
+      camera.rotation.x += (1.1 - camera.rotation.x) * k * .85;
+      camera.rotation.z += .55 * k + Math.sin(t * 1.7) * .05 * k;
+    }
+    if (down && $('koCard').style.display === 'none') $('koCard').style.display = 'block';
+    if (!down && $('koCard').style.display !== 'none' && own.downUntil === 0) $('koCard').style.display = 'none';
+    if (own.shake > 0) { camera.rotation.x += (Math.random() - .5) * own.shake; camera.rotation.y += (Math.random() - .5) * own.shake; own.shake = Math.max(0, own.shake - dt * .25); }
+    own.flash = Math.max(0, own.flash - dt * 2.2);
+    $('hurtVig').style.opacity = Math.max(own.flash, down ? .6 : 0, own.hp < 35 ? .25 + Math.sin(t * 5) * .08 : 0).toFixed(3);
+    if (!down && own.hp < MAX_HP && now() - own.lastHit > 4000) { own.hp = Math.min(MAX_HP, own.hp + 8 * dt); if (Math.floor(own.hp) % 4 === 0 || own.hp >= MAX_HP) drawHp(); }
+    vm.visible = !down;                 // the bottle hand drops out of view while you're out cold
+    // fists
+    own.punchT = Math.max(0, own.punchT - dt / .28);
+    const empty = !holding(), pk = own.punchT > 0 ? Math.sin((1 - own.punchT) * Math.PI) : 0;
+    for (const h of ['L', 'R']) {
+      const f = fists[h], active = own.punchT > 0 && own.hand === h;
+      f.visible = !down && (empty || active);
+      if (!f.visible) continue;
+      const k = active ? pk : 0;
+      _v.copy(REST[h]).lerp(HIT[h], k);
+      _v.y += Math.sin(t * 2.2 + (h === 'L' ? 1 : 0)) * .006 - (empty ? 0 : (1 - k) * .2);
+      f.position.copy(_v);
+      f.rotation.set(-k * .25, (h === 'L' ? 1 : -1) * (.12 - k * .1), (h === 'L' ? -1 : 1) * k * .3);
+    }
+  }
+
+  drawHp();
+  window.__fight = { own, pose, onFx, send: o => NET.send(o) };
+  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, isDown };
 })();
 
 // ===================== turf mini map (GAME-80) =====================

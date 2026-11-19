@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { createCombat } from './combat.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -63,6 +64,7 @@ const sessions = new Map(); // playerId -> { ws, entity, input, lastAct, graceTi
 const entities = new Map();      // id -> entity
 const byCollider = new Map();    // collider handle -> entity
 let nextBottle = 1;
+let combat = null;                // GAME-85 fights, set up once the character controller exists
 
 function addEntity(e) {
   entities.set(e.id, e);
@@ -89,6 +91,8 @@ function describe(e) {
   if (e.index !== undefined) d.index = e.index;
   if (e.spec) { d.s = e.spec.s; d.hex = e.spec.hex; if (e.spec.color) d.color = e.spec.color; }
   if (e.cat) { d.half = e.cat.half; d.r = e.cat.r; d.hh = e.cat.hh; d.drag = e.cat.drag; d.label = e.cat.label; }
+  if (e.kind === 'npc') Object.assign(d, combat.describeNpc(e));
+  if (e.kind === 'vagrant' && combat && combat.isDown(e)) d.down = 1;
   return d;
 }
 
@@ -96,7 +100,8 @@ function describe(e) {
 // windows, parked cars). The client already draws them; the server owns their state.
 const fixtureCount = {};
 MAP.colliders.forEach((c, i) => {
-  if (c.loose) return; // drawn and simulated as a movable prop instead (see props)
+  if (c.loose) return;
+  if (c.tag === 'npc') return;          // the street vagrants are server-driven NPCs now (combat.mjs) // drawn and simulated as a movable prop instead (see props)
   const collider = colliderFor(c);
   if (!c.tag || c.tag === 'npc') return;
   const n = fixtureCount[c.tag] = (fixtureCount[c.tag] || 0) + 1;
@@ -194,6 +199,10 @@ controller.enableAutostep(0.45, 0.25, true);
 controller.enableSnapToGround(0.4);
 controller.setMaxSlopeClimbAngle(50 * Math.PI / 180);
 
+combat = createCombat({ RAPIER, world, controller, entities, addEntity, broadcast: (m) => broadcast(m), addDamage: (...a) => addDamage(...a),
+  MAP, NPCS: JSON.parse(fs.readFileSync(path.join(__dirname, 'npcs.json'), 'utf8')).npcs, dt: 1 / PHYSICS_HZ, WALK, RUN, GRAVITY, CAP_HALF, CAP_R,
+  throwFrom: (e, v) => throwFrom(e, v), releaseGrab: (e) => releaseGrab(e) });
+
 const COLORS = ['#ff5fa2', '#46c6ff', '#ffb627', '#7ae582', '#b388ff', '#ff7b54', '#00d1b2', '#ffd6e0'];
 
 function vagrantId(pid) { return 'p:' + pid; }
@@ -253,7 +262,7 @@ function posOf(e) {
   return e.fixedPos;
 }
 function addDamage(p, cost, where, label) {
-  if (cost <= 0) return;
+  if (!p || cost <= 0) return;
   p.damage = (p.damage || 0) + cost;
   save.town.damage += cost;
   const zn = zoneAt(where[0], where[2]);
@@ -321,30 +330,36 @@ function interact(s) {
 
 function throwBottle(s, dir) {
   const now = Date.now();
-  if (now - (s.lastThrow || 0) < 450) return;
+  if (now - (s.lastThrow || 0) < 450 || combat.isDown(s.entity)) return;
   s.lastThrow = now;
-  const e = s.entity;
   // First person: throw along the look direction, from eye height.
   const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
   const dx = dir.x / len, dy = Math.max(-0.6, Math.min(0.9, dir.y / len)), dz = dir.z / len;
-  const t = e.body.translation();
+  throwFrom(s.entity, { x: dx * 22, y: dy * 22 + 3, z: dz * 22 });
+}
+// Any vagrant or NPC can throw a bottle with a given launch velocity.
+function throwFrom(e, v) {
+  const t = e.body.translation(), sp = Math.hypot(v.x, v.y, v.z) || 1;
   const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(t.x + dx * 0.6, t.y + 0.55 + dy * 0.6, t.z + dz * 0.6)
-    .setLinvel(dx * 22, dy * 22 + 3, dz * 22).setAngvel({ x: 8, y: 0, z: 3 }).setCcdEnabled(true));
+    .setTranslation(t.x + v.x / sp * 0.6, t.y + 0.55 + v.y / sp * 0.6, t.z + v.z / sp * 0.6)
+    .setLinvel(v.x, v.y, v.z).setAngvel({ x: 8, y: 0, z: 3 }).setCcdEnabled(true));
   const collider = world.createCollider(RAPIER.ColliderDesc.capsule(0.12, 0.07).setMass(0.4)
     .setRestitution(0.2).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
-  addEntity({ id: 'b:' + nextBottle++, kind: 'bottle', body, collider, thrower: e.player, born: now, state: {} });
+  addEntity({ id: 'b:' + nextBottle++, kind: 'bottle', body, collider, thrower: e.player || null, by: e, born: Date.now(), state: {} });
 }
 
 function onBottleHit(bottle, other) {
   if (bottle.state.smashed) return;
-  if (other && other.player === bottle.thrower && other.kind === 'vagrant') return;
+  if (other && other === bottle.by) return;
+  if (other && other.kind === 'bottle') return;
   bottle.state.smashed = true;
   const at = posOf(bottle);
   const p = bottle.thrower;
   const now = Date.now();
   const vel = bottle.body.linvel();
-  if (other && (other.type === 'window' || other.type === 'car')) {
+  if (other && (other.kind === 'vagrant' || other.kind === 'npc')) {
+    combat.itemHit(bottle.by, other, vel, 0.4);       // GAME-85: people react, NPCs fight back
+  } else if (other && (other.type === 'window' || other.type === 'car')) {
     const a = ACTIONS[other.type];
     if (now >= (other.state.brokenUntil || 0)) {
       other.state.brokenUntil = now + a.repairSec * 1000;
@@ -369,6 +384,7 @@ function onBottleHit(bottle, other) {
 function grab(s) {
   const e = s.entity;
   if (e.grabbing) return releaseGrab(e);
+  if (combat.isDown(e)) return;
   const target = nearest(e, 2.6, o => (o.kind === 'prop' || o.kind === 'sleeper' || o.kind === 'bottle') && o.body);
   if (!target) return;
   const a = e.body.translation(), b = target.body.translation();
@@ -525,6 +541,7 @@ function lightsPayload() {
 }
 
 spawnCars();
+combat.spawnNpcs();
 
 function stepPlayers() {
   for (const s of sessions.values()) {
@@ -553,11 +570,12 @@ function stepPlayers() {
       if (g) speed *= g.cat ? g.cat.drag : g.kind === 'sleeper' ? 60 / 70 : 1; // heavy things slow you down
     }
     e.vy += GRAVITY * step;
-    const desired = { x: mx * speed * step, y: e.vy * step, z: mz * speed * step };
+    const mm = combat.moveMod(e, step);              // knocked out / staggered / knocked back (GAME-85)
+    const desired = { x: mx * speed * step * mm.scale + mm.kx, y: e.vy * step, z: mz * speed * step * mm.scale + mm.kz };
     controller.computeColliderMovement(e.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC | RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC);
     const mv = controller.computedMovement();
     const grounded = controller.computedGrounded();
-    if (grounded) { e.vy = inp.jump ? JUMP : Math.min(e.vy, 0) * 0; }
+    if (grounded) { e.vy = inp.jump && !mm.down ? JUMP : 0; }
     if (typeof inp.yaw === 'number') e.facing = inp.yaw;
     else if (ml > 0.01) e.facing = Math.atan2(mx, mz);
     e.body.setNextKinematicTranslation({ x: t.x + mv.x, y: t.y + mv.y, z: t.z + mv.z });
@@ -570,6 +588,7 @@ let tick = 0;
 function physicsTick() {
   stepPlayers();
   stepTraffic(Date.now());
+  combat.stepNpcs(dt);
   world.step(events);
   events.drainCollisionEvents((h1, h2, started) => {
     if (!started) return;
@@ -596,7 +615,7 @@ function snapshotRows(all) {
     if (e.kind === 'prop' && !e.body.isSleeping()) e.moved = true;
     const t = e.body.translation(), q = e.body.rotation();
     const r = [e.id, +t.x.toFixed(2), +t.y.toFixed(2), +t.z.toFixed(2), +q.x.toFixed(3), +q.y.toFixed(3), +q.z.toFixed(3), +q.w.toFixed(3)];
-    if (e.kind === 'vagrant') r.push(+(e.facing || 0).toFixed(2));
+    if (e.kind === 'vagrant' || e.kind === 'npc') r.push(+(e.facing || 0).toFixed(2));
     rows.push(r);
   }
   return rows;
@@ -623,6 +642,8 @@ function metaPayload() {
     else if ((st.burntUntil || 0) > now) o.burnt = 1;
     if ((st.brokenUntil || 0) > now) o.broken = 1;
     if (st.braking) o.brake = 1;
+    if (st.angry) o.angry = 1;
+    if (st.down) o.down = 1;
     if (Object.keys(o).length) objects[e.id] = o;
   }
   const owners = {};
@@ -734,6 +755,11 @@ wss.on('connection', ws => {
     else if (m.t === 'act') interact(s);
     else if (m.t === 'throw' && m.dir) throwBottle(s, { x: +m.dir.x || 0, y: +m.dir.y || 0, z: +m.dir.z || 0 });
     else if (m.t === 'grab') grab(s);
+    else if (m.t === 'tp' && process.env.DEV_TP) {        // local testing only: jump to a spot
+      const e = s.entity, x = +m.x || 0, z = +m.z || 0;
+      e.body.setTranslation({ x, y: CAP_HALF + CAP_R + 0.05, z }, true); Object.assign(e.player, { x, y: CAP_HALF + CAP_R + 0.05, z }); s.queue = [];
+    }
+    else if (m.t === 'punch' && m.dir) combat.punch(s.entity, { x: +m.dir.x || 0, z: +m.dir.z || 0 });
   });
   ws.on('close', () => {
     const s = pid && sessions.get(pid);
