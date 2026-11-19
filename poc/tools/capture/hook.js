@@ -9,8 +9,10 @@ const CAP = (() => {
   try { const getDelta = clock.getDelta.bind(clock); clock.getDelta = function () { const d = getDelta(); if (fixedDt) { this.elapsedTime += fixedDt - d; return fixedDt; } return d; }; } catch {}
   window.requestAnimationFrame = cb => { if (queue) { queue.push(cb); return 0; } return realRAF(cb); };
   const st = document.createElement('style');
-  st.textContent = 'html.cap-nohud body > :not(canvas){display:none!important} html.cap-nohud canvas{cursor:none}';
+  // visibility, not display:none: HUD widgets keep their size (the mini map throws at size 0).
+  st.textContent = 'html.cap-nohud body > :not([data-cap-game]), html.cap-nohud body > :not([data-cap-game]) *{visibility:hidden!important}';
   document.head.appendChild(st);
+  try { renderer.domElement.dataset.capGame = '1'; } catch {}
   const viewmodel = () => { try { return vm; } catch { return null; } };
   const api = {
     // Fixed camera: x, y (eye height, ~1.6 for a standing player), z, yaw, pitch (radians).

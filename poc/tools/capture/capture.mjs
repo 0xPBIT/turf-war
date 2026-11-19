@@ -143,7 +143,8 @@ async function shoot(t, dir) {
       if (!s.path) {
         await page.evaluate(c => __cap.cam(...c), s.cam);
         const f0 = await page.evaluate(() => __cap.frames);
-        await page.waitForFunction(f => __cap.frames >= f + 3, f0, { timeout: 120000 });
+        await page.waitForFunction(f => __cap.frames >= f + 3, f0, { timeout: 120000 })
+          .catch(e => { throw new Error(`game loop stopped at shot ${s.name}${errs.length ? ': ' + errs.join(' | ') : ''}`); });
         await page.waitForTimeout((s.wait || 0) * 1000);
         const file = path.join(dir, `${s.name}.png`);
         await page.screenshot({ path: file }); out.push(file); console.log(`  still ${file}`);
