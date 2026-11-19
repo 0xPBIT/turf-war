@@ -6,6 +6,7 @@ const SET = (() => {
   const BIND_ACTIONS = [
     ['fwd', 'Walk forward', 'KeyW'], ['back', 'Walk back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
     ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'],
+    ['map', 'Big town map', 'KeyM'],
   ];
   // Arrow keys and the right-hand Shift always work too, whatever the bindings say.
   const ALT = { fwd: 'ArrowUp', back: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', run: 'ShiftRight' };
@@ -13,7 +14,7 @@ const SET = (() => {
     sens: 1, invertY: false, touchSens: 1, toggleRun: false,
     fov: 72, bob: 1, quality: 'high', scale: 1, bloom: true, fps: false,
     vol: .8,
-    help: true, board: true, xhair: true, tags: true,
+    help: true, board: true, xhair: true, tags: true, minimap: true, mapRotate: true,
     binds: Object.fromEntries(BIND_ACTIONS.map(([k, , c]) => [k, c])),
   };
   const s = structuredClone(DEFAULTS);
@@ -47,7 +48,7 @@ const SET = (() => {
   function applyHud() {
     const show = (id, on) => { const e = el(id); if (e) e.style.visibility = on ? '' : 'hidden'; };
     show('help', s.help); show('board', s.board); show('xh', s.xhair);
-    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
+    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
   }
   function applyAll() { applyVideo(); applyHud(); }
 
@@ -123,6 +124,7 @@ const SET = (() => {
     hud: [
       ['check', 'xhair', 'Crosshair'], ['check', 'tags', 'Name tags over vagrants'],
       ['check', 'board', 'Vagrants scoreboard'], ['check', 'help', 'Controls hint'],
+      ['check', 'minimap', 'Mini map'], ['check', 'mapRotate', 'Mini map turns with you'],
     ],
   };
   function row(spec) {
@@ -178,5 +180,5 @@ const SET = (() => {
 
   applyAll();
   window.__set = { s, open: openMenu, close: closeMenu, get look() { return [+yaw.toFixed(3), +pitch.toFixed(3)]; } };
-  return { down, running, isBind, lookMouse, lookDrag, bob, vol, tags, isOpen };
+  return { down, running, isBind, lookMouse, lookDrag, bob, vol, tags, isOpen, opt: k => s[k] };
 })();
