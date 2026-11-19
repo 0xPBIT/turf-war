@@ -24,6 +24,7 @@ PROPS = (HERE / 'props.js').read_text()
 MINI = (HERE / 'minimap.js').read_text()
 FIRE = (HERE / 'fire-client.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
+COPPER = (HERE / 'copper.js').read_text()
 CHARS = (HERE / 'characters.js').read_text()
 
 s = SRC.read_text()
@@ -147,7 +148,7 @@ rep("""  } else {
     for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""")
 rep("  bake(head); bake(g); head.position.y=1.62; g.add(head);", "  bake(head); bake(g); head.position.y=1.62; g.add(head); if(o.armRig) for(const pv of o.armRig) g.add(pv);")
 # First-person hands reach out, grip and strain while you hold something (net-client.js vmPose).
-rep("NET.heldVisible(handKick); NET.vmAnim(dt);", "NET.heldVisible(handKick); NET.vmPose(dt,ml>0); NET.vmAnim(dt);")
+rep("NET.heldVisible(handKick); NET.vmAnim(dt);", "NET.heldVisible(handKick); NET.vmPose(dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);")
 
 # Frame drops (fires, first smash): adding a light at runtime changes the scene's light
 # count, and three.js then recompiles every lit shader (about 12 programs, a long freeze).
@@ -191,7 +192,7 @@ rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAc
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

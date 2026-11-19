@@ -9,6 +9,7 @@ import { WebSocketServer } from 'ws';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { ITEM_TYPES, ITEM_RULES, POCKET_TYPES, itemSpots, pickWeighted, dumpsterFind } from './items.mjs';
 import { createCombat } from './combat.mjs';
+import { initCopper } from './copper.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -337,6 +338,9 @@ function decayHeatAndOwners() {
   saveDirty = true;
 }
 
+// Copper wire theft (GAME-91): lampposts and pliers live in copper.mjs.
+const copper = initCopper({ MAP, ACTIONS, save, sessions, addEntity, addDamage, broadcast, posOf });
+
 function nearest(e, radius, filter) {
   const [x, , z] = posOf(e);
   let best = null, bd = radius * radius;
@@ -368,6 +372,7 @@ function giveLighter(s) {
 // Shops are fixtures of type 'shop_<item>'; SHOP_ITEMS says how each item lands in your pockets.
 const SHOP_ITEMS = {
   lighter: { name: 'a lighter', has: p => fuelOf(p) > 3, give: giveLighter },
+  pliers: { name: 'some pliers', has: p => copper.hasTool(p), give: s => { copper.giveTool(s.entity.player); saveDirty = true; } },
 };
 function buy(s, shop) {
   const p = s.entity.player, it = SHOP_ITEMS[shop.item];
@@ -416,6 +421,7 @@ function interact(s, light) {
   // Skip things already burning or burnt, so a charred tree never hides the trash pile beside it. F only looks at burnables.
   const target = nearest(e, 3, o => (o.kind === 'fixture' || o.kind === 'prop') && ACTIONS[o.type] && !HIT_ONLY.has(o.type) && now >= ((o.state && o.state.busyUntil) || 0) && (!light || BURNABLE.has(o.type)));
   if (!target) return;
+  if (target.type === 'lamppost') return copper.start(s, target);
   if ((target.type === 'dumpster' || target.type === 'pile') && !light) return rummage(s, target, now);
   const a = ACTIONS[target.type];
   if (target.type.startsWith('shop_')) return buy(s, target);
@@ -511,6 +517,7 @@ function pocketItem(e, key) {
   saveDirty = true;
   broadcast({ t: 'fx', kind: 'pocket', id: e.id, key, name: POCKET_TYPES[key]?.name || key });
   if (key === 'lighter') sendInv(sessions.get(e.player.id));
+  if (key === 'pliers') copper.sendInv(e.player);
 }
 function rummage(s, dump, now) {
   const e = s.entity, st = dump.state;
@@ -929,6 +936,7 @@ let tick = 0;
 function physicsTick() {
   stepPlayers();
   stepTraffic(Date.now());
+  copper.tick(Date.now());
   combat.stepNpcs(dt);
   world.step(events);
   events.drainCollisionEvents((h1, h2, started) => {
@@ -985,6 +993,7 @@ function metaPayload() {
       if (st.glass) { o.g = st.glass; if (now >= st.boardAt) o.board = 1; }
     } else if (st.glass) { delete st.glass; delete save.windows[e.id]; }
     if (st.braking) o.brake = 1;
+    copper.meta(e, o);
     if (st.angry) o.angry = 1;
     if (st.down) o.down = 1;
     if (e.down) o.rag = 1;                            // ragdolled by a car (GAME-83)
@@ -995,7 +1004,7 @@ function metaPayload() {
     const p = save.players[pid];
     if (p) owners[z] = { name: p.name, color: p.color };
   }
-  const players = Object.values(save.players).map(p => ({ id: p.id, name: p.name, color: p.color, damage: Math.round(p.damage || 0), cash: p.cash || 0, asleep: !sessions.has(p.id) }))
+  const players = Object.values(save.players).map(p => ({ id: p.id, name: p.name, color: p.color, damage: Math.round(p.damage || 0), cash: p.cash || 0, asleep: !sessions.has(p.id), ...copper.playerMeta(p) }))
     .sort((a, b) => b.damage - a.damage).slice(0, 12);
   return { t: 'm', lights: lightsPayload(), town: Math.round(save.town.damage), owners, objects, players, online: sessions.size };
 }
@@ -1086,6 +1095,7 @@ wss.on('connection', ws => {
       sendSnapshot(true, ws);
       ws.send(JSON.stringify(metaPayload()));
       sendInv(sessions.get(pid));
+      copper.sendInv(p);
       saveDirty = true;
       console.log(`[town] ${p.name} woke up (${sessions.size} online)`);
       return;
@@ -1113,6 +1123,7 @@ wss.on('connection', ws => {
     const s = pid && sessions.get(pid);
     if (!s || s.ws !== ws) return;
     s.input = {}; s.queue = [];
+    copper.cancel(s, 'left');
     releaseGrab(s.entity);
     // Wait a moment for a reconnect before the vagrant lies down.
     s.graceTimer = setTimeout(() => { if (sessions.get(pid) === s) lieDown(pid); }, GRACE_MS);

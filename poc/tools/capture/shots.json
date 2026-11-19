@@ -172,6 +172,30 @@
    "wait": 1,
    "optional": true,
    "note": "GAME-93: Big Dale and Old Gus at the underpass camp"
+  },
+  "lamppost": {
+   "cam": [
+    1.2,
+    1.6,
+    3.6,
+    2.577,
+    -0.45
+   ],
+   "setup": "if(typeof COPPER!=='undefined'){ COPPER.meta=()=>{}; window.__copper.setStripped('lamp:2',true); }",
+   "wait": 1,
+   "note": "GAME-91: base of the Main St lamppost by the school (lamp:2), stripped in AFTER: hand hole pried open, wiring on the sidewalk"
+  },
+  "lamppost-head": {
+   "cam": [
+    4,
+    1.6,
+    -4.6,
+    2.69,
+    0.42
+   ],
+   "setup": "if(typeof COPPER!=='undefined'){ COPPER.meta=()=>{}; window.__copper.setStripped('lamp:2',true); }",
+   "wait": 1,
+   "note": "GAME-91: Main St lampposts from across the street; lamp:2 dark in AFTER, its neighbours still lit"
   }
  }
 }

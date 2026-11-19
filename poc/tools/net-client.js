@@ -180,6 +180,8 @@ const NET = (() => {
     const d = dyn.splice(n, 1)[0]; world.removeBody(d.b); d.m.position.set(0, 0, 0);
     return d.m;
   }
+  // Stable small number per id, for picking item looks (was dropped in the GAME-93 merge; items crashed spawn).
+  function hash(str) { let h = 7; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
   function spawn(e) {
     if (ents.has(e.id)) despawn(e.id);
     if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
@@ -429,6 +431,7 @@ const NET = (() => {
     else if (m.kind === 'hit') onHit(m);
     else if (m.kind === 'up') onUp(m);
     else if (m.kind === 'flick') FIRE.onFlick(m.id === me, m.id);
+    else if (m.kind === 'strip') COPPER.fx(m);
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
     else FIGHT.onFx(m);
   }
@@ -518,7 +521,7 @@ const NET = (() => {
   }
 
   function onMeta(m) {
-    meta = m; damage = m.town; FIGHT.onMeta(m);
+    meta = m; damage = m.town; FIGHT.onMeta(m); COPPER.meta(m);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
@@ -606,6 +609,7 @@ const NET = (() => {
       if (v.rag && v.model) poseRagdoll(v, dt, v.rag.up || v.rag.noPull ? null : s.p);
     }
     frameOwnRag(dt);
+    COPPER.frame(dt, t);
     // zone readout
     if (MAP) {
       const px = player.position.x, pz = player.position.z;
@@ -627,7 +631,7 @@ const NET = (() => {
     for (const f of actionables()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
-      const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt)) continue;
+      const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt || st.stripped || st.busy)) continue;
       const d = (f.pos[0] - player.position.x) ** 2 + (f.pos[2] - player.position.z) ** 2; if (d < bd) { bd = d; best = f; }
     }
     return best;
@@ -645,12 +649,13 @@ const NET = (() => {
   let promptMode = null;
   function updatePrompt(btn) {
     let html = ''; promptMode = null;
-    if (itemTarget) { promptMode = 'pickup'; html = `${myHeld ? 'Swap for' : 'Pick up'} the ${esc(ITEMS.name(itemTarget.type))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`; }
+    if (COPPER.busy()) { /* stripping copper: the progress bar replaces the prompt */ }
+    else if (itemTarget) { promptMode = 'pickup'; html = `${myHeld ? 'Swap for' : 'Pick up'} the ${esc(ITEMS.name(itemTarget.type))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`; }
     else {
       const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
       promptMode = f ? 'act' : g ? 'grab' : null;
       if (f && (f.type === 'dumpster' || f.type === 'pile')) html = `Dig through the ${f.type === 'pile' ? 'trash' : 'dumpster'} <kbd>${keyLabel(__set.s.binds.act)}</kbd> &nbsp;${esc(FIRE.verb(f.type, 'Light it'))} <kbd>${keyLabel(__set.s.binds.light)}</kbd>`;
-      else if (f) html = `${esc(FIRE.verb(f.type, MAP.actions[f.type].verb))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+      else if (f) html = `${esc(COPPER.verb(f.type, FIRE.verb(f.type, MAP.actions[f.type].verb)))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
       else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
     }
     btn.hidden = !html;
@@ -705,7 +710,7 @@ const NET = (() => {
       else if (m.t === 'fx') onFx(m);
       else if (m.t === 'spawn') spawn(m.e);
       else if (m.t === 'despawn') despawn(m.id);
-      else if (m.t === 'inv') FIRE.onInv(m);
+      else if (m.t === 'inv') { FIRE.onInv(m); COPPER.inv(m); }
       else if (m.t === 'welcome') {
         try { localStorage.setItem('tw_token', m.token); } catch {}
         for (const id of [...ents.keys(), ...fixtures.keys()]) despawn(id);
@@ -731,7 +736,7 @@ const NET = (() => {
     setTimeout(() => el('nameInput').focus(), 50);
   }
   window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
-    get held() { return myHeld; }, get busy() { return !!anim; }, get target() { return itemTarget && itemTarget.id; }, send,
+    get held() { return myHeld; }, get busy() { return !!anim || COPPER.busy(); }, get target() { return itemTarget && itemTarget.id; }, send,
     previewHeld(t) { setMyHeld(t); },
     throwNow() { lastPointer = 'touch'; throwDir(camera.getWorldDirection(new THREE.Vector3())); },
     lookAt(x, z, p = -.5) { yaw = Math.atan2(-(x - player.position.x), -(z - player.position.z)); pitch = p; },
