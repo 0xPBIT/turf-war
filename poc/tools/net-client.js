@@ -16,6 +16,8 @@ const NET = (() => {
   for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
 
   // ---------- entities ----------
+  // Stable small number from an id (item mesh variety). GAME-93 moved the old helper into characters.js.
+  const hash = str => { let h = 7; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
   const fixtures = new Map();        // fixture id -> desc
   let me = null, myPid = null, meta = null, ws = null, grabbing = null;
@@ -253,7 +255,6 @@ const NET = (() => {
   const handDrop = () => (1 - Math.max(raise, anim && anim.kind !== 'throw' ? 1 : 0)) * .32;
   const heldVisible = kick => { heldSlot.visible = kick < .6 && !(anim && anim.kind === 'reach' && anim.t / anim.dur < .45); handG.visible = raise > .02 || !!anim; };
   function vmAnim(dt) {
-    vm.rotation.z = 0;                                  // the look test never resets roll; animations below add to it
     if (!anim) return;
     anim.t += dt; const k = anim.t / anim.dur;
     if (k >= 1) { anim = null; return; }

@@ -172,6 +172,40 @@
    "wait": 1,
    "optional": true,
    "note": "GAME-93: Big Dale and Old Gus at the underpass camp"
+  },
+  "hydrant": {
+   "cam": [
+    -0.6,
+    1.45,
+    -1.5,
+    0.6,
+    -0.3
+   ],
+   "setup": "typeof HYD !== 'undefined' && HYD.force(__net.fixtures)",
+   "wait": 5,
+   "note": "Sunny Mart fire hydrant gushing across the sidewalk (GAME-94; setup forces the jet on)"
+  },
+  "hydrant-clip": {
+   "path": [
+    [
+     -0.2,
+     1.45,
+     -1.3,
+     0.45,
+     -0.28
+    ],
+    [
+     -1.2,
+     1.4,
+     -1.7,
+     0.75,
+     -0.3
+    ]
+   ],
+   "seconds": 5,
+   "setup": "typeof HYD !== 'undefined' && HYD.force(__net.fixtures)",
+   "optional": true,
+   "note": "slow pan past the gushing hydrant (GAME-94)"
   }
  }
 }

@@ -4,7 +4,7 @@
 // the spreading puddle, the shove you feel standing in it, and the gush sound.
 // Cheap on purpose: one Points draw per jet, materials made at load, no lights.
 const HYD = (() => {
-  const LEN = 6.5, RADIUS = 0.9, PUSH = 5.2;          // same numbers as the server (server.mjs HYD)
+  const LEN = 6.5, RADIUS = 0.9, PUSH = 5.2, G = 9.8;          // same numbers as the server (server.mjs HYD)
   const jets = new Map();                              // fixture id -> jet
   // Shared materials, made now so they compile behind the loading screen (see prewarm.js).
   // Drops: a firm, saturated blue disc. The Blend shader washes pale blues out to nothing, so water has to be a strong blue to read.
@@ -14,8 +14,8 @@ const HYD = (() => {
     rg.addColorStop(0, 'rgba(190,232,255,1)'); rg.addColorStop(.3, 'rgba(40,160,255,1)'); rg.addColorStop(.75, 'rgba(20,110,230,.95)'); rg.addColorStop(1, 'rgba(20,110,230,0)');
     g.fillStyle = rg; g.fillRect(0, 0, s, s); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
   })();
-  const waterMat = new THREE.PointsMaterial({ map: dropTex, color: 0xFFFFFF, size: .34, transparent: true, opacity: .95, depthWrite: false, sizeAttenuation: true });
-  const mistMat = new THREE.PointsMaterial({ map: flameTex, color: 0x4AAEFF, size: .9, transparent: true, opacity: .3, depthWrite: false, sizeAttenuation: true });
+  const waterMat = new THREE.PointsMaterial({ map: dropTex, color: 0xFFFFFF, size: .12, transparent: true, opacity: .95, depthWrite: false, sizeAttenuation: true });
+  const mistMat = new THREE.PointsMaterial({ map: flameTex, color: 0x8CCBFF, size: .45, transparent: true, opacity: .35, depthWrite: false, sizeAttenuation: true });
   const puddleTex = (() => {
     const s = 256, cv = document.createElement('canvas'); cv.width = cv.height = s; const g = cv.getContext('2d');
     for (let i = 0; i < 30; i++) {
@@ -25,8 +25,27 @@ const HYD = (() => {
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
   })();
   // The solid core of the jet right out of the outlet: a tapered translucent cone.
-  const coreMat = new THREE.MeshBasicMaterial({ color: 0x2299FF, transparent: true, opacity: .85, depthWrite: false, side: THREE.DoubleSide });
-  const coreGeo = (() => { const g = new THREE.CylinderGeometry(.16, .055, 1.7, 10, 1, true); g.translate(0, .85, 0); g.rotateZ(-Math.PI / 2); return g; })();   // along +x from the origin
+  // Streaky white-water texture that scrolls down the cone, so the jet reads as flowing.
+  const streakTex = (() => {
+    const w = 256, h = 64, cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
+    g.fillStyle = 'rgba(40,150,255,.55)'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 46; i++) { const x = Math.random() * w, len = 30 + Math.random() * 120, y = Math.random() * w; g.fillStyle = `rgba(${Math.random() < .5 ? '235,248,255' : '120,200,255'},${.5 + Math.random() * .5})`; g.fillRect(y, x * h / w, len, 1.5 + Math.random() * 2); g.fillRect(y - w, x * h / w, len, 1.5 + Math.random() * 2); }
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); return t;
+  })();
+  const coreMat = new THREE.MeshBasicMaterial({ map: streakTex, color: 0xFFFFFF, transparent: true, opacity: .9, depthWrite: false, side: THREE.DoubleSide });
+  // The jet itself: a tube along the water's arc (along +x from the outlet), thickening as it spreads.
+  const coreGeo = (() => {
+    const VX = 8, VY = 3, T = .7, pts = [];
+    for (let i = 0; i <= 16; i++) { const t = i / 16 * T; pts.push(new THREE.Vector3(VX * t, VY * t - G / 2 * t * t, 0)); }
+    const g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 1, 10, false);
+    const pos = g.attributes.position, uv = g.attributes.uv, c = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {             // radius: 6 cm at the outlet to 22 cm where it lands
+      const k = uv.getX(i), r = .06 + .16 * k * k;
+      const t = k * T; c.set(VX * t, VY * t - G / 2 * t * t, 0);
+      pos.setXYZ(i, c.x + (pos.getX(i) - c.x) * r, c.y + (pos.getY(i) - c.y) * r, c.z + (pos.getZ(i) - c.z) * r);
+    }
+    g.computeVertexNormals(); return g;
+  })();
   const puddleMat = new THREE.MeshBasicMaterial({ map: puddleTex, transparent: true, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -2 });
 
   // Same model as the look test's hydrant, turned so an outlet cap faces the jet.
@@ -41,7 +60,7 @@ const HYD = (() => {
 
   function makeJet(f) {
     const dir = f.dir || 0, dx = Math.sin(dir), dz = Math.cos(dir);
-    const N = 320, M = 36;
+    const N = 420, M = 48;
     const mk = (n, mat) => {
       const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3).fill(-50), 3));
       const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; fxl(pts); scene.add(pts); return pts;
@@ -49,7 +68,7 @@ const HYD = (() => {
     const puddle = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), puddleMat.clone());   // clone shares the compiled program
     puddle.rotation.x = -Math.PI / 2; puddle.position.set(f.pos[0] + dx * 2.6, .085, f.pos[2] + dz * 2.6); puddle.scale.set(5.5, 5.5, 1); fxl(puddle); scene.add(puddle);
     const core = new THREE.Mesh(coreGeo, coreMat); core.position.set(f.pos[0] + dx * .28, .4, f.pos[2] + dz * .28);
-    core.rotation.set(0, dir - Math.PI / 2, .16, 'YXZ'); core.visible = false; fxl(core); scene.add(core);
+    core.rotation.set(0, dir - Math.PI / 2, 0, 'YXZ'); core.visible = false; core.layers.set(2); scene.add(core);   // layer 2 = kept out of the paint filter (like sign text), so the jet stays crisp
     return { f, dx, dz, ox: f.pos[0] + dx * .3, oz: f.pos[2] + dz * .3, on: false, wet: 0, wetTarget: 0, core,
       drops: mk(N, waterMat), mist: mk(M, mistMat), p: new Float32Array(N * 3), v: new Float32Array(N * 3), age: new Float32Array(N).fill(9),
       mp: new Float32Array(M * 3), mv: new Float32Array(M * 3), mage: new Float32Array(M).fill(9), acc: 0, macc: 0, next: 0, mnext: 0, puddle };
@@ -65,6 +84,7 @@ const HYD = (() => {
       if (!st.water && !st.wet && !jets.has(id)) continue;
       const j = jetFor(f);
       if (st.water && !j.on) feedOpen(j);
+      if (forced) continue;
       j.on = !!st.water; j.wetTarget = st.water ? 1 : st.wet ? .55 : 0;
     }
   }
@@ -106,16 +126,16 @@ const HYD = (() => {
     }
   }
 
-  const G = 9.8;
   function frame(dt) {
+    streakTex.offset.x -= dt * 2.4;                     // tube u runs along the arc
     for (const j of jets.values()) {
       // drops: launched from the outlet, arc down under gravity, die on the ground
       const { p, v, age } = j, N = age.length;
       if (j.on) {
-        j.acc += dt * 330;
+        j.acc += dt * 420;
         while (j.acc > 1) {
           j.acc--; const i = j.next; j.next = (j.next + 1) % N;
-          const sp = 7.5 + Math.random() * 3.2, side = (Math.random() - .5) * 1.1, up = 1.4 + Math.random() * 1.4;
+          const sp = 7 + Math.random() * 2.2, side = (Math.random() - .5) * 1.1, up = 2.4 + Math.random() * 1.3;
           p[i * 3] = j.ox; p[i * 3 + 1] = .4; p[i * 3 + 2] = j.oz;
           v[i * 3] = j.dx * sp + j.dz * side; v[i * 3 + 1] = up; v[i * 3 + 2] = j.dz * sp - j.dx * side;
           const pre = Math.random() * dt - dt;                  // rewind 0..dt; the step below moves it forward dt, so the batch spreads along the arc and low frame rates still read as a stream
@@ -127,17 +147,16 @@ const HYD = (() => {
         if (age[i] > 2) continue;
         age[i] += dt; v[i * 3 + 1] -= G * dt;
         p[i * 3] += v[i * 3] * dt; p[i * 3 + 1] += v[i * 3 + 1] * dt; p[i * 3 + 2] += v[i * 3 + 2] * dt;
-        if (p[i * 3 + 1] < .06) {                              // hits the ground: skitter along a little, then gone
-          p[i * 3 + 1] = .06; v[i * 3 + 1] = Math.abs(v[i * 3 + 1]) * .18; v[i * 3] *= .45; v[i * 3 + 2] *= .45;
-          if (Math.abs(v[i * 3]) + Math.abs(v[i * 3 + 2]) < 1.2) age[i] = 9;
-          else if (j.on && Math.random() < .08) spawnMist(j, p[i * 3], p[i * 3 + 2]);
+        if (p[i * 3 + 1] < .1) {                               // lands: gone into the puddle, sometimes with a splash of spray
+          age[i] = 9; if (Math.random() < .03) spawnMist(j, p[i * 3], p[i * 3 + 2]);
+          continue;
         }
         live++;
       }
       const pa = j.drops.geometry.attributes.position.array;
       for (let i = 0; i < N; i++) { const dead = age[i] > 2; pa[i * 3] = dead ? 0 : p[i * 3]; pa[i * 3 + 1] = dead ? -50 : p[i * 3 + 1]; pa[i * 3 + 2] = dead ? 0 : p[i * 3 + 2]; }
       j.drops.geometry.attributes.position.needsUpdate = true;
-      if (j.on) { j.macc += dt * 10; while (j.macc > 1) { j.macc--; spawnMist(j, j.ox + j.dx * (.3 + Math.random() * 1.2), j.oz + j.dz * (.3 + Math.random() * 1.2), .5); } }
+      if (j.on) { j.macc += dt * 6; while (j.macc > 1) { j.macc--; spawnMist(j, j.ox + j.dx * (.3 + Math.random() * 1.2), j.oz + j.dz * (.3 + Math.random() * 1.2), .5); } }
       // mist puffs drift up and fade (all share one material, so they fade by shrinking)
       const { mp, mv, mage } = j, M = mage.length, ma = j.mist.geometry.attributes.position.array;
       for (let i = 0; i < M; i++) {
@@ -174,6 +193,10 @@ const HYD = (() => {
     if (f && f.type === 'pile') { const pl = piles[f.index]; if (pl && pl.state === 'burning') { pl.state = 'smolder'; pl.t = 0; if (pl.e) { pl.e.fire = 0; pl.e.smoke = .5; } } }
   }
 
-  return { init, onMeta, frame, push, douse, clank, set onOpen(fn) { feedOpen = fn; }, materials: [waterMat, mistMat, puddleMat, coreMat], jets };
+  // Capture hook: turn every hydrant on locally (photo-mode clips pause the server, so meta never arrives).
+  let forced = false;
+  function force(fixtures) { forced = true; for (const f of fixtures.values()) if (f.type === 'hydrant') { const j = jetFor(f); j.on = true; j.wetTarget = 1; j.wet = .8; } }
+
+  return { init, onMeta, force, frame, push, douse, clank, set onOpen(fn) { feedOpen = fn; }, materials: [waterMat, mistMat, puddleMat, coreMat], jets };
 })();
 window.__hyd = HYD;   // for capture/debug scripts
