@@ -196,10 +196,15 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 #bigLegend p{margin:4px 0 0;font-size:12px;color:var(--ink-soft);font-weight:700}
 #bigMap .close{font-size:12.5px;color:var(--ink-soft);font-weight:700;margin-top:6px}
 @media (max-width:640px){ :root{--mm:124px} #miniKey{display:none} #miniInfo small{display:none} #bigMap .card{grid-template-columns:1fr} #bigMapCv{width:min(calc(100vw - 64px),calc(100vh - 260px))} }
+#inv{position:fixed;z-index:5;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(96px + env(safe-area-inset-bottom,0px));background:rgba(255,255,255,.94);border-radius:14px;padding:6px 14px;font-size:13.5px;font-weight:700;display:flex;gap:8px;align-items:center;box-shadow:0 3px 0 rgba(20,60,140,.2)}
+#inv[hidden]{display:none}
+#inv i{width:9px;height:16px;border-radius:3px;background:linear-gradient(#9AA0B6 0 28%,#D8343F 28%)}
+#inv em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
 </style>
 <div class="hud chip" id="zone"><b id="zoneName">Sunnyside</b><span id="zoneOwner">nobody owns this turf</span></div>
 <div id="board"><h3>Vagrants</h3><div id="rows"></div></div>
 <div id="feed"></div>
+<div id="inv" hidden></div>
 <div id="help">Click to look around · <kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump<br>Click throws a bottle · <kbd>E</kbd> do the thing · <kbd>G</kbd> grab or drag<br>Close the tab and your vagrant lies down right where you are.</div>
 <div id="status"></div>
 <div id="login"><div class="card"><h1>Turf War</h1><p>Pick a name, vagrant.</p><input id="nameInput" maxlength="16" placeholder="Sunny Steve" autocomplete="off"><button type="button" id="go">Wake up</button></div></div>
@@ -641,19 +646,21 @@ house(-30,11,6,6,3.2,'tx:sidLav','tx:shTang',TRIM,Math.PI,P.tang);
 })();
 
 // ---------- trees and bushes (faceted, layered) ----------
+const burnGroup=new THREE.Group(); scene.add(burnGroup); const BURN=[];
 function lumpy(rad,sd){ const g=new THREE.SphereGeometry(rad,16,11), p=g.attributes.position, v=new THREE.Vector3();
   for(let i=0;i<p.count;i++){ v.fromBufferAttribute(p,i).normalize(); let d=1+.16*Math.sin(v.x*6+sd)*Math.sin(v.y*5+sd*1.7)*Math.sin(v.z*6+sd*.6)+.07*Math.sin(v.x*14+v.z*12+sd)+.05*Math.sin(v.y*17+v.x*9-sd); if(v.y<-.2) d*=1-(-.2-v.y)*.45; p.setXYZ(i,v.x*rad*d,v.y*rad*d*.88,v.z*rad*d); }
   g.computeVertexNormals(); return g; }
 function tree(x,z,s=1,hexA='tx:leafA'){
-  const g=grp(city,x,0,z,R()*6);
+  const g=grp(burnGroup,0,0,0), ry0=R()*6;
   put(CYL(.12*s,.22*s,2.2*s,8),'tx:pole',g,0,1.1*s,0);
   for(let k=0;k<3;k++){ const a=k/3*6.28+R(); tube([[0,1.5*s,0],[Math.cos(a)*.45*s,2.0*s,Math.sin(a)*.45*s],[Math.cos(a)*.8*s,2.5*s,Math.sin(a)*.8*s]],.06*s,'tx:pole',g,6); }
   const n=5+((R()*3)|0);
   for(let k=0;k<n;k++){ const a=k/n*6.28+R()*.6, r=(.5+R()*.4)*s, y=2.6*s+R()*1.0*s; put(lumpy((.75+R()*.35)*s,R()*50),k%3===0?'tx:leafB':hexA,g,Math.cos(a)*r,y,Math.sin(a)*r,{ry:R()*3}); }
   put(lumpy(1.15*s,R()*50),hexA,g,0,3.5*s,0);
+  bake(g); g.position.set(x,0,z); g.rotation.y=ry0; BURN.push({id:'t:'+BURN.length,type:'tree',g,x,z,s});
   const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.25*s,.25*s,2.2*s,8)}); b.position.set(x,1.1*s,z); world.addBody(b);
 }
-function bush(x,z,s=1){ const g=grp(city,x,0,z); for(let k=0;k<4;k++){ const a=R()*6.28; put(lumpy((.36+R()*.22)*s,R()*50),k%2?'tx:leafA':'tx:leafB',g,Math.cos(a)*.35*s,.3*s+R()*.2*s,Math.sin(a)*.35*s); } }
+function bush(x,z,s=1){ const g=grp(burnGroup,0,0,0); for(let k=0;k<4;k++){ const a=R()*6.28; put(lumpy((.36+R()*.22)*s,R()*50),k%2?'tx:leafA':'tx:leafB',g,Math.cos(a)*.35*s,.3*s+R()*.2*s,Math.sin(a)*.35*s); } bake(g); g.position.set(x,0,z); BURN.push({id:'t:'+BURN.length,type:'bush',g,x,z,s}); }
 [[-4,-6.7],[10.8,-6.7],[-36,-7],[-18,-6.6],[-4,6.6],[15,6.6],[26,-14],[31,-10],[-36,8],[31,14],[-6,22],[4,26],[16,22],[-24,-18],[-14,18],[28,22]].forEach(([x,z],i)=>tree(x,z,.9+((i*37)%5)/10, i%3?'tx:leafA':'tx:leafB'));
 [[-17,-8],[-25.5,-8],[-26,8],[-17,8.2],[8.6,-6.6],[18,-6.7],[-33.5,-8],[-33.5,8]].forEach(([x,z])=>bush(x,z,1+R()*.4));
 for(let i=0;i<14;i++){ const a=i/14*Math.PI*2; const r=170+(i%3)*25; const h=put(new THREE.IcosahedronGeometry(40+(i%4)*10,2),i%2?0x54D46A:P.hedge,city,Math.cos(a)*r,-14,Math.sin(a)*r,{ns:true}); h.scale.y=.55; }
@@ -852,7 +859,12 @@ function vagrant(o){
   for(const s of [-1,1]){ put(B(.025,.21,.02),0x3B2C26,g,s*.16,1.42,-.24,{s:[1,1,1]}); put(B(.04,.36,.012),0x3B2C26,g,s*.11,1.18,.1,{rx:-.08}); }
   // arms: jacket sleeves, cuffs, gloves
   const sh=[[-.24,1.34,0],[.24,1.34,0]];
-  if(o.sign){
+  if(o.sign && o.armRig){
+    for(const [i,s] of [[0,-1],[1,1]]){ const pv=new THREE.Group(), rel=v=>[v[0]-sh[i][0],v[1]-sh[i][1],v[2]-sh[i][2]], e=rel([s*.27,1.08,.1]), w=rel([s*.17,1.0,.33]);
+      limb([0,0,0],e,.06,.065,'tx:canvas|'+o.coat,pv); limb(e,w,.05,.058,'tx:canvas|'+o.coat,pv); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,pv,...w); glove(pv,rel([s*.2,1.0,.39]),[0,1,.2],o,false);
+      bake(pv); pv.position.set(...sh[i]); o.armRig.push(pv); }
+    const sg=new THREE.Mesh(new THREE.BoxGeometry(.66,.42,.012),[0,0,0,0,new THREE.MeshLambertMaterial({map:labelTex(o.sign,512,330,'#D9A866','#3A2410',42)}),0].map(m=>m||new THREE.MeshLambertMaterial({color:0xB98A50}))); sg.position.set(0,1.02,.4); sg.rotation.set(-.15,0,-.05); g.add(sg); sg.castShadow=true; o._sign=sg;
+  } else if(o.sign){
     for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.27,1.08,.1], w=[s*.17,1.0,.33]; limb(sh[i],e,.06,.065,'tx:canvas|'+o.coat,g); limb(e,w,.05,.058,'tx:canvas|'+o.coat,g); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,g,...w); }
     const sg=new THREE.Mesh(new THREE.BoxGeometry(.66,.42,.012),[0,0,0,0,new THREE.MeshLambertMaterial({map:labelTex(o.sign,512,330,'#D9A866','#3A2410',42)}),0].map(m=>m||new THREE.MeshLambertMaterial({color:0xB98A50}))); sg.position.set(0,1.02,.4); sg.rotation.set(-.15,0,-.05); g.add(sg); sg.castShadow=true;
     g.updateMatrixWorld(true); for(const s of [-1,1]) glove(g,[s*.2,1.0,.39],[0,1,.2],o,false);
@@ -894,7 +906,7 @@ function vagrant(o){
   bake(head); bake(g); head.position.y=1.62; g.add(head); if(o.armRig) for(const pv of o.armRig) g.add(pv);
   g.position.set(o.x,0,o.z); g.rotation.y=o.ry??0; scene.add(g);
   const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.3,.3,1.85,10)}); b.position.set(o.x,.93,o.z); world.addBody(b);
-  const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62}; b.tw={type:'person',p}; people.push(p); return p;
+  const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62,sign:o._sign||null}; b.tw={type:'person',p}; people.push(p); return p;
 }
 vagrant({x:-9.4,z:-4.4,ry:.5,coat:0xE07A2E,coatSh:0xB85E1E,hat:0xFF5D8F,hatSh:0xE03A72,pants:0x4D6FC9,hoodie:0x9AA3B8,scarf:0,sign:['ANYTHING','HELPS :)']});
 vagrant({x:19.4,z:8.6,ry:2.2,coat:0x5FA88A,coatSh:0x4A8A70,hat:0xF2C230,hatSh:0xD9A400,pants:0x5A4C80,hoodie:0x7A3E4E,skin:0xC98A5E,skinSh:0xA86F48,beard:0x2E221A,pack:0x8A6A44,packSh:0x6E5434,roll:0x3E6A9A});
@@ -1248,7 +1260,7 @@ function tick(){
   processBreaks();
   for(const {m,b} of dyn){ m.position.copy(b.position); m.quaternion.copy(b.quaternion); }
   for(const e of bottles){ e.m.position.copy(e.b.position); e.m.quaternion.copy(e.b.quaternion); }
-  for(const d of debris){ if(d.b && d.b.sleepState!==2){ d.m.position.copy(d.b.position); d.m.quaternion.copy(d.b.quaternion);} } updatePiles(dt); updateAct();
+  for(const d of debris){ if(d.b && d.b.sleepState!==2){ d.m.position.copy(d.b.position); d.m.quaternion.copy(d.b.quaternion);} } updatePiles(dt); FIRE.update(dt); updateAct();
   for(let i=chunks.length-1;i>=0;i--){ const c=chunks[i]; c.t+=dt; c.m.position.copy(c.b.position); c.m.quaternion.copy(c.b.quaternion); if(c.t>5){ const s=Math.max(0,1-(c.t-5)/.6); c.m.scale.setScalar(s); if(s<=0){ scene.remove(c.m); world.removeBody(c.b); chunks.splice(i,1);} } }
   for(let i=sparks.length-1;i>=0;i--){ const s=sparks[i]; s.userData.t+=dt; s.userData.v.y-=12*dt; s.position.addScaledVector(s.userData.v,dt); s.material.opacity=1-s.userData.t/.9; s.material.rotation+=dt*4; if(s.userData.t>.9){ scene.remove(s); sparks.splice(i,1);} }
   NET.frame(dt, t);
@@ -1257,6 +1269,7 @@ function tick(){
   bobT+=dt*(ml>0?speed*2.2:0);
   camera.position.set(player.position.x, player.position.y+1.25+Math.sin(bobT)*.04*SET.bob(), player.position.z);
   camera.rotation.set(pitch,yaw,0,'YXZ');
+  FIGHT.afterCamera(dt, t);
   // viewmodel
   handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6; NET.vmPose(dt,ml>0);
   // ambient life
@@ -1280,7 +1293,7 @@ const SET = (() => {
   const KEY = 'tw_settings';
   const BIND_ACTIONS = [
     ['fwd', 'Walk forward', 'KeyW'], ['back', 'Walk back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
-    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'],
+    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'], ['punch', 'Punch', 'KeyV'],
     ['map', 'Big town map', 'KeyM'],
   ];
   // Arrow keys and the right-hand Shift always work too, whatever the bindings say.
@@ -1323,7 +1336,7 @@ const SET = (() => {
   function applyHud() {
     const show = (id, on) => { const e = el(id); if (e) e.style.visibility = on ? '' : 'hidden'; };
     show('help', s.help); show('board', s.board); show('xh', s.xhair);
-    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
+    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle (punches with empty hands) · <kbd>${keyName(s.binds.punch)}</kbd> punch · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
   }
   function applyAll() { applyVideo(); applyHud(); }
 
@@ -1517,6 +1530,216 @@ const PROPS = (() => {
   return { build, has: t => !!ART[t] };
 })();
 
+// ===================== lighters and burning plants (GAME-86) =====================
+// You need a lighter to start a fire. This file draws the lighter (HUD and first-person
+// flick), the Sunny Mart lighter sticker, and trees and bushes catching fire, burning
+// down to charred, half-bare husks, and coming back once the town replants them.
+// Trees and bushes come from the look test's tree()/bush(), which build-client.py
+// patches to keep each one as its own small baked group in BURN (id "t:N", build order).
+const FIRE = (() => {
+  let lighter = 0;                                   // flicks of fuel left; 0 = no lighter
+  const BURNABLE = new Set(['pile', 'dumpster', 'tree', 'bush', 'plant']);
+  const byId = new Map(BURN.map(b => [b.id, b]));
+
+  // Charred stages share cached materials (same shader as the living leaves, new colour),
+  // so a fire never compiles a new program mid-game.
+  const STAGES = [
+    { leafA: 'tx:leafA|' + 0xA88A48, leafB: 'tx:leafB|' + 0x967238, pole: 'tx:pole|' + 0x7A604C },   // scorched, browning
+    { leafA: 'tx:leafA|' + 0x6E5440, leafB: 'tx:leafB|' + 0x5A4434, pole: 'tx:pole|' + 0x4E423A },   // charring
+    { leafA: 'tx:leafA|' + 0x6A625C, leafB: 'tx:leafB|' + 0x4A4440, pole: 'tx:pole|' + 0x3A3330 },   // burnt: ash-grey husk, still shaded so the ink lines read
+  ];
+  for (const st of STAGES) for (const k of Object.values(st)) getMat(k);   // same shader as live leaves: no new program
+  const partOf = key => typeof key === 'string' ? key.slice(3).split('|')[0] : null;
+  function prepare(b) {
+    if (b.parts) return;
+    b.parts = [];
+    for (const m of b.g.children) {
+      if (!m.isMesh) continue;
+      const part = partOf(m.userData.c);
+      const leaf = part === 'leafA' || part === 'leafB';
+      if (leaf) {   // re-centre canopy meshes so they can shrink in place as the leaves burn away
+        m.geometry.computeBoundingBox(); const c = new THREE.Vector3(); m.geometry.boundingBox.getCenter(c);
+        m.geometry.translate(-c.x, -c.y, -c.z); m.position.copy(c);
+      }
+      b.parts.push({ m, part, key: m.userData.c, leaf });
+    }
+    const top = b.type === 'tree' ? 3.9 * b.s : .6 * b.s;   // flames start at the outside of the canopy, not hidden inside it
+    b.canopy = new THREE.Vector3(b.x, top, b.z);
+    b.scorch = decal(scorchTex, b.x, b.z, b.type === 'tree' ? 2.2 * b.s : 1.3 * b.s, 0);
+  }
+  function setStage(b, k) {
+    if (b.stage === k) return; b.stage = k;
+    for (const p of b.parts) {
+      const key = k < 0 || !p.part || !STAGES[k][p.part] ? p.key : STAGES[k][p.part];
+      p.m.userData.c = key; p.m.material = getMat(key);
+    }
+  }
+  function ignite(b) {
+    prepare(b);
+    if (b.state === 'burning') return;
+    b.state = 'burning'; b.t0 = performance.now(); b.t = 0;
+    const tree = b.type === 'tree';
+    // Fires share the fixed FIRE_LIGHTS pool (never a new light, so no shader recompile).
+    b.fx = emitter(b.canopy, { radius: (tree ? .9 : .75) * b.s, fire: .1, smoke: .2 });
+    if (tree) b.skirt = emitter(new THREE.Vector3(b.x, 2.2 * b.s, b.z), { radius: 1.35 * b.s, fire: .1, smoke: 0, light: false });   // flames licking up the sides
+    if (tree) b.base = emitter(new THREE.Vector3(b.x, .15, b.z), { radius: .3 * b.s, fire: .1, smoke: 0, light: false });   // trunk flames: glow comes from the canopy fire
+  }
+  // Daylight flames: the look test's additive flames vanish against a bright sky, so burning
+  // plants also shed solid, normal-blended tongues of flame off the canopy surface. They go
+  // through the same particle list, so they age yellow -> orange -> sooty red like the rest.
+  const _v = new THREE.Vector3();
+  { // compile the tongue shader at load: prewarm.js (runs after this file) compiles the whole scene once
+    const w = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, transparent: true, depthWrite: false, toneMapped: false }));
+    w.layers.set(1); w.scale.setScalar(.001); camera.updateMatrixWorld(); w.position.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3())); scene.add(w);
+    let n = 0; (function drop() { if (++n < 5) return requestAnimationFrame(drop); scene.remove(w); })();
+  }
+  function tongues(b, dt, amount) {
+    b.accT = (b.accT || 0) + dt * amount * (b.type === 'tree' ? 110 : 40);
+    const tree = b.type === 'tree', k = 1 - (b.shrunk || 0) * (tree ? .38 : .55);
+    const cy = tree ? 3.0 * b.s : .45 * b.s, r = (tree ? 1.35 : .6) * b.s * k;
+    while (b.accT > 1) {
+      b.accT--;
+      const a = Math.random() * 6.28, up = Math.random() * .9 - .15;   // sides and top of the canopy
+      _v.set(b.x + Math.cos(a) * r * Math.sqrt(1 - up * up), cy + up * r * .9, b.z + Math.sin(a) * r * Math.sqrt(1 - up * up));
+      const hot = Math.random();
+      const mat = new THREE.SpriteMaterial({ map: flameTex, color: hot < .25 ? 0xFFB020 : hot < .8 ? 0xFF5A12 : 0xC8280A, transparent: true, depthWrite: false, opacity: .95, rotation: Math.random() * 6.28, toneMapped: false });
+      const sp = new THREE.Sprite(mat); sp.layers.set(1); sp.position.copy(_v); const s0 = (.45 + Math.random() * .45) * (tree ? b.s : .7 * b.s); sp.scale.setScalar(s0); scene.add(sp);
+      // kind 'tongue' takes the smoke path in updateFX: fixed colour, fade in then out, slows as it rises.
+      parts.push({ s: sp, kind: 'tongue', vel: new THREE.Vector3((Math.random() - .5) * .5, 1.4 + Math.random() * 1.2, (Math.random() - .5) * .5), life: .55 + Math.random() * .45, t: 0, size0: s0, size1: s0 * .3, opacity: 1.7, spin: (Math.random() - .5) * 1.2 });
+    }
+  }
+  function stop(e) { if (!e) return; e.fire = 0; e.smoke = 0; const i = emitters.indexOf(e); if (i >= 0) emitters.splice(i, 1); }
+  function charNow(b) {         // seen already burnt (joined late): go straight to the husk
+    prepare(b); stop(b.fx); stop(b.base); stop(b.skirt); b.fx = b.base = b.skirt = null;
+    b.state = 'burnt'; setStage(b, 2); shrink(b, 1); b.scorch.material.opacity = .9;
+  }
+  function shrink(b, u) {
+    const k = 1 - u * (b.type === 'tree' ? .38 : .55);
+    b.shrunk = u;
+    for (const p of b.parts) if (p.leaf) p.m.scale.set(k, k * (1 - u * .1), k);
+  }
+  function replant(b) {
+    if (!b.parts || b.state === 'idle' || !b.state) return;
+    stop(b.fx); stop(b.base); stop(b.skirt); b.fx = b.base = b.skirt = null;
+    b.state = 'idle'; setStage(b, -1); shrink(b, 0); b.scorch.material.opacity = 0;
+  }
+  function burnLen(b) { return ((MAPA && MAPA.actions[b.type] && MAPA.actions[b.type].burnSec) || 30); }
+  let MAPA = null; fetch('/town.json').then(r => r.json()).then(m => { MAPA = m; });
+
+  function update(dt) {
+    for (const b of BURN) {
+      if (b.state !== 'burning' && b.state !== 'smolder') continue;
+      b.t = (performance.now() - b.t0) / 1000;   // wall clock, so a slow frame or hidden tab keeps pace with the server
+      const L = burnLen(b), tree = b.type === 'tree';
+      if (b.state === 'burning') {
+        const ramp = Math.min(1, b.t / (tree ? 5 : 2.5)), fade = Math.max(0, Math.min(1, (L - b.t) / 6));
+        b.fx.fire = (.1 + ramp * (tree ? 2.1 : 1.4)) * fade; b.fx.smoke = (.3 + ramp * (tree ? 2.2 : 1.4)) * Math.max(.4, fade);
+        if (b.base) { b.base.fire = Math.min(1, b.t / 2) * .8 * fade; b.skirt.fire = ramp * 1.6 * fade; }
+        const u = Math.min(1, b.t / (L * .8));
+        setStage(b, u < .15 ? -1 : u < .4 ? 0 : u < .75 ? 1 : 2);
+        shrink(b, Math.max(0, (u - .2) / .8));
+        b.scorch.material.opacity = Math.min(.9, b.t / 8);
+        tongues(b, dt, ramp * fade);
+        if (b.t > L) { b.state = 'smolder'; b.t0 = performance.now(); b.t = 0; stop(b.base); stop(b.skirt); b.base = b.skirt = null; b.fx.fire = 0; b.fx.smoke = .7; setStage(b, 2); shrink(b, 1); }
+      } else {
+        b.fx.smoke = Math.max(0, .7 - b.t / 25);
+        if (b.t > 18) { stop(b.fx); b.fx = null; b.state = 'burnt'; }
+      }
+    }
+    updateOthers(dt);
+    // first-person lighter flick
+    if (flickT > 0) {
+      flickT = Math.max(0, flickT - dt);
+      const u = 1 - flickT / FLICK;                     // 0..1
+      const up = u < .2 ? u / .2 : u > .8 ? (1 - u) / .2 : 1;
+      lg.position.set(-.9, -.95 + up * .9, .1); lg.rotation.set(-.2, .35, .18 - up * .1);
+      lg.visible = up > 0;
+      const lit = u > .28 && u < .85;
+      flame.visible = lit; if (lit) { const f = .8 + Math.random() * .35; flame.scale.set(.09 * f, .16 * f, 1); }
+      wheel.rotation.x = u < .3 ? u * 30 : wheel.rotation.x;
+    }
+  }
+
+  // ---------- server state ----------
+  function onMeta(m, fixtures) {
+    for (const [id, f] of fixtures) {
+      const b = byId.get(id); if (!b) continue;
+      const st = m.objects[id] || {};
+      if (st.fire) { if (b.state !== 'burning' && b.state !== 'smolder') ignite(b); }
+      else if (st.burnt) { if (!b.state || b.state === 'idle') charNow(b); }
+      else replant(b);
+    }
+  }
+  function onInv(m) {
+    if (!('lighter' in m)) return;   // other pocket items (pliers...) send their own fields
+    const had = lighter; lighter = m.lighter || 0;
+    const el = document.getElementById('inv');
+    el.hidden = !lighter; el.innerHTML = `<i></i>Lighter <em>${lighter}</em>`;
+    el.title = `${lighter} lights left`;
+    if (lighter && !had) feed2('You have a lighter. Walk up to trash, a bush or a tree and press <kbd>F</kbd>.');
+  }
+  function feed2(html) { const f = document.getElementById('feed'), d = document.createElement('div'); d.innerHTML = html; f.prepend(d); setTimeout(() => d.remove(), 6000); }
+  // Other players see you lean in and spark the lighter at hand height for a moment.
+  const others = new Map();   // entity id -> { t, flame }
+  function onFlick(isMe, id) {
+    if (isMe) { flickT = FLICK; return; }
+    const v = window.__net && __net.ents.get(id); if (!v || !v.obj || !v.model) return;
+    let o = others.get(id);
+    if (!o) {
+      const fl = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, color: 0xFFB347, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+      fl.position.set(.22, .05, .42); fl.visible = false; fxl(fl); v.obj.add(fl);
+      o = { flame: fl, v }; others.set(id, o);
+    }
+    o.t = FLICK;
+  }
+  function updateOthers(dt) {
+    for (const [id, o] of others) {
+      o.t = Math.max(0, o.t - dt);
+      const u = 1 - o.t / FLICK, up = o.t <= 0 ? 0 : u < .2 ? u / .2 : u > .8 ? (1 - u) / .2 : 1;
+      o.v.model.g.rotation.x = up * .32;
+      const lit = o.t > 0 && u > .28 && u < .85;
+      o.flame.visible = lit; if (lit) { const f = .8 + Math.random() * .35; o.flame.scale.set(.12 * f, .22 * f, 1); }
+      if (o.t <= 0) others.delete(id);
+    }
+  }
+  // Prompt text for the nearest action, so you know before you press.
+  function verb(type, base) {
+    if (BURNABLE.has(type) && !lighter) return base + ' (need a lighter)';
+    return base;
+  }
+
+  // ---------- first-person lighter (left hand) ----------
+  const FLICK = 1.1; let flickT = 0;
+  const lg = new THREE.Group(); lg.visible = false; vm.add(lg);
+  (function () {
+    const body = 0xD8343F;
+    put(B(.11, .26, .06, .018), body, lg, 0, 0, 0);                                   // translucent-red plastic body
+    put(B(.1, .2, .005), 0xF3B7AE, lg, 0, -.02, .031);                                 // label
+    put(B(.114, .07, .064, .006), METAL, lg, 0, .16, 0);                               // steel hood
+    for (let k = 0; k < 3; k++) put(B(.016, .03, .004), DARKM, lg, -.03 + k * .03, .165, .033); // hood vents
+    put(B(.03, .03, .03), 0x2a2a2a, lg, .03, .14, 0);                                   // fork / gas valve
+    // glove: fist around the body, thumb on the wheel
+    const GL = 'tx:knit|' + 0x7C8299;
+    put(B(.16, .2, .11, .045), GL, lg, .03, -.07, -.02);
+    for (let k = 0; k < 4; k++) put(CYL(.028, .028, .09, 8), GL, lg, .0, -.13 + k * .045, .055, { rz: Math.PI / 2 });
+    tube([[.08, -.04, .03], [.06, .1, .04], [.0, .2, .02]], .03, GL, lg, 8);
+    put(new THREE.SphereGeometry(.027, 10, 8), 0xF2C6A0, lg, -.005, .205, .02);
+    limb([.07, -.15, -.03], [.2, -.6, -.1], .085, .08, 'tx:canvas|' + 0xE07A2E, lg, 14);
+  })();
+  const wheel = put(CYL(.028, .028, .05, 12), 0x5E636E, lg, -.015, .205, 0, { rz: Math.PI / 2 });
+  const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, color: 0xFFB347, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  flame.position.set(-.015, .31, 0); flame.visible = false; lg.add(flame);
+  lg.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } });
+
+  // ---------- Sunny Mart sells lighters ----------
+  const stick = sign(['LIGHTERS $5'], 1.1, .3, '#E8343F', '#FFFFFF', scene, 4.2, 1.75, -5.93);
+  stick.material.toneMapped = false;
+
+  window.__look = (y, p) => { yaw = y; pitch = p; };   // test hooks for in-engine screenshots
+  window.__burn = BURN;
+  return { update, onMeta, onInv, onFlick, verb, get lighter() { return lighter; } };
+})();
+
 // ===================== procedural glass fracture (GAME-84) =====================
 // Any glass pane can shatter from the exact point it was hit. The crack pattern is a
 // radial + concentric fracture (the "spider web" real glass makes) built from a seed,
@@ -1686,8 +1909,9 @@ const GLASS = (() => {
   const caster = new THREE.Raycaster(); caster.layers.set(0);
   function floorAt(mesh, outward) {
     const wp = mesh.getWorldPosition(new THREE.Vector3()).addScaledVector(outward, .8);
-    caster.set(wp, new THREE.Vector3(0, -1, 0)); caster.far = wp.y + 1;
-    const hit = caster.intersectObjects(scene.children, true).find(h => h.object.isMesh && !h.object.material.transparent && h.object.visible && h.point.y < .35); // skip bins, bags, sills
+    caster.set(wp, new THREE.Vector3(0, -1, 0)); caster.far = wp.y + 1; caster.camera = camera;
+    let hits = []; try { hits = caster.intersectObjects(scene.children, true); } catch { return 0; }
+    const hit = hits.find(h => h.object.isMesh && !h.object.material.transparent && h.object.visible && h.point.y < .35); // skip bins, bags, sills
     return hit ? hit.point.y : 0;
   }
   function dims(mesh) { const g = mesh.geometry.parameters || {}; return [g.width || 1, g.height || 1]; }
@@ -1900,6 +2124,9 @@ const NET = (() => {
   // The server has walls at the town edge; mirror them so prediction agrees.
   for (const [x, z, hx, hz] of [[-60.5, 0, .5, 70], [60.5, 0, .5, 70], [0, -60.5, 70, .5], [0, 60.5, 70, .5]]) staticBox(x, 5, z, hx, 10, hz);
 
+  // The look test's three static vagrants are server-driven NPCs now (GAME-85).
+  for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
+
   // ---------- entities ----------
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
   const fixtures = new Map();        // fixture id -> desc
@@ -1922,7 +2149,7 @@ const NET = (() => {
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
   function buildVagrant(e) {
     const armRig = [];
-    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e), armRig });
+    const p = vagrant({ x: 0, z: 0, ry: 0, ...(e.kind === 'npc' ? e.look : vagrantLook(e)), armRig });
     p.arms = armRig;
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
@@ -1964,10 +2191,10 @@ const NET = (() => {
     if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
     if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); return; }
     let obj, extra = {};
-    if (e.kind === 'vagrant' || e.kind === 'sleeper') {
+    if (e.kind === 'vagrant' || e.kind === 'sleeper' || e.kind === 'npc') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
-      const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag);
-      extra = { model: v, tag, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
+      extra = { model: v, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
+      if (e.kind !== 'npc') { const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag); extra.tag = tag; }
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
     } else if (e.kind === 'traffic') obj = buildCar(e.color);
     else if (e.kind === 'prop') obj = buildProp(e);
@@ -2017,8 +2244,10 @@ const NET = (() => {
     const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
     if (!haveAck) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us
+    if (FIGHT.isDown()) player.velocity.y = Math.min(player.velocity.y, 0);   // no jumping while knocked out
   }
   function afterStep(dt) {
+    FIGHT.afterStep(dt);
     // Blend in any correction over a few frames so it never reads as a snap.
     if (corr.lengthSq() > 1e-6) { const k = 1 - Math.exp(-dt * 8); player.position.x += corr.x * k; player.position.z += corr.z * k; corr.multiplyScalar(1 - k); }
     sendAcc += dt;
@@ -2044,7 +2273,7 @@ const NET = (() => {
       corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
     }
   }
-  const speedScale = () => { const g = grabbing && ents.get(grabbing); return !g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1); };
+  const speedScale = () => { const g = grabbing && ents.get(grabbing); return (!g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1)) * FIGHT.speedScale(); };
 
   // ---------- fixtures and effects ----------
   let dumpFire = null;
@@ -2104,13 +2333,16 @@ const NET = (() => {
       if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
     }
+    else if (m.kind === 'flick') FIRE.onFlick(m.id === me, m.id);
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
+    else FIGHT.onFx(m);
   }
   function onMeta(m) {
-    meta = m; damage = m.town;
+    meta = m; damage = m.town; FIGHT.onMeta(m);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
+    FIRE.onMeta(m, fixtures);
     for (const [id, f] of fixtures) {
       const st = m.objects[id] || {};
       if (f.type === 'window') { const t = paneFor(f); if (st.g) { breakPane(t, st.g, true); if (st.board) GLASS.board(t.mesh); } else repairPane(t); }
@@ -2164,7 +2396,7 @@ const NET = (() => {
       if (!v.obj) continue;
       if (v.tag) v.tag.visible = showTags;
       const s = sampleBuf(v, rt); if (!s) continue;
-      if (v.kind === 'vagrant') {
+      if (v.kind === 'vagrant' || v.kind === 'npc') {
         cur.copy(v.obj.position); v.obj.position.copy(s.p);
         if (s.f !== undefined) v.obj.rotation.y = s.f;
         const moving = cur.distanceTo(s.p) > dt * .5;
@@ -2173,6 +2405,7 @@ const NET = (() => {
         v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
         v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
         animateArms(v, dt, moving);
+        FIGHT.pose(v, dt, t);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
@@ -2219,7 +2452,7 @@ const NET = (() => {
     const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
     promptMode = f ? 'act' : g ? 'grab' : null; btn.hidden = !promptMode;
     let html = '';
-    if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+    if (f) html = `${esc(FIRE.verb(f.type, MAP.actions[f.type].verb))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
     else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
     if (html && btn.innerHTML !== html) btn.innerHTML = html;
   }
@@ -2231,6 +2464,7 @@ const NET = (() => {
   function throwDir(dir) {
     if (lastPointer === 'mouse' && document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
     if (document.pointerLockElement === canvas) camera.getWorldDirection(dir);
+    if (!FIGHT.holding()) return FIGHT.punch(dir);   // empty hands: punch (GAME-85)
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'throw', dir: { x: dir.x, y: dir.y, z: dir.z } }));
     handKick = 1;
   }
@@ -2242,6 +2476,7 @@ const NET = (() => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
     if (SET.isBind('act', e.code) || e.code === 'KeyF') sendAct();
     if (SET.isBind('grab', e.code)) sendGrab();
+    if (SET.isBind('punch', e.code)) FIGHT.punch(camera.getWorldDirection(new THREE.Vector3()));
   });
 
   // ---------- connection ----------
@@ -2256,6 +2491,7 @@ const NET = (() => {
       else if (m.t === 'fx') onFx(m);
       else if (m.t === 'spawn') spawn(m.e);
       else if (m.t === 'despawn') despawn(m.id);
+      else if (m.t === 'inv') FIRE.onInv(m);
       else if (m.t === 'welcome') {
         try { localStorage.setItem('tw_token', m.token); } catch {}
         for (const id of [...ents.keys(), ...fixtures.keys()]) despawn(id);
@@ -2283,7 +2519,225 @@ const NET = (() => {
   window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view };
+  const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money };
+})();
+
+// ===================== fist fights and hit reactions (GAME-85) =====================
+// Punching with empty hands, being hit (by fists, thrown things or cars), knockouts,
+// and the arm poses that let other vagrants and townsfolk throw hands.
+const FIGHT = (() => {
+  const MAX_HP = 100;
+  const own = { hp: MAX_HP, downUntil: 0, staggerUntil: 0, lastHit: 0, lastPunch: 0, punchT: 0, hand: 'R', flash: 0, shake: 0, ko: 0, kb: new THREE.Vector3() };
+  const now = () => performance.now();
+
+  // ---------- HUD: health pill, hurt vignette, knocked-out card ----------
+  const css = document.createElement('style');
+  css.textContent = `
+#hpWrap{position:fixed;z-index:5;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.92);border-radius:999px;padding:5px 12px 5px 10px;box-shadow:0 3px 0 rgba(20,60,140,.22);pointer-events:none;font-family:var(--display);font-weight:700;font-size:13px;color:var(--ink);transition:opacity .4s}
+#hpWrap.full{opacity:.55}
+#hpBar{width:120px;height:10px;border-radius:999px;background:#F1E4EC;overflow:hidden}
+#hpBar i{display:block;height:100%;width:100%;border-radius:999px;background:linear-gradient(90deg,#FF6E9E,#FFC93C);transition:width .15s}
+#hurtVig{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(255,60,80,0) 45%,rgba(200,20,50,.55) 100%)}
+#koCard{position:fixed;z-index:6;left:50%;top:38%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;display:none}
+#koCard b{display:block;font-family:var(--display);font-weight:700;font-size:44px;color:#fff;-webkit-text-stroke:6px #E8343F;paint-order:stroke fill;letter-spacing:1px}
+#koCard span{display:inline-block;margin-top:6px;background:rgba(255,255,255,.94);border-radius:14px;padding:5px 12px;font-weight:700;font-size:14px;color:var(--ink)}
+.pop.pow{color:#FFC93C;font-size:30px;-webkit-text-stroke:6px #E8343F}
+.pop.paid{color:#26B07A;font-size:24px}
+@media (pointer:coarse){ #hpWrap{bottom:calc(150px + env(safe-area-inset-bottom,0px))} }`;
+  document.head.appendChild(css);
+  const hud = document.createElement('div');
+  hud.innerHTML = `<div id="hpWrap" class="full">♥<div id="hpBar"><i></i></div></div><div id="hurtVig"></div><div id="koCard"><b>KNOCKED OUT</b><span id="koSub"></span></div>`;
+  document.body.append(...hud.children);
+  const $ = id => document.getElementById(id);
+  let koPaid = 0;
+  function drawHp() {
+    $('hpBar').firstChild.style.width = Math.max(0, own.hp) + '%';
+    $('hpWrap').classList.toggle('full', own.hp >= MAX_HP);
+  }
+
+  // ---------- sounds ----------
+  let ac = null;
+  function sfx(kind, at) {
+    const d = at ? camera.position.distanceTo(new THREE.Vector3(...at)) : 0; if (d > 35) return;
+    try { ac ||= new AudioContext(); } catch { return; }
+    const vol = (1 - d / 35) * SET.vol(); if (vol <= 0) return;
+    const len = kind === 'swoosh' ? .16 : .12, buf = ac.createBuffer(1, ac.sampleRate * len, ac.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / ch.length, kind === 'swoosh' ? 1.5 : 4);
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = kind === 'swoosh' ? 'bandpass' : 'lowpass'; f.frequency.value = kind === 'swoosh' ? 1400 : kind === 'bonk' ? 900 : 420;
+    const g = ac.createGain(); g.gain.value = (kind === 'swoosh' ? .05 : .32) * vol;
+    src.connect(f); f.connect(g); g.connect(ac.destination); src.start();
+    if (kind !== 'swoosh') { const o = ac.createOscillator(), og = ac.createGain(); o.frequency.setValueAtTime(kind === 'bonk' ? 520 : 140, ac.currentTime); o.frequency.exponentialRampToValueAtTime(60, ac.currentTime + .12); og.gain.value = .12 * vol; og.gain.exponentialRampToValueAtTime(.001, ac.currentTime + .14); o.connect(og); og.connect(ac.destination); o.start(); o.stop(ac.currentTime + .15); }
+  }
+
+  // ---------- first-person fists ----------
+  // Same fingerless knit gloves and orange canvas sleeves as the bottle hand.
+  const HAND = { glove: 0x7C8299, skin: 0xF2C6A0 };
+  function fist(side) {
+    const root = new THREE.Group();
+    const h = glove(root, [0, 0, 0], [0, 1, 0], HAND, false);
+    // knuckles forward (glove +y -> -z), palm down (glove +z -> -y), turned in a little
+    h.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0)))
+      .premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, side * .25, side * -.35)));
+    h.scale.setScalar(1.2);
+    const end = new THREE.Vector3(side * .1, -.3, .34);                  // forearm runs back and down out of view
+    limb([0, -.004, .05], end.toArray(), .034, .044, 'tx:canvas|' + 0xE07A2E, root, 14);
+    put(CYL(.05, .05, .035, 12), 'tx:knit|' + 0x9AA3B8, root, 0, -.002, .055, { rx: Math.PI / 2 - .55 });  // hoodie cuff
+    put(CYL(.043, .043, .025, 14), 0xB85E1E, root, side * .008, -.02, .09, { rx: Math.PI / 2 - .6 });     // sleeve hem
+    root.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } });
+    camera.add(root); root.visible = false; return root;
+  }
+  const fists = { L: fist(-1), R: fist(1) };
+  const REST = { L: new THREE.Vector3(-.15, -.2, -.42), R: new THREE.Vector3(.15, -.195, -.41) };
+  const HIT = { L: new THREE.Vector3(-.04, -.09, -.66), R: new THREE.Vector3(.04, -.09, -.66) };
+  const _v = new THREE.Vector3();
+
+  // Until items can be put down (GAME-82), the bottle is always in hand.
+  const holding = () => (window.__net && 'held' in window.__net) ? window.__net.held != null : true;
+  const isDown = () => now() < own.downUntil;
+
+  function punch(dir) {
+    const t = now();
+    if (isDown() || t - own.lastPunch < 420 || !NET.me) return;
+    own.lastPunch = t;
+    own.hand = holding() ? 'L' : (own.hand === 'L' ? 'R' : 'L');   // bottle in the right hand: jab with the left
+    own.punchT = 1;
+    sfx('swoosh');
+    NET.send({ t: 'punch', dir: { x: dir.x, y: dir.y, z: dir.z } });
+  }
+
+  // ---------- movement while hurt (mirrors combat.mjs moveMod) ----------
+  function speedScale() { const t = now(); return t < own.downUntil ? 0 : t < own.staggerUntil ? .35 : 1; }
+  function afterStep(dt) {
+    if (own.kb.lengthSq() > 1e-4) {
+      player.position.x += own.kb.x * dt; player.position.z += own.kb.z * dt;
+      own.kb.multiplyScalar(Math.exp(-dt * 7));
+    }
+    if (isDown()) player.velocity.y = Math.min(player.velocity.y, 0);
+  }
+
+  // ---------- events from the server ----------
+  function stars() {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96; const g = cv.getContext('2d');
+    g.font = '700 64px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineWidth = 10; g.strokeStyle = '#fff'; g.fillStyle = '#FFC93C';
+    g.strokeText('✦ ✦ ✦', 128, 50); g.fillText('✦ ✦ ✦', 128, 50);
+    const tx = new THREE.CanvasTexture(cv); tx.colorSpace = THREE.SRGBColorSpace;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, depthWrite: false, transparent: true, fog: false })); s.scale.set(.75, .28, 1); fxl(s); return s;
+  }
+  const headAt = v => [v.obj.position.x, v.obj.position.y + (v.down ? -.4 : 1.1), v.obj.position.z];
+  const fx = v => v.fight || (v.fight = { punch: 0, hand: 'R', hurt: 0, fall: v.down ? 1 : 0, guardUntil: 0 });
+  function onFx(m) {
+    const meId = NET.me, v = NET.ents.get(m.id);
+    if (m.kind === 'punch') {
+      if (m.id === meId || !v || !v.model) return;
+      const F = fx(v); F.punch = 1; F.hand = m.hand; F.guardUntil = now() + 4000;
+      sfx('swoosh', headAt(v));
+    } else if (m.kind === 'hurt') {
+      const bonk = m.cause === 'item';
+      if (m.id === meId) {
+        own.hp = m.hp; own.lastHit = now(); own.staggerUntil = now() + 350; own.flash = 1; own.shake = bonk ? .05 : .035;
+        if (m.push) own.kb.add(new THREE.Vector3(m.push[0], 0, m.push[2]));
+        if (m.paid) { koPaid += m.paid; const at = camera.getWorldDirection(_v).multiplyScalar(1.2).add(camera.position); NET.popText('+' + NET.money(m.paid), [at.x, at.y - .2, at.z], 'paid'); }
+        if (m.cause === 'car') NET.feed(`Hit by a car! <b>+${NET.money(m.paid)}</b> for your pain and suffering.`);
+        drawHp(); sfx(bonk ? 'bonk' : 'thud');
+      } else if (v && v.model) {
+        const F = fx(v); F.hurt = 1;
+        const at = headAt(v);
+        NET.popText(m.cause === 'punch' ? ['POW!', 'BAM!', 'WHAP!', 'OOF!'][Math.floor(Math.random() * 4)] : m.cause === 'car' ? 'WHAM!' : 'BONK!', [at[0], at[1] + .5, at[2]], 'pow');
+        sfx(bonk ? 'bonk' : 'thud', at);
+        dust(new THREE.Vector3(at[0], at[1] - .1, at[2]), 3, 0xE8E0D0);
+        if (m.by === meId && m.paid === 0 && v.kind === 'vagrant') NET.feed(`You hit <b>${NET.esc(v.name)}</b>. They got paid for it.`);
+      }
+    } else if (m.kind === 'ko') {
+      if (m.id === meId) {
+        own.downUntil = now() + m.ms; own.hp = 0; drawHp();
+        $('koSub').textContent = koPaid ? `+${NET.money(koPaid)} in damages. Getting up in a sec...` : 'Getting up in a sec...';
+        $('koCard').style.display = 'block';
+      } else if (v && v.model) {
+        v.down = 1; NET.popText('K.O.!', headAt(v), 'pow');
+        if (m.by === meId) NET.feed(`You knocked out <b>${NET.esc(v.name || 'someone')}</b>!`);
+      }
+    } else if (m.kind === 'koup') {
+      if (m.id === meId) { own.downUntil = 0; own.hp = MAX_HP; koPaid = 0; drawHp(); $('koCard').style.display = 'none'; }
+      else if (v) v.down = 0;
+    } else if (m.kind === 'thud') { sfx('thud', m.at); dust(new THREE.Vector3(...m.at), 3, 0xE8E0D0); }
+  }
+  function onMeta(m) {
+    for (const v of NET.ents.values()) {
+      if (v.kind !== 'npc' && v.kind !== 'vagrant') continue;
+      const st = m.objects[v.id] || {};
+      v.angry = !!st.angry; if (!v.own) v.down = !!st.down;
+    }
+  }
+
+  // ---------- poses for other vagrants and townsfolk ----------
+  const ease = k => 1 - Math.pow(1 - k, 3);
+  function pose(v, dt, t) {
+    const m = v.model; if (!m) return;
+    const F = fx(v), g = m.g;
+    F.punch = Math.max(0, F.punch - dt / (F.hand === 'T' ? .5 : .3));
+    F.hurt = Math.max(0, F.hurt - dt * 3);
+    F.fall = Math.min(1, Math.max(0, F.fall + (v.down ? dt * 3.2 : -dt * 1.6)));
+    const guard = v.angry || now() < F.guardUntil;
+    const k = F.punch > 0 ? Math.sin((1 - F.punch) * Math.PI) : 0;
+    if (m.sign) m.sign.visible = !guard && !v.down && F.fall === 0;
+    if (F.stars) F.stars.visible = !!v.down;
+    // Not fighting: leave the walk / grab arm animation alone.
+    if (!guard && !v.down && F.punch === 0 && F.hurt === 0 && F.fall === 0) return;
+    if (m.arms && m.arms.length === 2) {
+      const [L, R] = m.arms, base = guard ? -.95 : 0;
+      L.rotation.set(base, 0, guard ? .32 : 0); R.rotation.set(base, 0, guard ? -.32 : 0);
+      if (F.punch > 0) {
+        if (F.hand === 'T') { const p = 1 - F.punch; R.rotation.x = p < .4 ? -2.8 * (p / .4) : -2.8 + 2.0 * ((p - .4) / .6); R.rotation.z = -.1; }
+        else { const A = F.hand === 'L' ? L : R; A.rotation.x = base + (-1.6 - base) * k; A.rotation.z *= 1 - k * .7; }
+      }
+      if (v.down) { L.rotation.set(-2.6, 0, .5); R.rotation.set(-2.4, 0, -.6); }   // sprawled
+    }
+    const twist = F.punch > 0 && F.hand !== 'T' ? (F.hand === 'R' ? -1 : 1) * .35 * k : 0;
+    g.rotation.y = twist;
+    g.rotation.x = (guard ? .1 : 0) + .15 * k - .4 * F.hurt - Math.PI / 2 * ease(F.fall);
+    g.rotation.z += Math.sin(t * 18) * F.hurt * .18;
+    if (F.fall > 0) g.position.y = -.9 + .12 * ease(F.fall);
+    if (v.down && !F.stars) { F.stars = stars(); F.stars.position.set(0, 2.0, 0); g.add(F.stars); }
+    if (F.stars) { F.stars.visible = !!v.down; F.stars.material.rotation = Math.sin(t * 3) * .3; F.stars.position.x = Math.sin(t * 4) * .08; }
+  }
+
+  // ---------- camera: hurt shake, knocked-out view, fists ----------
+  function afterCamera(dt, t) {
+    const down = isDown();
+    own.ko = Math.min(1, Math.max(0, own.ko + (down ? dt * 3 : -dt * 1.5)));
+    if (own.ko > 0) {
+      const k = ease(own.ko);
+      camera.position.y -= 1.0 * k;
+      camera.rotation.x += (1.1 - camera.rotation.x) * k * .85;
+      camera.rotation.z += .55 * k + Math.sin(t * 1.7) * .05 * k;
+    }
+    if (down && $('koCard').style.display === 'none') $('koCard').style.display = 'block';
+    if (!down && $('koCard').style.display !== 'none' && own.downUntil === 0) $('koCard').style.display = 'none';
+    if (own.shake > 0) { camera.rotation.x += (Math.random() - .5) * own.shake; camera.rotation.y += (Math.random() - .5) * own.shake; own.shake = Math.max(0, own.shake - dt * .25); }
+    own.flash = Math.max(0, own.flash - dt * 2.2);
+    $('hurtVig').style.opacity = Math.max(own.flash, down ? .6 : 0, own.hp < 35 ? .25 + Math.sin(t * 5) * .08 : 0).toFixed(3);
+    if (!down && own.hp < MAX_HP && now() - own.lastHit > 4000) { own.hp = Math.min(MAX_HP, own.hp + 8 * dt); if (Math.floor(own.hp) % 4 === 0 || own.hp >= MAX_HP) drawHp(); }
+    vm.visible = !down;                 // the bottle hand drops out of view while you're out cold
+    // fists
+    own.punchT = Math.max(0, own.punchT - dt / .28);
+    const empty = !holding(), pk = own.punchT > 0 ? Math.sin((1 - own.punchT) * Math.PI) : 0;
+    for (const h of ['L', 'R']) {
+      const f = fists[h], active = own.punchT > 0 && own.hand === h;
+      f.visible = !down && (empty || active);
+      if (!f.visible) continue;
+      const k = active ? pk : 0;
+      _v.copy(REST[h]).lerp(HIT[h], k);
+      _v.y += Math.sin(t * 2.2 + (h === 'L' ? 1 : 0)) * .006 - (empty ? 0 : (1 - k) * .2);
+      f.position.copy(_v);
+      f.rotation.set(-k * .25, (h === 'L' ? 1 : -1) * (.12 - k * .1), (h === 'L' ? -1 : 1) * k * .3);
+    }
+  }
+
+  drawHp();
+  window.__fight = { own, pose, onFx, send: o => NET.send(o) };
+  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, isDown };
 })();
 
 // ===================== turf mini map (GAME-80) =====================

@@ -1,0 +1,67 @@
+{
+ "note": "GAME-85 townsfolk NPCs. Positions are in town (map) coordinates; move them when the map changes. temper 0..1: how likely they are to fight instead of throwing back.",
+ "npcs": [
+  {
+   "x": -9.4,
+   "z": -4.4,
+   "ry": 0.5,
+   "name": "Sign Guy Sal",
+   "look": {
+    "coat": 14711342,
+    "coatSh": 12082718,
+    "hat": 16735631,
+    "hatSh": 14695026,
+    "pants": 5074889,
+    "hoodie": 10134456,
+    "scarf": 0,
+    "sign": [
+     "ANYTHING",
+     "HELPS :)"
+    ]
+   },
+   "temper": 0.3
+  },
+  {
+   "x": 19.4,
+   "z": 8.6,
+   "ry": 2.2,
+   "name": "Big Dale",
+   "look": {
+    "coat": 6269066,
+    "coatSh": 4885104,
+    "hat": 15909424,
+    "hatSh": 14263296,
+    "pants": 5917824,
+    "hoodie": 8011342,
+    "skin": 13208158,
+    "skinSh": 11038536,
+    "beard": 3023386,
+    "pack": 9071172,
+    "packSh": 7230516,
+    "roll": 4090522
+   },
+   "temper": 0.9
+  },
+  {
+   "x": 21.8,
+   "z": 9.3,
+   "ry": -2.4,
+   "name": "Old Gus",
+   "look": {
+    "coat": 8018616,
+    "coatSh": 6440858,
+    "hat": 4172008,
+    "hatSh": 2000072,
+    "pants": 6975102,
+    "hoodie": 14207400,
+    "skin": 16771030,
+    "skinSh": 15778982,
+    "beard": 14272168,
+    "brow": 13153430,
+    "scarf": 3124842,
+    "boot": 4864560
+   },
+   "temper": 0.5
+  }
+ ]
+}

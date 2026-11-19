@@ -167,8 +167,9 @@ const GLASS = (() => {
   const caster = new THREE.Raycaster(); caster.layers.set(0);
   function floorAt(mesh, outward) {
     const wp = mesh.getWorldPosition(new THREE.Vector3()).addScaledVector(outward, .8);
-    caster.set(wp, new THREE.Vector3(0, -1, 0)); caster.far = wp.y + 1;
-    const hit = caster.intersectObjects(scene.children, true).find(h => h.object.isMesh && !h.object.material.transparent && h.object.visible && h.point.y < .35); // skip bins, bags, sills
+    caster.set(wp, new THREE.Vector3(0, -1, 0)); caster.far = wp.y + 1; caster.camera = camera;
+    let hits = []; try { hits = caster.intersectObjects(scene.children, true); } catch { return 0; }
+    const hit = hits.find(h => h.object.isMesh && !h.object.material.transparent && h.object.visible && h.point.y < .35); // skip bins, bags, sills
     return hit ? hit.point.y : 0;
   }
   function dims(mesh) { const g = mesh.geometry.parameters || {}; return [g.width || 1, g.height || 1]; }

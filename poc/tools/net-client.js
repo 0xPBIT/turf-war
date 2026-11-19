@@ -12,6 +12,9 @@ const NET = (() => {
   // The server has walls at the town edge; mirror them so prediction agrees.
   for (const [x, z, hx, hz] of [[-60.5, 0, .5, 70], [60.5, 0, .5, 70], [0, -60.5, 70, .5], [0, 60.5, 70, .5]]) staticBox(x, 5, z, hx, 10, hz);
 
+  // The look test's three static vagrants are server-driven NPCs now (GAME-85).
+  for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
+
   // ---------- entities ----------
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
   const fixtures = new Map();        // fixture id -> desc
@@ -34,7 +37,7 @@ const NET = (() => {
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
   function buildVagrant(e) {
     const armRig = [];
-    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e), armRig });
+    const p = vagrant({ x: 0, z: 0, ry: 0, ...(e.kind === 'npc' ? e.look : vagrantLook(e)), armRig });
     p.arms = armRig;
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
@@ -76,10 +79,10 @@ const NET = (() => {
     if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
     if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); return; }
     let obj, extra = {};
-    if (e.kind === 'vagrant' || e.kind === 'sleeper') {
+    if (e.kind === 'vagrant' || e.kind === 'sleeper' || e.kind === 'npc') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
-      const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag);
-      extra = { model: v, tag, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
+      extra = { model: v, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
+      if (e.kind !== 'npc') { const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag); extra.tag = tag; }
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
     } else if (e.kind === 'traffic') obj = buildCar(e.color);
     else if (e.kind === 'prop') obj = buildProp(e);
@@ -129,8 +132,10 @@ const NET = (() => {
     const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
     if (!haveAck) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us
+    if (FIGHT.isDown()) player.velocity.y = Math.min(player.velocity.y, 0);   // no jumping while knocked out
   }
   function afterStep(dt) {
+    FIGHT.afterStep(dt);
     // Blend in any correction over a few frames so it never reads as a snap.
     if (corr.lengthSq() > 1e-6) { const k = 1 - Math.exp(-dt * 8); player.position.x += corr.x * k; player.position.z += corr.z * k; corr.multiplyScalar(1 - k); }
     sendAcc += dt;
@@ -156,7 +161,7 @@ const NET = (() => {
       corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
     }
   }
-  const speedScale = () => { const g = grabbing && ents.get(grabbing); return !g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1); };
+  const speedScale = () => { const g = grabbing && ents.get(grabbing); return (!g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1)) * FIGHT.speedScale(); };
 
   // ---------- fixtures and effects ----------
   let dumpFire = null;
@@ -216,13 +221,16 @@ const NET = (() => {
       if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
     }
+    else if (m.kind === 'flick') FIRE.onFlick(m.id === me, m.id);
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
+    else FIGHT.onFx(m);
   }
   function onMeta(m) {
-    meta = m; damage = m.town;
+    meta = m; damage = m.town; FIGHT.onMeta(m);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
+    FIRE.onMeta(m, fixtures);
     for (const [id, f] of fixtures) {
       const st = m.objects[id] || {};
       if (f.type === 'window') { const t = paneFor(f); if (st.g) { breakPane(t, st.g, true); if (st.board) GLASS.board(t.mesh); } else repairPane(t); }
@@ -276,7 +284,7 @@ const NET = (() => {
       if (!v.obj) continue;
       if (v.tag) v.tag.visible = showTags;
       const s = sampleBuf(v, rt); if (!s) continue;
-      if (v.kind === 'vagrant') {
+      if (v.kind === 'vagrant' || v.kind === 'npc') {
         cur.copy(v.obj.position); v.obj.position.copy(s.p);
         if (s.f !== undefined) v.obj.rotation.y = s.f;
         const moving = cur.distanceTo(s.p) > dt * .5;
@@ -285,6 +293,7 @@ const NET = (() => {
         v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
         v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
         animateArms(v, dt, moving);
+        FIGHT.pose(v, dt, t);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
@@ -331,7 +340,7 @@ const NET = (() => {
     const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
     promptMode = f ? 'act' : g ? 'grab' : null; btn.hidden = !promptMode;
     let html = '';
-    if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+    if (f) html = `${esc(FIRE.verb(f.type, MAP.actions[f.type].verb))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
     else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
     if (html && btn.innerHTML !== html) btn.innerHTML = html;
   }
@@ -343,6 +352,7 @@ const NET = (() => {
   function throwDir(dir) {
     if (lastPointer === 'mouse' && document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
     if (document.pointerLockElement === canvas) camera.getWorldDirection(dir);
+    if (!FIGHT.holding()) return FIGHT.punch(dir);   // empty hands: punch (GAME-85)
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'throw', dir: { x: dir.x, y: dir.y, z: dir.z } }));
     handKick = 1;
   }
@@ -354,6 +364,7 @@ const NET = (() => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
     if (SET.isBind('act', e.code) || e.code === 'KeyF') sendAct();
     if (SET.isBind('grab', e.code)) sendGrab();
+    if (SET.isBind('punch', e.code)) FIGHT.punch(camera.getWorldDirection(new THREE.Vector3()));
   });
 
   // ---------- connection ----------
@@ -368,6 +379,7 @@ const NET = (() => {
       else if (m.t === 'fx') onFx(m);
       else if (m.t === 'spawn') spawn(m.e);
       else if (m.t === 'despawn') despawn(m.id);
+      else if (m.t === 'inv') FIRE.onInv(m);
       else if (m.t === 'welcome') {
         try { localStorage.setItem('tw_token', m.token); } catch {}
         for (const id of [...ents.keys(), ...fixtures.keys()]) despawn(id);
@@ -395,5 +407,6 @@ const NET = (() => {
   window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view };
+  const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money };
 })();
