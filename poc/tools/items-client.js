@@ -59,5 +59,9 @@ const ITEMS = (() => {
     return g;
   }
   const NAMES = { bottle: 'bottle', can: 'can', rock: 'rock', brick: 'brick', wrench: 'pipe wrench' };
-  return { mesh, name: t => NAMES[t] || t };
+  // In the first-person fist: the grip was modelled round a bottle, so smaller things sit
+  // up out of the fingers where you can see them.
+  const HAND = { rock: { y: .1, s: 1.25 }, can: { y: .04, s: 1 }, brick: { y: .05, s: 1 }, bottle: { y: 0, s: 1 }, wrench: { y: -.02, s: 1 } };
+  function inHand(m, type) { const h = HAND[type] || HAND.rock; m.position.y += h.y; m.scale.multiplyScalar(h.s); return m; }
+  return { mesh, inHand, name: t => NAMES[t] || t };
 })();
