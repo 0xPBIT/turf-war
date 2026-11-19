@@ -44,10 +44,24 @@ const CARDMG = (() => {
         g.closePath(); g.stroke();
       }
     };
-    stroke(4, 'rgba(40,50,80,.35)'); stroke(1.6, 'rgba(255,255,255,.95)');
+    stroke(11, 'rgba(30,36,64,.95)'); stroke(3.5, 'rgba(255,255,255,1)');
     g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.arc(S / 2, S / 2, 7, 0, Math.PI * 2); g.fill();
     crackTex = new THREE.CanvasTexture(cv); crackTex.colorSpace = THREE.SRGBColorSpace;
     return crackTex;
+  }
+  // Scraped paint: a dark smudge with bright bare-metal scratches.
+  let scuffTex = null;
+  function scuffTexture() {
+    if (scuffTex) return scuffTex;
+    const S = 128, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
+    const rg = g.createRadialGradient(S / 2, S / 2, 4, S / 2, S / 2, S / 2); rg.addColorStop(0, 'rgba(40,34,52,.55)'); rg.addColorStop(1, 'rgba(40,34,52,0)');
+    g.fillStyle = rg; g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 22; i++) {
+      const x = S * (.2 + Math.random() * .6), y = S * (.2 + Math.random() * .6), a = -.4 + Math.random() * .8, l = 10 + Math.random() * 34;
+      g.strokeStyle = i % 3 ? 'rgba(235,238,245,.85)' : 'rgba(30,26,40,.7)'; g.lineWidth = i % 3 ? 1.2 : 2;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+    }
+    scuffTex = new THREE.CanvasTexture(cv); scuffTex.colorSpace = THREE.SRGBColorSpace; return scuffTex;
   }
   const frostMat = () => new THREE.MeshPhysicalMaterial({ color: 0xE8F4FA, roughness: .5, transparent: true, opacity: .82, side: THREE.DoubleSide, depthWrite: false });
   // car: the model group built by car(); it carries userData.body (mesh) and userData.glass.
@@ -66,20 +80,20 @@ const CARDMG = (() => {
   function dent(g, d) {
     const body = g.userData.body; if (!body) return;
     const geo = ensureGeo(g), pos = geo.attributes.position, arr = pos.array;
-    const P = toModel(d), N = toModel([d[3], d[4], d[5]]).normalize(), R = d[6] * 1.7, depth = d[6] * .45;
+    const P = toModel(d), N = toModel([d[3], d[4], d[5]]).normalize(), R = d[6] * 1.6, depth = d[6] * .7;
     const v = new THREE.Vector3(), w = new THREE.Vector3();
     for (let i = 0; i < arr.length; i += 3) {
       v.set(arr[i], arr[i + 1], arr[i + 2]); w.copy(v).sub(P);
       const along = w.dot(N); if (along < -.35 || along > .5) continue;
       const lat = w.addScaledVector(N, -along).length(); if (lat > R) continue;
       const k = 1 - lat / R, fall = k * k * (3 - 2 * k);
-      const crinkle = .75 + .5 * Math.abs(Math.sin(arr[i] * 37.1 + arr[i + 1] * 51.7 + arr[i + 2] * 23.3));
+      const crinkle = .45 + 1.1 * Math.abs(Math.sin(arr[i] * 37.1 + arr[i + 1] * 51.7 + arr[i + 2] * 23.3));
       arr[i] -= N.x * depth * fall * crinkle; arr[i + 1] -= N.y * depth * fall * crinkle; arr[i + 2] -= N.z * depth * fall * crinkle;
     }
     pos.needsUpdate = true; geo.computeVertexNormals(); geo.computeBoundingSphere();
     // a scuff where the paint got scraped
-    const sc = new THREE.Mesh(new THREE.CircleGeometry(d[6] * .9, 10), new THREE.MeshBasicMaterial({ color: 0x3A3550, transparent: true, opacity: .22, depthWrite: false }));
-    sc.position.copy(P).addScaledVector(N, .02 - depth * .6); sc.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), N); sc.rotation.z += Math.random() * 3;
+    const sc = new THREE.Mesh(new THREE.PlaneGeometry(d[6] * 2.2, d[6] * 2.2), new THREE.MeshBasicMaterial({ map: scuffTexture(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+    sc.position.copy(P).addScaledVector(N, .015 - depth * .55); sc.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), N); sc.rotation.z += Math.random() * 3;
     sc.scale.set(1, .6 + Math.random() * .5, 1); g.add(sc); state(g).decals.push(sc);
   }
   function crack(g, pane, level, at) {
@@ -87,18 +101,19 @@ const CARDMG = (() => {
     const S = state(g), prev = S.glass[pane] || 0; if (level <= prev) return;
     S.glass[pane] = level;
     const n = gl.n.clone();
-    const P = at ? toModel(at) : gl.m.getWorldPosition(new THREE.Vector3()).applyMatrix4(new THREE.Matrix4().copy(g.matrixWorld).invert());
+    const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+    const centre = new THREE.Box3().setFromObject(gl.m).getCenter(new THREE.Vector3()).applyMatrix4(inv);   // the pane's middle (meshes may sit at their own origin)
+    const P = at ? toModel(at) : centre;
     const decal = (size, p) => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: crackTexture(), transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: crackTexture(), alphaTest: .35, side: THREE.DoubleSide }));
       m.position.copy(p).addScaledVector(n, .012); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
-      m.rotateZ(Math.random() * Math.PI * 2); g.add(m); S.decals.push(m); return m;
+      m.rotateZ(Math.random() * Math.PI * 2); m.renderOrder = 2; g.add(m); S.decals.push(m); return m;
     };
-    if (level >= 1 && prev < 1) decal(.55, P);
+    if (level >= 1 && prev < 1) decal(1.0, P);
     if (level >= 2) {
       if (!gl.orig) gl.orig = gl.m.material;
       gl.m.material = frostMat();
-      const c = gl.m.getWorldPosition(new THREE.Vector3()).applyMatrix4(new THREE.Matrix4().copy(g.matrixWorld).invert());
-      decal(1.1, c); decal(.8, P);
+      decal(1.3, centre); decal(.9, P);
     }
   }
   function apply(g, m) {

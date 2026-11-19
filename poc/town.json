@@ -1855,7 +1855,8 @@
   },
   "window": {
    "verb": "Smashed a window",
-   "repairSec": 90
+   "repairSec": 240,
+   "boardSec": 45
   },
   "car": {
    "verb": "Bottled a windshield",
