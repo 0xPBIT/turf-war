@@ -17,6 +17,7 @@ NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
+COPPER = (HERE / 'copper.js').read_text()
 
 s = SRC.read_text()
 
@@ -90,9 +91,12 @@ rep("const m=new THREE.Mesh(g,mat); m.castShadow=true;", "const m=new THREE.Mesh
 rep("if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); }",
     "if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); if(o.m.userData.ownGeo) o.m.geometry.dispose(); }")
 
+# Copper theft (GAME-91): the pliers and the squat play after the hand is placed each frame.
+rep("vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6;", "vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6; COPPER.viewmodel(dt,t);")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + NET + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + NET + '\n' + COPPER + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

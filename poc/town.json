@@ -1743,6 +1743,20 @@
    "verb": "Knocked a cone",
    "cost": 40,
    "repairSec": 5
+  },
+  "lamppost": {
+   "verb": "Strip the copper wire",
+   "cost": 1200,
+   "repairSec": 180,
+   "cash": 25,
+   "holdSec": 2.6,
+   "needs": "pliers"
+  },
+  "buy_pliers": {
+   "verb": "Buy pliers",
+   "price": 6,
+   "cost": 0,
+   "repairSec": 1
   }
  },
  "traffic": {
@@ -1792,5 +1806,69 @@
     "control": "stop"
    }
   ]
- }
+ },
+ "lampposts": [
+  {
+   "id": "lamp:0",
+   "p": [
+    -34,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  },
+  {
+   "id": "lamp:1",
+   "p": [
+    -17,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  },
+  {
+   "id": "lamp:2",
+   "p": [
+    0,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  },
+  {
+   "id": "lamp:3",
+   "p": [
+    17,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  },
+  {
+   "id": "lamp:4",
+   "p": [
+    34,
+    0,
+    5.5
+   ],
+   "ry": 0,
+   "style": "cobra"
+  }
+ ],
+ "shops": [
+  {
+   "id": "shop:pliers",
+   "name": "Sunny Mart",
+   "sells": "pliers",
+   "p": [
+    5.4,
+    0.9,
+    -6.4
+   ]
+  }
+ ]
 }

@@ -212,10 +212,11 @@ const NET = (() => {
     else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
     else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
+    else if (m.kind === 'strip') COPPER.fx(m);
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
   function onMeta(m) {
-    meta = m; damage = m.town;
+    meta = m; damage = m.town; COPPER.meta(m);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
@@ -251,6 +252,7 @@ const NET = (() => {
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
       } else { v.obj.position.copy(s.p); v.obj.quaternion.copy(s.q); }
     }
+    COPPER.frame(dt, t);
     // zone readout
     if (MAP) {
       const px = player.position.x, pz = player.position.z;
@@ -267,14 +269,14 @@ const NET = (() => {
     for (const f of fixtures.values()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
-      const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt)) continue;
+      const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt || st.stripped || st.busy)) continue;
       const d = (f.pos[0] - player.position.x) ** 2 + (f.pos[2] - player.position.z) ** 2; if (d < bd) { bd = d; best = f; }
     }
     return best;
   }
   function updatePrompt(btn) {
-    const f = nearestAction(); btn.hidden = !f;
-    if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
+    const f = COPPER.busy() ? null : nearestAction(); btn.hidden = !f;
+    if (f) { const a = MAP.actions[f.type], k = __set.s.binds.act, html = `${esc(COPPER.prompt(f, a) || a.verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
   }
   const act = () => { if (ws && ws.readyState === 1) ws.send('{"t":"act"}'); };
   let lastPointer = 'mouse';
@@ -305,6 +307,7 @@ const NET = (() => {
       else if (m.t === 'a') onAck(m);
       else if (m.t === 'm') onMeta(m);
       else if (m.t === 'fx') onFx(m);
+      else if (m.t === 'inv') COPPER.inv(m);
       else if (m.t === 'spawn') spawn(m.e);
       else if (m.t === 'despawn') despawn(m.id);
       else if (m.t === 'welcome') {

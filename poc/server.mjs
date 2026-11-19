@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { initCopper } from './copper.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -219,6 +220,9 @@ function decayHeatAndOwners() {
   saveDirty = true;
 }
 
+// Copper wire theft (GAME-91): lampposts and pliers live in copper.mjs.
+const copper = initCopper({ MAP, ACTIONS, save, sessions, addEntity, addDamage, broadcast, posOf });
+
 function nearest(e, radius, filter) {
   const [x, , z] = posOf(e);
   let best = null, bd = radius * radius;
@@ -239,6 +243,7 @@ function interact(s) {
   s.lastAct = now;
   const target = nearest(e, 3, o => o.kind === 'fixture' && ACTIONS[o.type] && !HIT_ONLY.has(o.type));
   if (!target) return;
+  if (target.type === 'lamppost' || target.type === 'buy_pliers') return copper.start(s, target);
   const a = ACTIONS[target.type];
   const busyUntil = target.state.busyUntil || 0;
   if (now < busyUntil) return;
@@ -499,6 +504,7 @@ let tick = 0;
 function physicsTick() {
   stepPlayers();
   stepTraffic(Date.now());
+  copper.tick(Date.now());
   world.step(events);
   events.drainCollisionEvents((h1, h2, started) => {
     if (!started) return;
@@ -550,6 +556,7 @@ function metaPayload() {
     else if ((st.burntUntil || 0) > now) o.burnt = 1;
     if ((st.brokenUntil || 0) > now) o.broken = 1;
     if (st.braking) o.brake = 1;
+    copper.meta(e, o);
     if (Object.keys(o).length) objects[e.id] = o;
   }
   const owners = {};
@@ -557,7 +564,7 @@ function metaPayload() {
     const p = save.players[pid];
     if (p) owners[z] = { name: p.name, color: p.color };
   }
-  const players = Object.values(save.players).map(p => ({ id: p.id, name: p.name, color: p.color, damage: Math.round(p.damage || 0), cash: p.cash || 0, asleep: !sessions.has(p.id) }))
+  const players = Object.values(save.players).map(p => ({ id: p.id, name: p.name, color: p.color, damage: Math.round(p.damage || 0), cash: p.cash || 0, asleep: !sessions.has(p.id), ...copper.playerMeta(p) }))
     .sort((a, b) => b.damage - a.damage).slice(0, 12);
   return { t: 'm', lights: lightsPayload(), town: Math.round(save.town.damage), owners, objects, players, online: sessions.size };
 }
@@ -647,6 +654,7 @@ wss.on('connection', ws => {
       ws.send(JSON.stringify({ t: 'welcome', token, you: vagrantId(pid), name: p.name, entities: [...entities.values()].map(describe) }));
       sendSnapshot(true, ws);
       ws.send(JSON.stringify(metaPayload()));
+      copper.sendInv(p);
       saveDirty = true;
       console.log(`[town] ${p.name} woke up (${sessions.size} online)`);
       return;
@@ -666,6 +674,7 @@ wss.on('connection', ws => {
     const s = pid && sessions.get(pid);
     if (!s || s.ws !== ws) return;
     s.input = {}; s.queue = [];
+    copper.cancel(s, 'left');
     releaseGrab(s.entity);
     // Wait a moment for a reconnect before the vagrant lies down.
     s.graceTimer = setTimeout(() => { if (sessions.get(pid) === s) lieDown(pid); }, GRACE_MS);
