@@ -139,8 +139,6 @@ rep("root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined) return;", "roo
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
 
-# GAME-87 + GAME-92: other players' arms (and legs) move. vagrant({rig:true}) splits the
-# model into posable parts (see the GAME-92 block below and tools/anim.js).
 # First-person hands reach out, grip and strain while you hold something (net-client.js vmPose).
 rep("NET.heldVisible(handKick); NET.vmAnim(dt);", "NET.heldVisible(handKick); NET.vmPose(dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);")
 
