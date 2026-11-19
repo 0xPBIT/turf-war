@@ -698,6 +698,7 @@ for(let x=-34;x<=34;x+=17){ const g=grp(city,x,0,5.5); put(CYL(.07,.11,6.4,10),0
 // GAME-83: see-through car cabin. Model frame of car(): nose at -x, width along z,
 // beltline at y ~.95, roof at 1.4. Glass is its own (unbaked) transparent mesh.
 let carGlassMat = null;
+const CAR_GROUPS = [];   // parked cars' model groups, so car damage can find them
 function carGlass(m){ if(!carGlassMat){ carGlassMat = glassMat.clone(); carGlassMat.color.set(0x8CC6E6); carGlassMat.opacity = .42; carGlassMat.side = THREE.DoubleSide; }
   m.material = carGlassMat; delete m.userData.c; m.castShadow = false; m.receiveShadow = false; return m; }
 function carPane(parent, a, b, w){   // a flat pane spanning the car's width between two (x,y) points
@@ -725,11 +726,14 @@ function carCabin(g, Wd, bodyHex){
   put(B(.44,.1,Wd-.28,.03), SEAT, g, .88, .74, 0);
   put(B(.1,.42,Wd-.28,.03), SEAT, g, 1.1, .97, 0, { rz: -.25 });
   // glass: windshield, back glass, side windows
-  carPane(g, [-.93,.94], [-.39,1.365], Wd-.1);
-  carPane(g, [1.47,1.0], [.83,1.365], Wd-.1);
+  // panes and their outward normals (model frame), for cracks (car-damage.js)
+  const paneN = m => { const n = new THREE.Vector3(0,1,0).applyQuaternion(m.quaternion); return n.x > 0 && n.y < 0 ? n.negate() : n.y < 0 ? n.negate() : n; };
+  const front = carPane(g, [-.93,.94], [-.39,1.365], Wd-.1), back = carPane(g, [1.47,1.0], [.83,1.365], Wd-.1);
+  g.userData.glass = { front: { m: front, n: paneN(front) }, back: { m: back, n: paneN(back) } };
   for(const s of [-1,1]){
     const w = shapeExtrude([[-.9,.95],[-.4,1.345],[.8,1.345],[1.44,1.0]], .012, 0xFFFFFF, g);
     w.position.z = s*(hw+.005); carGlass(w);
+    g.userData.glass[s < 0 ? 'left' : 'right'] = { m: w, n: new THREE.Vector3(0, 0, s) };
   }
   // a bright streak on the windshield so it reads as glass from far away
   const streakMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: .5, depthWrite: false });
@@ -742,7 +746,7 @@ function carCabin(g, Wd, bodyHex){
 function car(x,z,ry,bodyHex){
   const g=grp(city,x,0,z,ry); const L=4.4, Wd=1.75;
   const prof=[[-2.2,.32],[-2.26,.62],[-2.12,.8],[-.95,.94],[1.5,1.0],[2.15,.93],[2.26,.62],[2.2,.32],[1.78,.32],[1.72,.55],[1.35,.72],[.98,.55],[.92,.32],[-.92,.32],[-.98,.55],[-1.35,.72],[-1.72,.55],[-1.78,.32]];
-  shapeExtrude(prof,Wd,bodyHex,g,.04);
+  g.userData.body=shapeExtrude(prof,Wd,bodyHex,g,.04); g.userData.body.userData.nobake=1; CAR_GROUPS.push(g);
   carCabin(g,Wd,bodyHex);
   
   for(const s of [-1,1]){ put(B(4.3,.02,.02),0x2A3050,g,0,.62,s*(Wd/2+.05)); put(B(.02,.55,.02),0x2A3050,g,.0,.66,s*(Wd/2+.05)); put(B(.02,.55,.02),0x2A3050,g,1.05,.68,s*(Wd/2+.05)); put(B(.02,.55,.02),0x2A3050,g,-1.0,.66,s*(Wd/2+.05));
@@ -767,7 +771,7 @@ glowDecal(0xFF3D8B,-9,-6,6); glowDecal(0x26D3A0,20,7,7);
 function worldUV(g,tile){ const p=g.attributes.position, n=g.attributes.normal; const uv=new Float32Array(p.count*2); for(let i=0;i<p.count;i++){ const ax=Math.abs(n.getX(i)), ay=Math.abs(n.getY(i)), az=Math.abs(n.getZ(i)); let u,v; if(ax>=ay&&ax>=az){u=p.getZ(i);v=p.getY(i);} else if(ay>=ax&&ay>=az){u=p.getX(i);v=p.getZ(i);} else {u=p.getX(i);v=p.getY(i);} uv[i*2]=u/tile; uv[i*2+1]=v/tile; } g.setAttribute('uv',new THREE.BufferAttribute(uv,2)); }
 function bake(root){
   root.updateMatrixWorld(true); const groups=new Map(), kill=[];
-  root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined) return; let g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
+  root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined || o.userData.nobake) return; let g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
     for(const k of Object.keys(g.attributes)) if(!['position','normal','uv'].includes(k)) g.deleteAttribute(k);
     if(!g.attributes.uv) g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(g.attributes.position.count*2),2));
     const key=o.userData.c; if(typeof key==='string'){ const t=TILE[key.slice(3).split('|')[0]]; if(t) worldUV(g,t); }
@@ -1786,6 +1790,129 @@ const FIRE = (() => {
   return { update, onMeta, onInv, onFlick, verb, get lighter() { return lighter; } };
 })();
 
+// ===================== car damage (GAME-83) =====================
+// The server sends dents and per-pane crack levels in the car's own frame (nose +z, y from
+// the ground). The car model's frame is nose -x, so model = (-z, y, x). Each damaged car
+// gets its own finely tessellated copy of the body so dents can push real vertices in,
+// and cracked panes get a crack decal (level 1) or go frosted with a big crack (level 2).
+const CARDMG = (() => {
+  // Split triangles until no edge is longer than MAX, so a dent has vertices to push.
+  function tessellate(geo, MAX) {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    const src = g.attributes.position.array, out = [];
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+    const split = (a, b, c, depth) => {
+      const ab = a.distanceTo(b), bc = b.distanceTo(c), ca = c.distanceTo(a), m = Math.max(ab, bc, ca);
+      if (m <= MAX || depth > 9) { out.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z); return; }
+      if (m === ab) { const p = a.clone().lerp(b, .5); split(a, p, c, depth + 1); split(p, b, c, depth + 1); }
+      else if (m === bc) { const p = b.clone().lerp(c, .5); split(a, b, p, depth + 1); split(a, p, c, depth + 1); }
+      else { const p = c.clone().lerp(a, .5); split(a, b, p, depth + 1); split(p, b, c, depth + 1); }
+    };
+    for (let i = 0; i < src.length; i += 9) split(A.set(src[i], src[i + 1], src[i + 2]).clone(), B.set(src[i + 3], src[i + 4], src[i + 5]).clone(), C.set(src[i + 6], src[i + 7], src[i + 8]).clone(), 0);
+    const ng = new THREE.BufferGeometry();
+    ng.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+    ng.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(out.length / 3 * 2), 2));
+    ng.computeVertexNormals();
+    return ng;
+  }
+  // A white spiderweb crack on a transparent canvas; one texture, rotated per decal.
+  let crackTex = null;
+  function crackTexture() {
+    if (crackTex) return crackTex;
+    const S = 256, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    const rays = [];
+    for (let i = 0; i < 11; i++) {
+      const a0 = i / 11 * Math.PI * 2 + Math.random() * .3, pts = [[S / 2, S / 2]];
+      let r = 0, a = a0; while (r < S * .48) { r += 10 + Math.random() * 18; a += (Math.random() - .5) * .35; pts.push([S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r]); }
+      rays.push(pts);
+    }
+    const stroke = (w, col) => {
+      g.strokeStyle = col; g.lineWidth = w;
+      for (const pts of rays) { g.beginPath(); pts.forEach(([x, y], k) => k ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke(); }
+      for (const rr of [.12, .24, .36]) {               // rings joining neighbouring rays
+        g.beginPath();
+        rays.forEach((pts, k) => { const p = pts[Math.min(pts.length - 1, Math.round(pts.length * rr / .48))]; k ? g.lineTo(...p) : g.moveTo(...p); });
+        g.closePath(); g.stroke();
+      }
+    };
+    stroke(4, 'rgba(40,50,80,.35)'); stroke(1.6, 'rgba(255,255,255,.95)');
+    g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.arc(S / 2, S / 2, 7, 0, Math.PI * 2); g.fill();
+    crackTex = new THREE.CanvasTexture(cv); crackTex.colorSpace = THREE.SRGBColorSpace;
+    return crackTex;
+  }
+  const frostMat = () => new THREE.MeshPhysicalMaterial({ color: 0xE8F4FA, roughness: .5, transparent: true, opacity: .82, side: THREE.DoubleSide, depthWrite: false });
+  // car: the model group built by car(); it carries userData.body (mesh) and userData.glass.
+  function state(g) {
+    const u = g.userData;
+    if (!u.dmg) u.dmg = { dents: [], decals: [], glass: {}, geo: null, origGeo: null };
+    return u.dmg;
+  }
+  function ensureGeo(g) {
+    const S = state(g), body = g.userData.body;
+    if (!S.geo) { S.origGeo = body.geometry; S.geo = tessellate(body.geometry, .11); S.rest = S.geo.attributes.position.array.slice(); body.geometry = S.geo; }
+    return S.geo;
+  }
+  const toModel = (p) => new THREE.Vector3(-p[2], p[1], p[0]);
+  // Push vertices near the impact inward, with a crumpled, faceted falloff.
+  function dent(g, d) {
+    const body = g.userData.body; if (!body) return;
+    const geo = ensureGeo(g), pos = geo.attributes.position, arr = pos.array;
+    const P = toModel(d), N = toModel([d[3], d[4], d[5]]).normalize(), R = d[6] * 1.7, depth = d[6] * .45;
+    const v = new THREE.Vector3(), w = new THREE.Vector3();
+    for (let i = 0; i < arr.length; i += 3) {
+      v.set(arr[i], arr[i + 1], arr[i + 2]); w.copy(v).sub(P);
+      const along = w.dot(N); if (along < -.35 || along > .5) continue;
+      const lat = w.addScaledVector(N, -along).length(); if (lat > R) continue;
+      const k = 1 - lat / R, fall = k * k * (3 - 2 * k);
+      const crinkle = .75 + .5 * Math.abs(Math.sin(arr[i] * 37.1 + arr[i + 1] * 51.7 + arr[i + 2] * 23.3));
+      arr[i] -= N.x * depth * fall * crinkle; arr[i + 1] -= N.y * depth * fall * crinkle; arr[i + 2] -= N.z * depth * fall * crinkle;
+    }
+    pos.needsUpdate = true; geo.computeVertexNormals(); geo.computeBoundingSphere();
+    // a scuff where the paint got scraped
+    const sc = new THREE.Mesh(new THREE.CircleGeometry(d[6] * .9, 10), new THREE.MeshBasicMaterial({ color: 0x3A3550, transparent: true, opacity: .22, depthWrite: false }));
+    sc.position.copy(P).addScaledVector(N, .02 - depth * .6); sc.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), N); sc.rotation.z += Math.random() * 3;
+    sc.scale.set(1, .6 + Math.random() * .5, 1); g.add(sc); state(g).decals.push(sc);
+  }
+  function crack(g, pane, level, at) {
+    const gl = g.userData.glass && g.userData.glass[pane]; if (!gl) return;
+    const S = state(g), prev = S.glass[pane] || 0; if (level <= prev) return;
+    S.glass[pane] = level;
+    const n = gl.n.clone();
+    const P = at ? toModel(at) : gl.m.getWorldPosition(new THREE.Vector3()).applyMatrix4(new THREE.Matrix4().copy(g.matrixWorld).invert());
+    const decal = (size, p) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: crackTexture(), transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+      m.position.copy(p).addScaledVector(n, .012); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      m.rotateZ(Math.random() * Math.PI * 2); g.add(m); S.decals.push(m); return m;
+    };
+    if (level >= 1 && prev < 1) decal(.55, P);
+    if (level >= 2) {
+      if (!gl.orig) gl.orig = gl.m.material;
+      gl.m.material = frostMat();
+      const c = gl.m.getWorldPosition(new THREE.Vector3()).applyMatrix4(new THREE.Matrix4().copy(g.matrixWorld).invert());
+      decal(1.1, c); decal(.8, P);
+    }
+  }
+  function apply(g, m) {
+    if (!g) return;
+    if (m.dent) dent(g, m.dent);
+    if (m.glass) crack(g, m.glass, m.level, m.at);
+  }
+  function applyAll(g, dmg) {
+    if (!g || !dmg) return;
+    for (const d of dmg.dents || []) dent(g, d);
+    for (const [pane, lvl] of Object.entries(dmg.glass || {})) crack(g, pane, lvl, null);
+  }
+  function reset(g) {
+    const S = g && g.userData.dmg; if (!S) return;
+    if (S.origGeo) { g.userData.body.geometry = S.origGeo; S.geo.dispose(); }
+    for (const d of S.decals) { g.remove(d); d.geometry.dispose(); }
+    for (const pane in g.userData.glass || {}) { const gl = g.userData.glass[pane]; if (gl.orig) { gl.m.material = gl.orig; gl.orig = null; } }
+    g.userData.dmg = null;
+  }
+  return { apply, applyAll, reset };
+})();
+
 // ===================== multiplayer client (GAME-77) =====================
 // Runs inside the look-test module, so it reuses its scene, shader and asset builders.
 // The server owns the world; this file draws it, predicts your own vagrant, and
@@ -1806,6 +1933,8 @@ const NET = (() => {
   // ---------- entities ----------
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
   const fixtures = new Map();        // fixture id -> desc
+  const fixtureCars = new Map();     // parked car fixture id -> its model group (car damage)
+  const carGroupOf = id => { const v = ents.get(id); return (v && v.obj && v.obj.userData.carG) || fixtureCars.get(id) || null; };
   let me = null, myPid = null, meta = null, ws = null, grabbing = null;
   const INTERP_MS = 110;
   let clockOffset = null;            // serverTime - performance.now()
@@ -1966,9 +2095,10 @@ const NET = (() => {
     const before = city.children.length, nb = world.bodies.length;
     car(0, 0, 0, new THREE.Color(hex).getHex());
     const g = city.children[before]; city.remove(g);
+    if (CAR_GROUPS[CAR_GROUPS.length - 1] === g) CAR_GROUPS.pop();   // only parked cars stay listed
     while (world.bodies.length > nb) world.removeBody(world.bodies[world.bodies.length - 1]);
     g.position.set(0, -0.7, 0); g.rotation.set(0, Math.PI / 2, 0);   // model is long along x, nose at -x
-    const w = new THREE.Group(); w.add(g); return w;
+    const w = new THREE.Group(); w.add(g); w.userData.carG = g; return w;
   }
   function buildProp(e) {
     if (e.type !== 'crate' && e.type !== 'cone') return PROPS.build(e);   // GAME-87 movable props
@@ -1979,7 +2109,15 @@ const NET = (() => {
   }
   function spawn(e) {
     if (ents.has(e.id)) despawn(e.id);
-    if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
+    if (e.kind === 'fixture') {
+      fixtures.set(e.id, e);
+      if (e.type === 'car') {   // find the parked car model it belongs to, and show its damage
+        let best = null, bd = 9;
+        for (const g of CAR_GROUPS) { const d = (g.position.x - e.pos[0]) ** 2 + (g.position.z - e.pos[2]) ** 2; if (d < bd) { bd = d; best = g; } }
+        if (best) { fixtureCars.set(e.id, best); CARDMG.reset(best); CARDMG.applyAll(best, e.dmg); }
+      }
+      return;
+    }
     if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); return; }
     let obj, extra = {};
     if (e.kind === 'vagrant' || e.kind === 'sleeper' || e.kind === 'npc') {
@@ -1999,9 +2137,11 @@ const NET = (() => {
     else if (e.kind === 'bottle') obj = bottleMesh();
     else return;
     scene.add(obj);
+    if (obj.userData.carG && e.dmg) CARDMG.applyAll(obj.userData.carG, e.dmg);
     ents.set(e.id, { ...e, obj, buf: [], ...extra });
   }
   function despawn(id) {
+    if (fixtureCars.has(id)) { CARDMG.reset(fixtureCars.get(id)); fixtureCars.delete(id); }
     const v = ents.get(id);
     if (v) { if (v.obj) scene.remove(v.obj); if (v.body) world.removeBody(v.body); if (v.rag) removeRagBodies(v.rag); }
     if (id === me && ownRag) { scene.remove(ownRag.obj); removeRagBodies(ownRag.rag); ownRag = null; }
@@ -2142,6 +2282,15 @@ const NET = (() => {
       if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
     }
+    else if (m.kind === 'cardmg') {
+      const g = carGroupOf(m.id); if (!g) return;
+      CARDMG.apply(g, m);
+      const lp = m.dent || m.at, wp = g.localToWorld(new THREE.Vector3(-lp[2], lp[1], lp[0]));
+      if (m.glass && m.level >= 2) shards(wp, 16, shardMat, .14, new THREE.Vector3(0, 1.5, 0));
+      else if (m.glass) shards(wp, 4, shardMat, .06, new THREE.Vector3(0, .8, 0));
+      else { thud(wp.toArray(), false); dust(wp, 2, 0xd8d2c4); }
+    }
+    else if (m.kind === 'carfix') CARDMG.reset(carGroupOf(m.id));
     else if (m.kind === 'hit') onHit(m);
     else if (m.kind === 'up') onUp(m);
     else if (m.kind === 'flick') FIRE.onFlick(m.id === me, m.id);

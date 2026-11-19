@@ -13,7 +13,7 @@ import pathlib, sys
 HERE = pathlib.Path(__file__).resolve().parent
 SRC = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else '/mnt/project-files/art/look-test/index.html')
 OUT = HERE.parent / 'public' / 'index.html'
-NET = (HERE / 'net-client.js').read_text()
+NET = (HERE / 'car-damage.js').read_text() + '\n' + (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
 FIGHTJS = (HERE / 'fight-client.js').read_text()
@@ -113,6 +113,9 @@ rep("put(B(.03,.42,Wd+.06),bodyHex,g,.25,1.15,0); put(B(.03,.4,Wd+.06),bodyHex,g
 rep("const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry); staticBox(x,.8,z,Math.abs(s.x)*2.2+Math.abs(s.z)*.9,.8,Math.abs(s.z)*2.2+Math.abs(s.x)*.9);",
     "const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry), ax=Math.abs(s.x), az=Math.abs(s.z); staticBox(x,.545,z,ax*2.2+az*.875,.385,az*2.2+ax*.875); staticBox(x+s.x*.25,1.165,z+s.z*.25,ax*.9+az*.8,.235,az*.9+ax*.8);")
 rep("function car(x,z,ry,bodyHex){", (HERE / 'car-cabin.js').read_text() + "\nfunction car(x,z,ry,bodyHex){")
+# Car damage: keep the body mesh separate (unbaked) so dents can deform it.
+rep("shapeExtrude(prof,Wd,bodyHex,g,.04);", "g.userData.body=shapeExtrude(prof,Wd,bodyHex,g,.04); g.userData.body.userData.nobake=1; CAR_GROUPS.push(g);")
+rep("root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined) return;", "root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined || o.userData.nobake) return;")
 
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")

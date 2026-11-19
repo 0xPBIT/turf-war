@@ -18,6 +18,8 @@ const NET = (() => {
   // ---------- entities ----------
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
   const fixtures = new Map();        // fixture id -> desc
+  const fixtureCars = new Map();     // parked car fixture id -> its model group (car damage)
+  const carGroupOf = id => { const v = ents.get(id); return (v && v.obj && v.obj.userData.carG) || fixtureCars.get(id) || null; };
   let me = null, myPid = null, meta = null, ws = null, grabbing = null;
   const INTERP_MS = 110;
   let clockOffset = null;            // serverTime - performance.now()
@@ -178,9 +180,10 @@ const NET = (() => {
     const before = city.children.length, nb = world.bodies.length;
     car(0, 0, 0, new THREE.Color(hex).getHex());
     const g = city.children[before]; city.remove(g);
+    if (CAR_GROUPS[CAR_GROUPS.length - 1] === g) CAR_GROUPS.pop();   // only parked cars stay listed
     while (world.bodies.length > nb) world.removeBody(world.bodies[world.bodies.length - 1]);
     g.position.set(0, -0.7, 0); g.rotation.set(0, Math.PI / 2, 0);   // model is long along x, nose at -x
-    const w = new THREE.Group(); w.add(g); return w;
+    const w = new THREE.Group(); w.add(g); w.userData.carG = g; return w;
   }
   function buildProp(e) {
     if (e.type !== 'crate' && e.type !== 'cone') return PROPS.build(e);   // GAME-87 movable props
@@ -191,7 +194,15 @@ const NET = (() => {
   }
   function spawn(e) {
     if (ents.has(e.id)) despawn(e.id);
-    if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
+    if (e.kind === 'fixture') {
+      fixtures.set(e.id, e);
+      if (e.type === 'car') {   // find the parked car model it belongs to, and show its damage
+        let best = null, bd = 9;
+        for (const g of CAR_GROUPS) { const d = (g.position.x - e.pos[0]) ** 2 + (g.position.z - e.pos[2]) ** 2; if (d < bd) { bd = d; best = g; } }
+        if (best) { fixtureCars.set(e.id, best); CARDMG.reset(best); CARDMG.applyAll(best, e.dmg); }
+      }
+      return;
+    }
     if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); return; }
     let obj, extra = {};
     if (e.kind === 'vagrant' || e.kind === 'sleeper' || e.kind === 'npc') {
@@ -211,9 +222,11 @@ const NET = (() => {
     else if (e.kind === 'bottle') obj = bottleMesh();
     else return;
     scene.add(obj);
+    if (obj.userData.carG && e.dmg) CARDMG.applyAll(obj.userData.carG, e.dmg);
     ents.set(e.id, { ...e, obj, buf: [], ...extra });
   }
   function despawn(id) {
+    if (fixtureCars.has(id)) { CARDMG.reset(fixtureCars.get(id)); fixtureCars.delete(id); }
     const v = ents.get(id);
     if (v) { if (v.obj) scene.remove(v.obj); if (v.body) world.removeBody(v.body); if (v.rag) removeRagBodies(v.rag); }
     if (id === me && ownRag) { scene.remove(ownRag.obj); removeRagBodies(ownRag.rag); ownRag = null; }
@@ -354,6 +367,15 @@ const NET = (() => {
       if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
     }
+    else if (m.kind === 'cardmg') {
+      const g = carGroupOf(m.id); if (!g) return;
+      CARDMG.apply(g, m);
+      const lp = m.dent || m.at, wp = g.localToWorld(new THREE.Vector3(-lp[2], lp[1], lp[0]));
+      if (m.glass && m.level >= 2) shards(wp, 16, shardMat, .14, new THREE.Vector3(0, 1.5, 0));
+      else if (m.glass) shards(wp, 4, shardMat, .06, new THREE.Vector3(0, .8, 0));
+      else { thud(wp.toArray(), false); dust(wp, 2, 0xd8d2c4); }
+    }
+    else if (m.kind === 'carfix') CARDMG.reset(carGroupOf(m.id));
     else if (m.kind === 'hit') onHit(m);
     else if (m.kind === 'up') onUp(m);
     else if (m.kind === 'flick') FIRE.onFlick(m.id === me, m.id);
