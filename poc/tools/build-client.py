@@ -17,6 +17,7 @@ NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
 FIRE = (HERE / 'fire-client.js').read_text()
+PREWARM = (HERE / 'prewarm.js').read_text()
 
 s = SRC.read_text()
 
@@ -76,6 +77,20 @@ rep("vm.position.set(.2+Math.cos(bobT*.5)*.008,-.17+Math.abs(Math.sin(bobT*.5))*
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
 
+# Frame drops (fires, first smash): adding a light at runtime changes the scene's light
+# count, and three.js then recompiles every lit shader (about 12 programs, a long freeze).
+# Fires borrow from a fixed pool of lights made at startup instead; the pool follows the
+# fires nearest the camera, so the light count never changes.
+rep("function emitter(pos,{radius=.3,fire=1,smoke=1,light=true}={}){ const e={pos:pos.clone(),radius,fire,smoke,accF:0,accS:0}; if(light){ e.light=new THREE.PointLight(0xFF8A3C,0,8,2); e.light.position.copy(pos).add(new THREE.Vector3(0,.6,0)); scene.add(e.light); } emitters.push(e); return e; }",
+    "const FIRE_LIGHTS=Array.from({length:4},()=>{ const l=new THREE.PointLight(0xFF8A3C,0,8,2); l.position.set(0,-50,0); scene.add(l); return l; }); let fireLightT=0;\n"
+    "function assignFireLights(){ const c=camera.position, live=emitters.filter(e=>e.wantsLight&&e.fire>0).sort((a,b)=>a.pos.distanceToSquared(c)-b.pos.distanceToSquared(c)); for(const e of emitters) e.light=null; FIRE_LIGHTS.forEach((l,i)=>{ const e=live[i]; if(e){ e.light=l; l.position.copy(e.pos); l.position.y+=.6; } else l.intensity=0; }); }\n"
+    "function emitter(pos,{radius=.3,fire=1,smoke=1,light=true}={}){ const e={pos:pos.clone(),radius,fire,smoke,accF:0,accS:0,wantsLight:light,light:null}; emitters.push(e); fireLightT=0; return e; }")
+rep("function updateFX(dt,t){\n", "function updateFX(dt,t){\n  if((fireLightT-=dt)<=0){ fireLightT=.25; assignFireLights(); }\n")
+# Shard geometry is made per shard; free it when old debris is dropped (it leaked GPU memory).
+rep("const m=new THREE.Mesh(g,mat); m.castShadow=true;", "const m=new THREE.Mesh(g,mat); m.castShadow=true; m.userData.ownGeo=true;")
+rep("if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); }",
+    "if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); if(o.m.userData.ownGeo) o.m.geometry.dispose(); }")
+
 # Burnable trees and bushes (GAME-86): each one stays out of the city bake as its own small
 # baked group in burnGroup, listed in BURN with the id the server uses ("t:N", build order).
 rep("function lumpy(rad,sd){", "const burnGroup=new THREE.Group(); scene.add(burnGroup); const BURN=[];\nfunction lumpy(rad,sd){")
@@ -90,7 +105,7 @@ rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAc
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + FIRE + '\n' + NET + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + FIRE + '\n' + NET + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

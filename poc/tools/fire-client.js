@@ -16,6 +16,7 @@ const FIRE = (() => {
     { leafA: 'tx:leafA|' + 0x4A3A2C, leafB: 'tx:leafB|' + 0x3E3026, pole: 'tx:pole|' + 0x3A2E28 },   // charring
     { leafA: 'tx:leafA|' + 0x24201E, leafB: 'tx:leafB|' + 0x1C1918, pole: 'tx:pole|' + 0x221D1B },   // burnt black
   ];
+  for (const st of STAGES) for (const k of Object.values(st)) getMat(k);   // same shader as live leaves: no new program
   const partOf = key => typeof key === 'string' ? key.slice(3).split('|')[0] : null;
   function prepare(b) {
     if (b.parts) return;
@@ -46,9 +47,9 @@ const FIRE = (() => {
     if (b.state === 'burning') return;
     b.state = 'burning'; b.t = 0;
     const tree = b.type === 'tree';
-    // light:false until the shared fire-light pool lands (no per-fire lights, see "Fix frame drops").
-    b.fx = emitter(b.canopy, { radius: (tree ? 1.1 : .55) * b.s, fire: .1, smoke: .2, light: false });
-    if (tree) b.base = emitter(new THREE.Vector3(b.x, .15, b.z), { radius: .3 * b.s, fire: .1, smoke: 0, light: false });
+    // Fires share the fixed FIRE_LIGHTS pool (never a new light, so no shader recompile).
+    b.fx = emitter(b.canopy, { radius: (tree ? 1.1 : .55) * b.s, fire: .1, smoke: .2 });
+    if (tree) b.base = emitter(new THREE.Vector3(b.x, .15, b.z), { radius: .3 * b.s, fire: .1, smoke: 0, light: false });   // trunk flames: glow comes from the canopy fire
   }
   function stop(e) { if (!e) return; e.fire = 0; e.smoke = 0; const i = emitters.indexOf(e); if (i >= 0) emitters.splice(i, 1); }
   function charNow(b) {         // seen already burnt (joined late): go straight to the husk
