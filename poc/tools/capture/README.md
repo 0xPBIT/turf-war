@@ -72,3 +72,11 @@ a pose, walk there in a capture and read `__cap.pose`, or try candidates with `-
   Shots sit on sidewalks to keep cars out of the foreground.
 - If a change renames `camera.rotation.set(pitch,yaw,0,'YXZ');` or the final `tick();</script>`
   in the client, update the anchors in `inject()` in `capture.mjs`; the tool fails loudly.
+
+## Hands check (GAME-98)
+
+`node tools/capture/hands-check.mjs <poc dir> <out dir>` shoots the first-person hands at the
+store in five states: idle, the panhandle and warm clips, knocked out, and ragdolled by a car.
+It fakes the server's `ko` / `hit` messages for your own player and steps game time with the
+hook, so it is a quick way to check that only one set of hands is ever on screen. Run it on a
+`git worktree` of the deploy branch for the "before" side. `ONLY=ko` shoots just the knockout.

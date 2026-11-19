@@ -205,5 +205,5 @@ const FIRE = (() => {
 
   window.__look = (y, p) => { yaw = y; pitch = p; };   // test hooks for in-engine screenshots
   window.__burn = BURN;
-  return { update, onMeta, onInv, onFlick, verb, get lighter() { return lighter; } };
+  return { update, onMeta, onInv, onFlick, verb, get lighter() { return lighter; }, get flicking() { return flickT > 0; } };
 })();
