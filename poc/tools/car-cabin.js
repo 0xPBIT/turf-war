@@ -1,6 +1,7 @@
 // GAME-83: see-through car cabin. Model frame of car(): nose at -x, width along z,
 // beltline at y ~.95, roof at 1.4. Glass is its own (unbaked) transparent mesh.
 let carGlassMat = null;
+const CAR_GROUPS = [];   // parked cars' model groups, so car damage can find them
 function carGlass(m){ if(!carGlassMat){ carGlassMat = glassMat.clone(); carGlassMat.color.set(0x8CC6E6); carGlassMat.opacity = .42; carGlassMat.side = THREE.DoubleSide; }
   m.material = carGlassMat; delete m.userData.c; m.castShadow = false; m.receiveShadow = false; return m; }
 function carPane(parent, a, b, w){   // a flat pane spanning the car's width between two (x,y) points
@@ -28,11 +29,14 @@ function carCabin(g, Wd, bodyHex){
   put(B(.44,.1,Wd-.28,.03), SEAT, g, .88, .74, 0);
   put(B(.1,.42,Wd-.28,.03), SEAT, g, 1.1, .97, 0, { rz: -.25 });
   // glass: windshield, back glass, side windows
-  carPane(g, [-.93,.94], [-.39,1.365], Wd-.1);
-  carPane(g, [1.47,1.0], [.83,1.365], Wd-.1);
+  // panes and their outward normals (model frame), for cracks (car-damage.js)
+  const paneN = m => { const n = new THREE.Vector3(0,1,0).applyQuaternion(m.quaternion); return n.x > 0 && n.y < 0 ? n.negate() : n.y < 0 ? n.negate() : n; };
+  const front = carPane(g, [-.93,.94], [-.39,1.365], Wd-.1), back = carPane(g, [1.47,1.0], [.83,1.365], Wd-.1);
+  g.userData.glass = { front: { m: front, n: paneN(front) }, back: { m: back, n: paneN(back) } };
   for(const s of [-1,1]){
     const w = shapeExtrude([[-.9,.95],[-.4,1.345],[.8,1.345],[1.44,1.0]], .012, 0xFFFFFF, g);
     w.position.z = s*(hw+.005); carGlass(w);
+    g.userData.glass[s < 0 ? 'left' : 'right'] = { m: w, n: new THREE.Vector3(0, 0, s) };
   }
   // a bright streak on the windshield so it reads as glass from far away
   const streakMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: .5, depthWrite: false });
