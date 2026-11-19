@@ -1023,12 +1023,12 @@ function carHits(car, now) {
       combat.hurt(e, Math.min(100, Math.round(25 + speed * 9)), { by: car.entity, cause: 'car' });   // no push: the ragdoll already flies
       car.lastHit = now; any = true;
       // dent the nose where it met them
-      const nose = { x: carPos(car).x + f.x * CAR_HALF_LEN, y: 0.75, z: carPos(car).z + f.z * CAR_HALF_LEN };
-      if (l.axis === 'x') nose.z = t.z; else nose.x = t.x;
+      // (the old lane-axis code read an undefined `l` here and crashed the server on every hit)
+      const sd = Math.max(-CAR_HALF_W, Math.min(CAR_HALF_W, side)), sx = -g.d.dz * sd, sz = g.d.dx * sd;
+      const nose = { x: carPos(car).x + f.x * CAR_HALF_LEN + sx, y: cy + 0.75, z: carPos(car).z + f.z * CAR_HALF_LEN + sz };
       carDamage(car.entity, [nose.x, nose.y, nose.z], [f.x * speed, 0, f.z * speed], 0.2 + speed * 0.03, null, 'hit');
       if (speed > 5) {   // they rolled up onto the windshield
-        const ws = { x: carPos(car).x + f.x * 0.65, y: 1.15, z: carPos(car).z + f.z * 0.65 };
-        if (l.axis === 'x') ws.z = t.z; else ws.x = t.x;
+        const ws = { x: carPos(car).x + f.x * 0.65 + sx * 0.8, y: cy + 1.15, z: carPos(car).z + f.z * 0.65 + sz * 0.8 };
         carDamage(car.entity, [ws.x, ws.y, ws.z], [f.x, -1, f.z], 0.3, null, 'hit');
       }
       console.log(`[town] ${car.id} hit ${e.player.name} at ${speed.toFixed(1)} m/s`);
