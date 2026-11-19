@@ -96,10 +96,12 @@ function removeEntity(id) {
 function describe(e) {
   const d = { id: e.id, kind: e.kind, type: e.type };
   if (e.player) Object.assign(d, { name: e.player.name, color: e.player.color, pid: e.player.id });
+  if (e.grabbing) d.grabbing = e.grabbing;
   if (e.fixedPos) d.pos = e.fixedPos;
   if (e.color) d.color = e.color;
   if (e.index !== undefined) d.index = e.index;
-  if (e.spec) { d.s = e.spec.s; d.hex = e.spec.hex; }
+  if (e.spec) { d.s = e.spec.s; d.hex = e.spec.hex; if (e.spec.color) d.color = e.spec.color; }
+  if (e.cat) { d.half = e.cat.half; d.r = e.cat.r; d.hh = e.cat.hh; d.drag = e.cat.drag; d.label = e.cat.label; }
   return d;
 }
 
@@ -107,6 +109,7 @@ function describe(e) {
 // windows, parked cars). The client already draws them; the server owns their state.
 const fixtureCount = {};
 MAP.colliders.forEach((c, i) => {
+  if (c.loose) return; // drawn and simulated as a movable prop instead (see props)
   let collider, extraColliders;
   if (c.tag === 'car') {
     // Parked cars: same hood + cabin shape as traffic, so you can climb onto them.
@@ -124,22 +127,86 @@ for (const w of MAP.windows) {
   const collider = colliderFor({ p: w.p, q: w.q, box: w.half });
   addEntity({ id: w.id, kind: 'fixture', type: 'window', collider, fixedPos: w.p, index: w.gi, value: w.value, state: {} });
 }
-// Props: crates and cones are dynamic bodies. Their resting spots persist.
-const PROP_SHAPES = {
-  crate: (pr) => RAPIER.ColliderDesc.cuboid(pr.s / 2, pr.s / 2, pr.s / 2).setMass(2),
-  cone: () => RAPIER.ColliderDesc.cylinder(0.38, 0.2).setMass(0.8),
+// ---------- loose props (GAME-87) ----------
+// Everything that is not fixed to the world is a dynamic body the server simulates:
+// players shove it by walking into it, grab and drag it (G), knock it over with
+// bottles or cars. Where it comes to rest is saved, so it stays put for everyone.
+// To make a map prop movable, add one line to town.json "props":
+//   { "id": "o:cart3", "type": "cart", "p": [x, y, z], "ry": 0.7 }      (y = body centre; "q" for full rotation)
+// Unknown types still work if the entry gives "half": [hx, hy, hz] and "mass" (drawn as a plain box).
+// Resting bodies sleep: they cost no physics time and are never sent in snapshots.
+//   half: box half extents, or r + hh for an upright cylinder.  com: centre of mass offset (low = hard to tip).
+//   drag: walk speed multiplier while you drag it.  label: name in the grab prompt.
+const PROP_TYPES = {
+  crate:    { half: [0.35, 0.35, 0.35], mass: 2,   friction: 0.6,  restitution: 0.25, drag: 1,    label: 'crate' },
+  cone:     { r: 0.2, hh: 0.38,         mass: 0.8, friction: 0.6,  restitution: 0.25, drag: 1,    label: 'cone' },
+  cart:     { half: [0.33, 0.55, 0.52], mass: 14,  friction: 0.06, restitution: 0.15, drag: 0.95, label: 'shopping cart', com: [0, -0.3, 0], linDamp: 0.35, angDamp: 1.5, handle: [0, 0.5, -0.52] },
+  mattress: { half: [0.95, 0.11, 0.7],  mass: 12,  friction: 1.0,  restitution: 0.05, drag: 0.85, label: 'mattress', linDamp: 0.6, angDamp: 1.2 },
+  couch:    { half: [1.42, 0.6, 0.54],  mass: 40,  friction: 0.9,  restitution: 0.05, drag: 0.6,  label: 'couch', com: [0, -0.2, 0], linDamp: 0.6, angDamp: 1.5 },
+  box:      { half: [0.3, 0.22, 0.24],  mass: 1.2, friction: 0.7,  restitution: 0.1,  drag: 1,    label: 'cardboard box', ccd: true },
+  trashcan: { r: 0.32, hh: 0.45,        mass: 5,   friction: 0.6,  restitution: 0.2,  drag: 0.95, label: 'trash can', com: [0, -0.15, 0] },
 };
+function propType(pr) {
+  if (pr.type === 'crate') return { ...PROP_TYPES.crate, half: [pr.s / 2, pr.s / 2, pr.s / 2] };
+  return PROP_TYPES[pr.type] || { half: pr.half || [0.3, 0.3, 0.3], mass: pr.mass || 5, friction: 0.7, restitution: 0.1, drag: 0.9, label: pr.label || pr.type };
+}
+function propRotation(pr) {
+  if (pr.q) return { x: pr.q[0], y: pr.q[1], z: pr.q[2], w: pr.q[3] };
+  const a = (pr.ry || 0) / 2;
+  return { x: 0, y: Math.sin(a), z: 0, w: Math.cos(a) };
+}
+function propCollider(cat) {
+  let desc, I;
+  if (cat.half) {
+    const [x, y, z] = cat.half.map(v => v * 2), m = cat.mass;
+    desc = RAPIER.ColliderDesc.cuboid(...cat.half);
+    I = { x: m / 12 * (y * y + z * z), y: m / 12 * (x * x + z * z), z: m / 12 * (x * x + y * y) };
+  } else {
+    const m = cat.mass, h = cat.hh * 2;
+    desc = RAPIER.ColliderDesc.cylinder(cat.hh, cat.r);
+    I = { x: m / 12 * (3 * cat.r * cat.r + h * h), y: m / 2 * cat.r * cat.r, z: m / 12 * (3 * cat.r * cat.r + h * h) };
+  }
+  const com = cat.com || [0, 0, 0];
+  desc.setMassProperties(cat.mass, { x: com[0], y: com[1], z: com[2] }, I, { x: 0, y: 0, z: 0, w: 1 });
+  return desc.setFriction(cat.friction).setRestitution(cat.restitution);
+}
+const savedKey = pr => 'o:' + pr.id.slice(2);
 function spawnProp(pr, fresh) {
-  const saved = !fresh && save.objects['o:' + pr.id.slice(2)];
+  const cat = propType(pr);
+  const saved = !fresh && save.objects[savedKey(pr)];
   const desc = RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(...(saved ? saved.p : pr.p)).setLinearDamping(0.3).setAngularDamping(0.5);
-  if (saved) desc.setRotation({ x: saved.q[0], y: saved.q[1], z: saved.q[2], w: saved.q[3] });
+    .setTranslation(...(saved ? saved.p : pr.p))
+    .setRotation(saved ? { x: saved.q[0], y: saved.q[1], z: saved.q[2], w: saved.q[3] } : propRotation(pr))
+    .setLinearDamping(cat.linDamp ?? 0.3).setAngularDamping(cat.angDamp ?? 0.5)
+    .setCcdEnabled(!!cat.ccd);
   const body = world.createRigidBody(desc);
-  const collider = world.createCollider(PROP_SHAPES[pr.type](pr).setFriction(0.6).setRestitution(0.25), body);
+  const collider = world.createCollider(propCollider(cat), body);
   body.sleep();
-  return addEntity({ id: pr.id, kind: 'prop', type: pr.type, body, collider, mass: pr.type === 'crate' ? 2 : 0.8, spec: pr, state: {} });
+  return addEntity({ id: pr.id, kind: 'prop', type: pr.type, body, collider, mass: cat.mass, cat, spec: pr, unsettled: !saved, state: {} });
 }
 for (const pr of MAP.props) spawnProp(pr);
+// Props placed by hand in town.json may float or overlap a little. Let new ones settle
+// once at startup so they are already lying still when the first player arrives.
+(function settleNewProps() {
+  const fresh = [...entities.values()].filter(e => e.kind === 'prop' && e.unsettled);
+  if (!fresh.length) return;
+  for (const e of fresh) e.body.wakeUp();
+  world.timestep = 1 / 60;
+  for (let i = 0; i < 180 && fresh.some(e => !e.body.isSleeping()); i++) world.step();
+  for (const e of fresh) { e.unsettled = false; e.body.sleep(); }
+})();
+// Something knocked out of the world (through a gap, off the map) goes back to its spot.
+function rescueLostProps() {
+  for (const e of entities.values()) {
+    if (e.kind !== 'prop' || e.body.isSleeping()) continue;
+    const t = e.body.translation();
+    if (t.y > -5 && t.x > minX - 5 && t.x < maxX + 5 && t.z > minZ - 5 && t.z < maxZ + 5) continue;
+    const pr = e.spec;
+    e.body.setTranslation({ x: pr.p[0], y: pr.p[1], z: pr.p[2] }, true);
+    e.body.setRotation(propRotation(pr), true);
+    e.body.setLinvel({ x: 0, y: 0, z: 0 }, true); e.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+}
 
 // ---------- players ----------
 const controller = world.createCharacterController(0.05);
@@ -257,7 +324,7 @@ function interact(s) {
   const now = Date.now();
   if (now - (s.lastAct || 0) < 600) return;
   s.lastAct = now;
-  const target = nearest(e, 3, o => o.kind === 'fixture' && ACTIONS[o.type] && !HIT_ONLY.has(o.type));
+  const target = nearest(e, 3, o => (o.kind === 'fixture' || o.kind === 'prop') && ACTIONS[o.type] && !HIT_ONLY.has(o.type));
   if (!target) return;
   const a = ACTIONS[target.type];
   const busyUntil = target.state.busyUntil || 0;
@@ -326,9 +393,13 @@ function grab(s) {
   if (!target) return;
   const a = e.body.translation(), b = target.body.translation();
   const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1;
-  const reach = 1.1;
-  const anchorOnPlayer = { x: dx / d * reach, y: 0.2, z: dz / d * reach };
-  const data = RAPIER.JointData.spherical(anchorOnPlayer, { x: 0, y: 0, z: 0 });
+  const reach = target.cat && target.cat.half ? Math.min(1.6, 0.8 + Math.max(target.cat.half[0], target.cat.half[2]) * 0.5) : 1.1;
+  // Carts sit at hand height; everything else is held low, at the waist, so it doesn't block your view.
+  const anchorOnPlayer = { x: dx / d * reach, y: target.cat && target.cat.handle ? 0.2 : -0.3, z: dz / d * reach };
+  // Carts are pushed by the handle; everything else is held by its middle.
+  const h = target.cat && target.cat.handle;
+  const anchorOnTarget = h ? { x: h[0], y: h[1], z: h[2] } : { x: 0, y: 0, z: 0 };
+  const data = RAPIER.JointData.spherical(anchorOnPlayer, anchorOnTarget);
   target.body.wakeUp();
   e.joint = world.createImpulseJoint(data, e.body, target.body, true);
   e.grabbing = target.id;
@@ -624,7 +695,7 @@ function stepPlayers() {
     let speed = inp.run ? RUN : WALK;
     if (e.grabbing) {
       const g = entities.get(e.grabbing);
-      if (g && g.mass) speed *= Math.max(0.25, Math.min(1, 60 / g.mass)); // heavy things slow you down
+      if (g) speed *= g.cat ? g.cat.drag : g.kind === 'sleeper' ? 60 / 70 : 1; // heavy things slow you down
     }
     e.vy += GRAVITY * step;
     const desired = { x: mx * speed * step, y: e.vy * step, z: mz * speed * step };
@@ -657,6 +728,7 @@ function physicsTick() {
     if (e.kind === 'bottle' && now - e.born > 6000) removeEntity(e.id);
   }
   tick++;
+  if (tick % PHYSICS_HZ === 0) rescueLostProps();
   if (tick % (PHYSICS_HZ / SNAPSHOT_HZ) === 0) sendSnapshot(false);
   if (tick % (PHYSICS_HZ / META_HZ) === 0) sendMeta();
 }
@@ -667,6 +739,7 @@ function snapshotRows(all) {
   for (const e of entities.values()) {
     if (!e.body) continue;
     if (!all && e.body.isSleeping()) continue;
+    if (e.kind === 'prop' && !e.body.isSleeping()) e.moved = true;
     const t = e.body.translation(), q = e.body.rotation();
     const r = [e.id, +t.x.toFixed(2), +t.y.toFixed(2), +t.z.toFixed(2), +q.x.toFixed(3), +q.y.toFixed(3), +q.z.toFixed(3), +q.w.toFixed(3)];
     if (e.kind === 'vagrant') r.push(+(e.facing || 0).toFixed(2));
@@ -720,7 +793,7 @@ function persistWorld() {
   for (const e of entities.values()) {
     if (!e.body) continue;
     const t = e.body.translation(), q = e.body.rotation();
-    if (e.kind === 'prop') save.objects[e.id] = { p: [t.x, t.y, t.z], q: [q.x, q.y, q.z, q.w] };
+    if (e.kind === 'prop' && (e.moved || !save.objects[e.id])) { save.objects[e.id] = { p: [t.x, t.y, t.z], q: [q.x, q.y, q.z, q.w] }; e.moved = !e.body.isSleeping(); }
     if (e.kind === 'sleeper') Object.assign(e.player, { x: t.x, y: t.y, z: t.z, q: [q.x, q.y, q.z, q.w] });
   }
   writeSave();

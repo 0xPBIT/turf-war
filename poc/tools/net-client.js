@@ -34,8 +34,9 @@ const NET = (() => {
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
   // It is built unbaked and split into six limbs so it can ragdoll (GAME-83).
   function buildVagrant(e) {
-    const realBake = bake; bake = () => {};
-    let p; try { p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e) }); } finally { bake = realBake; }
+    const armRig = [], realBake = bake; bake = () => {};
+    let p; try { p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e), armRig }); } finally { bake = realBake; }
+    p.arms = armRig;
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
     rig(p);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
@@ -62,13 +63,19 @@ const NET = (() => {
     const g = p.g; g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.updateMatrixWorld(true);
     const box = new THREE.Box3(), c = new THREE.Vector3();
     if (!p.parts) {
-      const parts = {};
+      const parts = {}, arms = p.arms && p.arms.length === 2 ? p.arms : null;   // GAME-87 arm pivots (at the shoulders), left first
       for (const k in JOINTS) parts[k] = new THREE.Group();
+      if (arms) { parts.armL = arms[0]; parts.armR = arms[1]; }
       for (const ch of [...g.children]) {
+        if (arms && arms.includes(ch)) continue;
         box.setFromObject(ch); if (box.isEmpty()) continue; box.getCenter(c);
-        const k = partOf(c); ch.position.sub(new THREE.Vector3(...JOINTS[k])); parts[k].add(ch);
+        let k = partOf(c); if (arms && k.startsWith('arm')) k = 'torso';
+        ch.position.sub(new THREE.Vector3(...JOINTS[k])); parts[k].add(ch);
       }
-      for (const k in parts) { bake(parts[k]); parts[k].position.set(...JOINTS[k]); g.add(parts[k]); }
+      for (const k in parts) {   // bake each limb at the origin, then put it back at its joint
+        const pv = parts[k], at = arms && k.startsWith('arm') ? pv.position.clone() : new THREE.Vector3(...JOINTS[k]);
+        g.remove(pv); pv.position.set(0, 0, 0); pv.rotation.set(0, 0, 0); pv.updateMatrixWorld(true); bake(pv); pv.position.copy(at); g.add(pv);
+      }
       p.parts = parts;
     }
     // Physics box per limb from its bounds; offset = box centre relative to the joint.
@@ -173,6 +180,7 @@ const NET = (() => {
     const w = new THREE.Group(); w.add(g); return w;
   }
   function buildProp(e) {
+    if (e.type !== 'crate' && e.type !== 'cone') return PROPS.build(e);   // GAME-87 movable props
     const n = dyn.length;
     if (e.type === 'crate') crate(0, 0, 0, e.s, e.hex); else cone(0, 0);
     const d = dyn.splice(n, 1)[0]; world.removeBody(d.b); d.m.position.set(0, 0, 0);
@@ -186,7 +194,7 @@ const NET = (() => {
     if (e.kind === 'vagrant' || e.kind === 'sleeper') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
       const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag);
-      extra = { model: v, tag };
+      extra = { model: v, tag, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
     } else if (e.kind === 'traffic') {
       obj = buildCar(e.color);
@@ -276,7 +284,7 @@ const NET = (() => {
       corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
     }
   }
-  const speedScale = () => { const g = grabbing && ents.get(grabbing); return g && g.kind === 'sleeper' ? 60 / 70 : 1; };
+  const speedScale = () => { const g = grabbing && ents.get(grabbing); return !g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1); };
 
   // ---------- fixtures and effects ----------
   let dumpFire = null;
@@ -297,7 +305,7 @@ const NET = (() => {
     const p = new THREE.Vector3(...at);
     for (let k = 0; k < 7; k++) {
       const len = s * (.5 + Math.random() * .5), wd = s * (.14 + Math.random() * .12);
-      const pm = new THREE.Mesh(new THREE.BoxGeometry(len, s * .07, wd), k % 3 === 0 ? getMat(hex) : woodMat); if (k % 3 === 0) pm.userData.c = hex; pm.castShadow = pm.receiveShadow = true;
+      const pm = new THREE.Mesh(new THREE.BoxGeometry(len, s * .07, wd), k % 3 === 0 ? getMat(hex) : woodMat); pm.userData.ownGeo = true; if (k % 3 === 0) pm.userData.c = hex; pm.castShadow = pm.receiveShadow = true;
       pm.position.set(p.x + (Math.random() - .5) * s, p.y + (Math.random() - .5) * s, p.z + (Math.random() - .5) * s);
       const pb = new CANNON.Body({ mass: .25, shape: new CANNON.Box(new CANNON.Vec3(len / 2, s * .035, wd / 2)) }); pb.position.set(pm.position.x, pm.position.y, pm.position.z);
       pb.quaternion.setFromEuler(Math.random() * 3, Math.random() * 3, Math.random() * 3);
@@ -337,7 +345,10 @@ const NET = (() => {
       if (m.target === me) feed(m.rage ? 'The driver has had enough of you. <b>Move!</b>' : 'A car is honking at you. Get out of the street!');
     }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
-    else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
+    else if (m.kind === 'grab') {
+      if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
+      const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
+    }
     else if (m.kind === 'hit') onHit(m);
     else if (m.kind === 'up') onUp(m);
     else if (m.kind === 'hurt') {
@@ -453,6 +464,39 @@ const NET = (() => {
     }
   }
 
+  // ---------- grab / push / drag animation (GAME-87) ----------
+  // Other players: both arms swing up and forward to the thing they hold, with a quick
+  // lunge as they grab it; the body leans into it and the arms pump while they haul it.
+  function animateArms(v, dt, moving) {
+    const want = v.grabbing ? 1 : 0;
+    v.reach += (want - v.reach) * (1 - Math.exp(-dt * (want ? 10 : 6)));
+    v.lunge = Math.max(0, v.lunge - dt * 3.5);
+    const lunge = Math.sin(v.lunge * Math.PI) * .35;
+    const haul = v.grabbing && moving ? Math.sin(v.walk * 1.0) * .12 : 0;
+    const swing = !v.grabbing && moving ? Math.sin(v.walk) * .35 : 0;   // normal walk arm swing
+    v.model.arms.forEach((pv, i) => {
+      const side = i ? 1 : -1;
+      pv.rotation.x = -(1.25 + lunge) * v.reach + (haul * side) + swing * side * (1 - v.reach);
+      pv.rotation.z = side * .18 * v.reach;                            // hands come in toward the middle
+    });
+    v.model.g.rotation.x = (.16 + lunge * .3) * v.reach;                 // lean into it
+  }
+  // You (first person): the hand drops the bottle out of view, shoots forward to grab,
+  // then holds a tight grip that strains and shakes a little while you drag.
+  let vmGrab = 0, vmLunge = 0, vmT = 0;
+  function vmPose(dt, moving) {
+    vmGrab += ((grabbing ? 1 : 0) - vmGrab) * (1 - Math.exp(-dt * 9));
+    vmLunge = Math.max(0, vmLunge - dt * 3.2); vmT += dt;
+    const g = vmGrab, l = Math.sin(vmLunge * Math.PI);
+    const strain = grabbing && moving ? 1 : grabbing ? .3 : 0;
+    vm.position.x += -.06 * g + Math.sin(vmT * 31) * .003 * strain;
+    vm.position.y += -.05 * g + Math.sin(vmT * 7) * .012 * strain;
+    vm.position.z += -.16 * g - .12 * l;
+    vm.rotation.x += .5 * g - .25 * l;
+    vm.rotation.z = -.6 * g + Math.sin(vmT * 23) * .02 * strain;
+    if (g > .25) heldBottle.visible = false;
+  }
+
   // ---------- per-frame ----------
   const cur = new THREE.Vector3();
   function frame(dt, t) {
@@ -469,6 +513,7 @@ const NET = (() => {
         v.model.g.position.y = -0.9 + (moving ? Math.abs(Math.sin(v.walk)) * .05 : 0);
         v.model.g.rotation.z = moving ? Math.sin(v.walk) * .04 : 0;
         v.model.head.rotation.z = Math.sin(t * 1.3 + v.model.ph) * .08;
+        animateArms(v, dt, moving);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
@@ -494,9 +539,14 @@ const NET = (() => {
   }
 
   // ---------- actions ----------
+  // Props can carry an action too (the couch); they are wherever they were left.
+  function* actionables() {
+    yield* fixtures.values();
+    for (const v of ents.values()) if (v.kind === 'prop' && v.obj) yield { id: v.id, type: v.type, pos: [v.obj.position.x, v.obj.position.y, v.obj.position.z] };
+  }
   function nearestAction() {
     if (!MAP) return null; let best = null, bd = 9;
-    for (const f of fixtures.values()) {
+    for (const f of actionables()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
       const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt)) continue;
@@ -504,11 +554,28 @@ const NET = (() => {
     }
     return best;
   }
-  function updatePrompt(btn) {
-    const f = nearestAction(); btn.hidden = !f;
-    if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
+  // Anything loose within reach can be grabbed and dragged (same reach as the server).
+  function nearestGrabbable() {
+    let best = null, bd = 2.6 * 2.6;
+    for (const v of ents.values()) {
+      if ((v.kind !== 'prop' && v.kind !== 'sleeper') || !v.obj) continue;
+      const d = (v.obj.position.x - player.position.x) ** 2 + (v.obj.position.z - player.position.z) ** 2; if (d < bd) { bd = d; best = v; }
+    }
+    return best;
   }
-  const act = () => { if (ws && ws.readyState === 1 && !ownRag) ws.send('{"t":"act"}'); };
+  const keyLabel = k => esc(k.startsWith('Key') ? k.slice(3) : k);
+  let promptMode = null;
+  function updatePrompt(btn) {
+    const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
+    promptMode = f ? 'act' : g ? 'grab' : null; btn.hidden = !promptMode;
+    let html = '';
+    if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+    else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
+    if (html && btn.innerHTML !== html) btn.innerHTML = html;
+  }
+  const sendAct = () => { if (ws && ws.readyState === 1 && !ownRag) ws.send('{"t":"act"}'); };
+  const sendGrab = () => { if (ws && ws.readyState === 1 && !ownRag) ws.send('{"t":"grab"}'); };
+  const act = () => (promptMode === 'grab' ? sendGrab : sendAct)();   // the on-screen button does whatever it says
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   function throwDir(dir) {
@@ -524,8 +591,8 @@ const NET = (() => {
   });
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (SET.isBind('act', e.code) || e.code === 'KeyF') act();
-    if (SET.isBind('grab', e.code) && ws && ws.readyState === 1) ws.send('{"t":"grab"}');
+    if (SET.isBind('act', e.code) || e.code === 'KeyF') sendAct();
+    if (SET.isBind('grab', e.code)) sendGrab();
   });
 
   // ---------- connection ----------
@@ -568,5 +635,7 @@ const NET = (() => {
     // Debug: ragdoll someone locally without the server (vel/spin as in fx 'hit').
     ragdoll(id, vel = [6, 4, 0], spin = [0, 0, -8]) { const v = ents.get(id); if (v && v.model) { startRagdoll(v, vel, spin); v.rag.noPull = true; } },
     getUp(id) { const v = ents.get(id); if (v && v.rag) getUpRagdoll(v); } };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, grounded, knockedCamera };
+  // Read-only view of the networked world for the mini map (GAME-80).
+  const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view, grounded, knockedCamera };
 })();
