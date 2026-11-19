@@ -99,7 +99,7 @@ const NET = (() => {
     type = type || null;
     if (type === myHeld && heldSlot.children.length === (type ? 1 : 0)) return;
     myHeld = type; heldSlot.clear();
-    if (type) { const m = ITEMS.mesh(type, 1); m.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } }); heldSlot.add(m); }
+    if (type) { const m = ITEMS.mesh(type, 1); ITEMS.inHand(m, type); m.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } }); heldSlot.add(m); }
   }
   // Other vagrants: a lean (pick up, dig) or an arm swing (throw) played on their model.
   function remoteAnim(id, kind) { const v = ents.get(id); if (v && v.model) v.ranim = { kind, t: 0, dur: ANIM_DUR[kind] * 1.3 }; }
@@ -445,6 +445,8 @@ const NET = (() => {
     setTimeout(() => el('nameInput').focus(), 50);
   }
   window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get held() { return myHeld; }, get target() { return itemTarget && itemTarget.id; }, send,
+    previewHeld(t) { setMyHeld(t); },
+    throwNow() { lastPointer = 'touch'; throwDir(camera.getWorldDirection(new THREE.Vector3())); },
     lookAt(x, z, p = -.5) { yaw = Math.atan2(-(x - player.position.x), -(z - player.position.z)); pitch = p; } };
   return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim };
 })();

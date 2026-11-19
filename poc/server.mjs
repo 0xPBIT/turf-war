@@ -327,7 +327,7 @@ function pickup(s, id) {
 function pocketItem(e, key) {
   const items = e.player.items ||= {};
   if (key === 'lighter') items.lighter = { fuel: Math.max(10, items.lighter?.fuel || 0) };
-  else if (key === 'pliers') items.pliers = true;
+  else if (key === 'pliers') items.pliers = { uses: 3 };
   else items[key] = (items[key] || 0) + 1;
   saveDirty = true;
   broadcast({ t: 'fx', kind: 'pocket', id: e.id, key, name: POCKET_TYPES[key]?.name || key });
