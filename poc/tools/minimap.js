@@ -297,7 +297,7 @@ const MINI = (() => {
     if (o.round) {   // inner ink ring + soft inner shade
       const sh = g.createRadialGradient(ox, oy, R * .78, ox, oy, R); sh.addColorStop(0, 'rgba(46,35,80,0)'); sh.addColorStop(1, 'rgba(46,35,80,.22)');
       g.fillStyle = sh; g.beginPath(); g.arc(ox, oy, R, 0, 7); g.fill();
-      g.lineWidth = 1.5; g.strokeStyle = 'rgba(46,35,80,.5)'; g.beginPath(); g.arc(ox, oy, R - .75, 0, 7); g.stroke();
+      g.lineWidth = 1.5; g.strokeStyle = 'rgba(46,35,80,.5)'; g.beginPath(); g.arc(ox, oy, Math.max(0, R - .75), 0, 7); g.stroke();
     }
   }
 

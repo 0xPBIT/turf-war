@@ -10,7 +10,8 @@ const NET = (() => {
   const money = n => '$' + Math.round(n).toLocaleString('en-US');
 
   // The server has walls at the town edge; mirror them so prediction agrees.
-  for (const [x, z, hx, hz] of [[-60.5, 0, .5, 70], [60.5, 0, .5, 70], [0, -60.5, 70, .5], [0, 60.5, 70, .5]]) staticBox(x, 5, z, hx, 10, hz);
+  { const B = TOWN.BOUNDS, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2, hx = (B.maxX - B.minX) / 2 + 1, hz = (B.maxZ - B.minZ) / 2 + 1;
+    for (const [x, z, ex, ez] of [[B.minX - .5, cz, .5, hz], [B.maxX + .5, cz, .5, hz], [cx, B.minZ - .5, hx, .5], [cx, B.maxZ + .5, hx, .5]]) { const b = staticBox(x, 5, z, ex, 10, ez); if (b) b.twEdge = true; } }
 
   // The look test's three static vagrants are server-driven NPCs now (GAME-85).
   for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
@@ -318,6 +319,7 @@ const NET = (() => {
       if (b[i].t <= t) {
         const a = b[i], c = b[i + 1];
         if (!c) return a;                                  // hold the last known state
+        if (a.p.distanceToSquared(c.p) > 900) return c;      // teleported: no glide across town
         const k = (t - a.t) / (c.t - a.t);
         const out = { p: a.p.clone().lerp(c.p, k), q: _q.copy(a.q).slerp(c.q, k).clone() };
         if (a.f !== undefined && c.f !== undefined) { let d = c.f - a.f; d = Math.atan2(Math.sin(d), Math.cos(d)); out.f = a.f + d * k; }
@@ -372,7 +374,7 @@ const NET = (() => {
   const speedScale = () => { const g = grabbing && ents.get(grabbing); return (!g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1)) * FIGHT.speedScale(); };
 
   // ---------- fixtures and effects ----------
-  let dumpFire = null;
+  const dumpFires = new Map();       // fixture id -> emitter
   function paneFor(f) { return glassPanes[f.index]; }
   // Glass breaks from where it was hit (GAME-84, tools/glass.js). g = { s: seed, h: [[u, v], ...] }.
   function breakPane(t, g, quiet, v) {
@@ -548,7 +550,7 @@ const NET = (() => {
   }
 
   function onMeta(m) {
-    meta = m; damage = m.town; FIGHT.onMeta(m); COPPER.meta(m);
+    meta = m; damage = m.town; TOWN.lights(m.lights); FIGHT.onMeta(m); COPPER.meta(m);
     HYD.onMeta(m, fixtures);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
@@ -560,8 +562,9 @@ const NET = (() => {
       if (f.type === 'window') { const t = paneFor(f); if (st.g) { breakPane(t, st.g, true); if (st.board) GLASS.board(t.mesh); } else repairPane(t); }
       else if (f.type === 'pile') { const p = piles[f.index]; if (!p) continue; if (st.fire && p.state === 'idle') lightPile(p); if (!st.fire && !st.burnt && p.state !== 'idle') resetPile(p); }
       else if (f.type === 'dumpster') {
-        if (st.fire && !dumpFire) dumpFire = emitter(new THREE.Vector3(f.pos[0], 1.6, f.pos[2]), { radius: .9, fire: 1.2, smoke: 1.4 });
-        if (!st.fire && dumpFire) { dumpFire.fire = 0; dumpFire.smoke = 0; if (dumpFire.light) dumpFire.light.intensity = 0; emitters.splice(emitters.indexOf(dumpFire), 1); dumpFire = null; }
+        const df = dumpFires.get(id);
+        if (st.fire && !df) dumpFires.set(id, emitter(new THREE.Vector3(f.pos[0], 1.6, f.pos[2]), { radius: .9, fire: 1.2, smoke: 1.4 }));
+        if (!st.fire && df) { df.fire = 0; df.smoke = 0; if (df.light) df.light.intensity = 0; emitters.splice(emitters.indexOf(df), 1); dumpFires.delete(id); }
       }
     }
   }

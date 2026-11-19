@@ -33,6 +33,8 @@ function loadSave() {
   catch { return { accounts: {}, players: {}, town: { damage: 0 }, heat: {}, owners: {}, objects: {} }; }
 }
 const save = loadSave();
+// Turf from zones that no longer exist on this map (the town grew, GAME-81) is dropped.
+{ const ids = new Set(MAP.zones.map(z => z.id)); for (const k of ['heat', 'owners']) for (const id of Object.keys(save[k] || {})) if (!ids.has(id)) delete save[k][id]; }
 let saveDirty = false;
 function writeSave() {
   fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
@@ -48,9 +50,10 @@ const fixed = (x, y, z, hx, hy, hz) => {
   return world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.8), b);
 };
 const { minX, maxX, minZ, maxZ } = MAP.bounds;
-fixed(0, -0.5, 0, (maxX - minX) / 2, 0.5, (maxZ - minZ) / 2); // ground
-fixed(minX - 0.5, 5, 0, 0.5, 10, 70); fixed(maxX + 0.5, 5, 0, 0.5, 10, 70);
-fixed(0, 5, minZ - 0.5, 70, 10, 0.5); fixed(0, 5, maxZ + 0.5, 70, 10, 0.5);
+fixed((minX + maxX) / 2, -0.5, (minZ + maxZ) / 2, (maxX - minX) / 2 + 2, 0.5, (maxZ - minZ) / 2 + 2); // ground
+{ const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, hx = (maxX - minX) / 2 + 1, hz = (maxZ - minZ) / 2 + 1;
+  fixed(minX - 0.5, 5, cz, 0.5, 10, hz); fixed(maxX + 0.5, 5, cz, 0.5, 10, hz);
+  fixed(cx, 5, minZ - 0.5, hx, 10, 0.5); fixed(cx, 5, maxZ + 0.5, hx, 10, 0.5); }
 // Colliders come from the art look test, in the order the client builds them.
 const colliderFor = (c) => {
   const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(c.p[0], c.p[1], c.p[2]);
@@ -861,8 +864,9 @@ const dt = 1 / PHYSICS_HZ;
 world.timestep = dt;
 
 // ---------- traffic ----------
-// AI cars are kinematic bodies on one-way lanes. They obey lights and stop signs,
-// stop for anyone in the street ahead, and honk if you keep standing there.
+// AI cars are kinematic bodies that follow routes (polylines on road centrelines, driven in
+// the right-hand lane). They obey lights and stop signs, stop for anyone in the street ahead,
+// and honk if you keep standing there. Old maps with one-way "lanes" still work.
 const TRAFFIC = MAP.traffic || { lanes: [], intersections: [], cars: 0 };
 const CRUISE = 8, ACCEL = 4, BRAKE = 10, CAR_HALF_LEN = 2.25, CAR_HALF_W = 0.9;
 const lightStart = Date.now();
@@ -875,55 +879,89 @@ function lightPhase(ix) {
   if (t < 2 * c.green + c.yellow) return { x: 'red', z: 'green' };
   return { x: 'red', z: 'yellow' };
 }
-const laneCrossings = new Map(); // lane id -> intersections it crosses, with stop line positions
-for (const lane of TRAFFIC.lanes) {
-  const list = [];
-  for (const ix of TRAFFIC.intersections) {
-    const crossCoord = lane.axis === 'x' ? ix.z : ix.x;
-    const crossHalf = lane.axis === 'x' ? ix.hz : ix.hx;
-    if (Math.abs(lane.at - crossCoord) > crossHalf) continue;
-    const center = lane.axis === 'x' ? ix.x : ix.z;
-    const half = lane.axis === 'x' ? ix.hx : ix.hz;
-    list.push({ ix, stopAt: center - lane.dir * (half + CAR_HALF_LEN + 0.6), exitAt: center + lane.dir * (half + CAR_HALF_LEN) });
+const ROUTES = (TRAFFIC.routes || []).map(r => ({ ...r, off: r.offset ?? TRAFFIC.laneOffset ?? 1.75 }));
+for (const l of TRAFFIC.lanes || []) { // legacy one-way lane: already offset, straight
+  const p = s => l.axis === 'x' ? [s, l.at] : [l.at, s];
+  ROUTES.push({ id: l.id, pts: [p(l.from), p(l.to)], off: 0 });
+}
+for (const r of ROUTES) {
+  r.y = r.y || 0;
+  const dirs = [];
+  for (let i = 0; i + 1 < r.pts.length; i++) {
+    const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az);
+    dirs.push({ dx: (bx - ax) / L, dz: (bz - az) / L });
   }
-  laneCrossings.set(lane.id, list);
+  // right of heading (dx,dz) is (-dz,dx); corners sit where the offset lines meet
+  const offPt = (i) => {
+    const [x, z] = r.pts[i]; let ox = 0, oz = 0;
+    for (const d of [dirs[i - 1], dirs[i]]) if (d) { ox += -d.dz * r.off; oz += d.dx * r.off; }
+    const a = dirs[i - 1], b = dirs[i];
+    if (a && b && Math.abs(a.dx * b.dx + a.dz * b.dz) > 0.99) { ox /= 2; oz /= 2; } // straight-through point
+    return [x + ox, z + oz];
+  };
+  r.segs = dirs.map((d, i) => {
+    const a = offPt(i), b = offPt(i + 1), len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const seg = { a, d, len, axis: Math.abs(d.dx) > Math.abs(d.dz) ? 'x' : 'z', yaw: Math.atan2(d.dx, d.dz), cross: [] };
+    if (!r.noStop) for (const ix of TRAFFIC.intersections) {
+      const rx = ix.x - a[0], rz = ix.z - a[1];
+      const along = rx * d.dx + rz * d.dz, side = rx * -d.dz + rz * d.dx;
+      const half = seg.axis === 'x' ? ix.hx : ix.hz, sideHalf = seg.axis === 'x' ? ix.hz : ix.hx;
+      if (Math.abs(side) > sideHalf + 1 || along < half * 0.6 || along > len + half + 1) continue; // we start inside it, or never reach it
+      seg.cross.push({ ix, stopAt: along - (half + CAR_HALF_LEN + 0.6), exitAt: along + half + CAR_HALF_LEN });
+    }
+    return seg;
+  });
+  r.total = r.segs.reduce((n, g) => n + g.len, 0);
 }
 const cars = [];
 const CAR_COLORS = ['#FF8A7A', '#26D3A0', '#3FB8FF', '#FFC93C', '#8F6BFF', '#FF6E9E'];
 function carPos(car) {
-  const l = car.lane;
-  return l.axis === 'x' ? { x: car.s, z: l.at } : { x: l.at, z: car.s };
+  const g = car.route.segs[car.seg];
+  return { x: g.a[0] + g.d.dx * car.s, z: g.a[1] + g.d.dz * car.s };
+}
+function carYaw(car) {
+  const g = car.route.segs[car.seg];
+  if (car.seg === 0 || car.s > 4) return g.yaw;
+  let prev = car.route.segs[car.seg - 1].yaw, dy = g.yaw - prev;
+  while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+  return prev + dy * (0.5 + 0.5 * car.s / 4);
+}
+const yawQuat = (yaw) => ({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) });
+function placeAt(car, dist) {
+  car.seg = 0; car.s = dist;
+  while (car.seg < car.route.segs.length - 1 && car.s > car.route.segs[car.seg].len) { car.s -= car.route.segs[car.seg].len; car.seg++; }
 }
 function spawnCars() {
-  const n = TRAFFIC.cars || 0, lanes = TRAFFIC.lanes;
+  if (!ROUTES.length) return;
+  const n = TRAFFIC.cars || 0;
   for (let i = 0; i < n; i++) {
-    const lane = lanes[i % lanes.length];
-    const k = Math.floor(i / lanes.length);
-    const span = lane.to - lane.from;
-    const car = { id: 'c:' + i, lane, s: lane.from + span * (0.15 + 0.37 * k + 0.11 * (i % 3)), v: CRUISE * 0.5, stopState: {}, lastHonk: 0, blockedSince: 0 };
+    const route = ROUTES[i % ROUTES.length], k = Math.floor(i / ROUTES.length);
+    const car = { id: 'c:' + i, route, seg: 0, s: 0, v: CRUISE * 0.5, stopState: {}, lastHonk: 0, blockedSince: 0 };
+    placeAt(car, route.total * ((0.12 + 0.41 * k + 0.13 * (i % 3)) % 0.95));
     const p = carPos(car);
-    const yaw = lane.axis === 'x' ? (lane.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (lane.dir > 0 ? 0 : Math.PI);
-    car.rot = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
-    const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, 0.7, p.z).setRotation(car.rot));
+    car.rot = yawQuat(carYaw(car));
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, route.y + 0.7, p.z).setRotation(car.rot));
     const [collider, ...extraColliders] = carColliders(body, 0.7);
     car.entity = addEntity({ id: car.id, kind: 'traffic', type: 'car', body, collider, extraColliders, state: {}, color: CAR_COLORS[i % CAR_COLORS.length] });
     cars.push(car);
   }
 }
-// Distance along the lane to the first thing in our path (vagrants, sleepers, cars).
-function obstacleAhead(car, look, ignorePeople = false) {
-  const l = car.lane;
+// Distance along our heading to the first thing in our path (vagrants, sleepers, cars).
+// ignorePeople: a raging driver (GAME-83); skipSleepers: shoving a sleeper out of the road.
+function obstacleAhead(car, look, ignorePeople = false, skipSleepers = false) {
+  const g = car.route.segs[car.seg], p = carPos(car), y = car.route.y + 0.7;
   let best = Infinity, vagrant = null;
   for (const e of entities.values()) {
     if (e === car.entity || !e.body) continue;
     if (!['vagrant', 'sleeper', 'traffic'].includes(e.kind)) continue; // cones and crates just get knocked aside
     if (ignorePeople && e.kind !== 'traffic') continue;
+    if (skipSleepers && e.kind === 'sleeper') continue;
     const t = e.body.translation();
-    const along = (l.axis === 'x' ? t.x - car.s : t.z - car.s) * l.dir;
-    const side = l.axis === 'x' ? t.z - l.at : t.x - l.at;
-    if (e.kind !== 'traffic' && t.y > 3.4) continue;              // up on a roof or a bridge, not in the road
+    if (Math.abs(t.y - y) > 2.5 && (e.kind === 'traffic' || car.route.y > 2 || t.y > 3.4)) continue; // the Skyway and the street below ignore each other; people up on a roof are not in the road
+    const rx = t.x - p.x, rz = t.z - p.z;
+    const along = rx * g.d.dx + rz * g.d.dz, side = rx * -g.d.dz + rz * g.d.dx;
     // Someone standing on this car: it won't drive off with them, it sits and honks.
-    if (e.kind === 'vagrant' && t.y > CAR_HOOD_TOP + 0.5 && Math.abs(along) < CAR_HALF_LEN + 0.3 && Math.abs(side) < CAR_HALF_W + 0.3) { best = Math.min(best, 0); vagrant = e; continue; }
+    if (e.kind === 'vagrant' && t.y > y - 0.7 + CAR_HOOD_TOP + 0.5 && Math.abs(along) < CAR_HALF_LEN + 0.3 && Math.abs(side) < CAR_HALF_W + 0.3) { best = Math.min(best, 0); vagrant = e; continue; }
     const r = e.kind === 'traffic' ? CAR_HALF_LEN : 0.6;
     if (along <= 0 || along > look + CAR_HALF_LEN + r || Math.abs(side) > CAR_HALF_W + 0.7) continue;
     const gap = along - CAR_HALF_LEN - r;
@@ -938,19 +976,20 @@ function obstacleAhead(car, look, ignorePeople = false) {
 const HIT_SPEED = 2.5, RAGE_MS = 8000, EBRAKE = BRAKE * 1.5, REACT_MS = 350;
 function carHits(car, now) {
   if (Math.abs(car.v) < HIT_SPEED) return false;
-  const l = car.lane, sgn = Math.sign(car.v) * l.dir;
-  const f = l.axis === 'x' ? { x: sgn, z: 0 } : { x: 0, z: sgn };
+  const g = car.route.segs[car.seg], sgn = Math.sign(car.v), p = carPos(car), cy = car.route.y;
+  const f = { x: g.d.dx * sgn, z: g.d.dz * sgn };
   let any = false;
   for (const s of sessions.values()) {
     const e = s.entity;
     if (e.down) continue;
     const t = e.body.translation();
-    const along = (l.axis === 'x' ? t.x - car.s : t.z - car.s) * l.dir;
-    const side = l.axis === 'x' ? t.z - l.at : t.x - l.at;
+    if (Math.abs(t.y - (cy + 0.7)) > 2.5) continue;             // Skyway vs street
+    const rx = t.x - p.x, rz = t.z - p.z;
+    const along = rx * g.d.dx + rz * g.d.dz, side = rx * -g.d.dz + rz * g.d.dx;
     if (Math.abs(along) > CAR_HALF_LEN + CAP_R + 0.05 || Math.abs(side) > CAR_HALF_W + CAP_R + 0.05) continue;
-    if (t.y > CAR_HOOD_TOP + CAP_HALF + CAP_R - 0.15) continue;   // standing on the hood, not in front of it
+    if (t.y > cy + CAR_HOOD_TOP + CAP_HALF + CAP_R - 0.15) continue;   // standing on the hood, not in front of it
     const speed = Math.abs(car.v), ss = Math.sign(side) || 1;
-    const perp = l.axis === 'x' ? { x: 0, z: ss } : { x: ss, z: 0 };
+    const perp = { x: -g.d.dz * ss, z: g.d.dx * ss };
     const out = 1 + speed * 0.15;
     const vel = [f.x * speed * 1.15 + perp.x * out, 2 + speed * 0.45, f.z * speed * 1.15 + perp.z * out];
     const roll = speed * 1.3;                                      // tumble head over heels away from the car
@@ -974,17 +1013,18 @@ function carHits(car, now) {
 }
 function stepTraffic(now) {
   for (const car of cars) {
-    const l = car.lane;
+    const g = car.route.segs[car.seg];
     let limit = Infinity; // distance we may still travel
-    // intersections
-    for (const c of laneCrossings.get(l.id)) {
-      const toLine = (c.stopAt - car.s) * l.dir;
-      if (toLine < -0.3) { if ((c.exitAt - car.s) * l.dir < 0) car.stopState[c.ix.id] = null; continue; }
+    // intersections on this leg
+    for (const c of g.cross) {
+      const toLine = c.stopAt - car.s;
+      if (toLine < -0.3) continue; // past the line: keep going
       if (c.ix.control === 'light') {
-        const ph = lightPhase(c.ix)[l.axis];
+        const ph = lightPhase(c.ix)[g.axis];
         if (ph === 'red' || (ph === 'yellow' && toLine > 6)) limit = Math.min(limit, toLine);
       } else if (c.ix.control === 'stop') {
-        const st = car.stopState[c.ix.id] || (car.stopState[c.ix.id] = { stoppedAt: 0, go: false });
+        const key = car.seg + ':' + c.ix.id;
+        const st = car.stopState[key] || (car.stopState[key] = { stoppedAt: 0, go: false });
         if (!st.go) {
           if (toLine < 0.4 && car.v < 0.2) {
             st.stoppedAt ||= now;
@@ -998,7 +1038,11 @@ function stepTraffic(now) {
     // people and cars in the street
     const rage = car.rage;
     const look = 4 + car.v * car.v / (2 * BRAKE) + 2;
-    const ob = obstacleAhead(car, look, rage && rage.phase === 'go');
+    // Someone asleep in the road: honk, wait, then creep forward and shove them aside
+    // (otherwise one sleeper jams the whole intersection behind it for good).
+    const shoving = !rage && car.blockedBySleeper && now - car.blockedSince > 8000;
+    const ob = obstacleAhead(car, look, rage && rage.phase === 'go', shoving);
+    car.blockedBySleeper = !!(ob.vagrant && ob.vagrant.kind === 'sleeper') || (shoving && !!obstacleAhead(car, 3).vagrant);
     if (ob.vagrant) car.sawPersonAt ||= now; else car.sawPersonAt = 0;
     const reacting = ob.vagrant && now - car.sawPersonAt < REACT_MS;  // driver hasn't hit the brakes yet
     if (ob.gap < Infinity && !reacting) limit = Math.min(limit, ob.gap - 1.2);
@@ -1006,21 +1050,23 @@ function stepTraffic(now) {
       car.blockedSince ||= now;
       if (now - car.blockedSince > 900 && now - car.lastHonk > 2200) {
         car.lastHonk = now;
-        const long = now - car.blockedSince > 5000;
-        broadcast({ t: 'fx', kind: 'honk', id: car.id, long, at: [carPos(car).x, 1, carPos(car).z], target: ob.vagrant.id });
+        const long = now - car.blockedSince > 5000, p = carPos(car);
+        broadcast({ t: 'fx', kind: 'honk', id: car.id, long, at: [p.x, car.route.y + 1, p.z], target: ob.vagrant.id });
       }
       // Fed up: back up a few metres, then floor it.
       const tgt = ob.vagrant;
-      if (now - car.blockedSince > RAGE_MS && tgt.kind === 'vagrant' && !tgt.down && ob.gap > -0.5 && tgt.body.translation().y < CAR_HOOD_TOP + 0.5) {
+      if (now - car.blockedSince > RAGE_MS && tgt.kind === 'vagrant' && !tgt.down && ob.gap > -0.5 && tgt.body.translation().y < car.route.y + CAR_HOOD_TOP + 0.5) {
+        const p = carPos(car);
         car.rage = { phase: 'back', until: now + 1000 };
         car.blockedSince = 0; car.lastHonk = now;
-        broadcast({ t: 'fx', kind: 'honk', id: car.id, long: true, rage: true, at: [carPos(car).x, 1, carPos(car).z], target: tgt.id });
+        broadcast({ t: 'fx', kind: 'honk', id: car.id, long: true, rage: true, at: [p.x, car.route.y + 1, p.z], target: tgt.id });
       }
-    } else if (!rage) car.blockedSince = 0;
+    } else if (!rage && !shoving) car.blockedSince = 0;
     // hits happen at the speed the car arrives with
     const hit = carHits(car, now);
-    // speed
-    const want = Math.min(CRUISE, Math.sqrt(2 * BRAKE * Math.max(0, limit)));
+    // speed (slow for corners)
+    const last = car.seg === car.route.segs.length - 1;
+    const want = Math.min(shoving ? 1.5 : CRUISE, Math.sqrt(2 * BRAKE * Math.max(0, limit)), last ? CRUISE : 4 + 0.5 * Math.max(0, g.len - car.s));
     if (rage && rage.phase === 'back') {
       car.v = Math.max(-2.2, car.v - ACCEL * 2 * dt);
       if (now > rage.until) rage.phase = 'go', rage.until = now + 3500;
@@ -1037,18 +1083,23 @@ function stepTraffic(now) {
       const skidding = hit || now - (car.lastHit || 0) < 1200;
       if (limit <= 0 && (!personBound || (!skidding && (car.v < HIT_SPEED || ob.gap <= 0.05)))) car.v = 0;
     }
-    car.s += car.v * dt * l.dir;
-    // loop back to the lane start at the map edge, if the start is clear
-    if ((car.s - l.to) * l.dir > 0) {
-      const clear = !cars.some(o => o !== car && o.lane === l && Math.abs(o.s - l.from) < 8);
-      if (clear) { car.s = l.from; car.stopState = {}; } else car.s = l.to;
+    car.s = Math.max(0, car.s + car.v * dt);                         // backing up never leaves this leg
+    if (car.s > g.len) {
+      if (!last) { car.s -= g.len; car.seg++; }
+      else { // back to the route start (out in the haze), if it is clear
+        const r = car.route;
+        const clear = !cars.some(o => o !== car && o.route === r && o.seg === 0 && o.s < 8);
+        if (clear) { car.seg = 0; car.s = 0; car.stopState = {}; car.rage = null; } else car.s = g.len;
+      }
     }
     const p = carPos(car);
-    car.entity.body.setNextKinematicTranslation({ x: p.x, y: 0.7, z: p.z });
+    car.entity.body.setNextKinematicTranslation({ x: p.x, y: car.route.y + 0.7, z: p.z });
+    car.entity.body.setNextKinematicRotation(yawQuat(carYaw(car)));
     car.entity.state.braking = car.v < want - 0.05 || car.v < 0.1;
   }
 }
 function insideIx(car, ix) {
+  if (car.route.y > 2) return false;
   const p = carPos(car);
   return Math.abs(p.x - ix.x) < ix.hx + CAR_HALF_LEN && Math.abs(p.z - ix.z) < ix.hz + CAR_HALF_LEN;
 }
