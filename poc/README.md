@@ -45,3 +45,24 @@ npm start          # http://localhost:3000
 Open two browser windows (one private) to see two players. Settings: `PORT`, `GRACE_MS` (default 5000), `HEAT_HALF_LIFE_S` (default 600), `DATA_FILE` (default `data/town-v2.json`).
 
 Shortcuts taken on purpose (the real build follows the design doc): JSON over plain `ws` instead of Colyseus and binary snapshots, a JSON save file instead of Postgres, single-capsule sleepers instead of ragdolls, and the small look-test corner instead of the full GAME-74 map.
+
+## Player animations (GAME-92)
+
+Every interaction needs an animation, in first person and for other players. Use the shared
+helper in `tools/anim.js` (it lands in the client as `ANIM`, and as `window.__anim` in the console).
+
+1. Define a clip next to the others at the bottom of `tools/anim.js`:
+   ```js
+   ANIM.define('dig', { dur: 1.2,               // seconds; loop: true + cancelOnMove: true for idles
+     fp: (k, t, m) => ({ x, y, z, rx, ry, rz, camY, camPitch, hideHeld }),   // your glove hand + camera
+     tp: (k, t, m) => ({ y, fwd, lean, turn, tilt, armR: [x,y,z], armL, legR, legL, torso, head, hideHeld, world }) });
+   ```
+   `k` runs 0 to 1 through the clip; every number is an offset from rest and is faded in and out for you.
+   `ANIM.keys([[0,0],[.3,1],[1,0]])(k)` makes a smooth curve. Arm or leg rotation x < 0 swings it forward.
+2. Server: call `playAnim(entity, 'dig', extra)` where the interaction happens. Everyone else sees it on
+   that player's vagrant; `extra` arrives as `m` in the clip.
+3. Client: call `ANIM.play('dig')` on the key press so your own hand moves at once (the server echo is skipped).
+
+Other players' vagrants are split into `p.parts = { torso, head, armL, armR, legL, legR }` (pivots at
+the joints, rest rotation identity, feet at the origin facing +z), walk and run from their speed, and
+hold their item (`v.heldObj`) in the -x glove, on the arm. Clips never add lights or materials.

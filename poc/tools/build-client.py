@@ -13,7 +13,7 @@ import pathlib, sys
 HERE = pathlib.Path(__file__).resolve().parent
 SRC = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else '/mnt/project-files/art/look-test/index.html')
 OUT = HERE.parent / 'public' / 'index.html'
-NET = (HERE / 'net-client.js').read_text()
+NET = (HERE / 'car-damage.js').read_text() + '\n' + (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
 ITEMS = (HERE / 'items-client.js').read_text()
@@ -24,6 +24,7 @@ PROPS = (HERE / 'props.js').read_text()
 MINI = (HERE / 'minimap.js').read_text()
 FIRE = (HERE / 'fire-client.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
+ANIMJS = (HERE / 'anim.js').read_text()
 COPPER = (HERE / 'copper.js').read_text()
 CHARS = (HERE / 'characters.js').read_text()
 
@@ -131,6 +132,9 @@ rep("put(B(.03,.42,Wd+.06),bodyHex,g,.25,1.15,0); put(B(.03,.4,Wd+.06),bodyHex,g
 rep("const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry); staticBox(x,.8,z,Math.abs(s.x)*2.2+Math.abs(s.z)*.9,.8,Math.abs(s.z)*2.2+Math.abs(s.x)*.9);",
     "const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry), ax=Math.abs(s.x), az=Math.abs(s.z); staticBox(x,.545,z,ax*2.2+az*.875,.385,az*2.2+ax*.875); staticBox(x+s.x*.25,1.165,z+s.z*.25,ax*.9+az*.8,.235,az*.9+ax*.8);")
 rep("function car(x,z,ry,bodyHex){", (HERE / 'car-cabin.js').read_text() + "\nfunction car(x,z,ry,bodyHex){")
+# Car damage: keep the body mesh separate (unbaked) so dents can deform it.
+rep("shapeExtrude(prof,Wd,bodyHex,g,.04);", "g.userData.body=shapeExtrude(prof,Wd,bodyHex,g,.04); g.userData.body.userData.nobake=1; CAR_GROUPS.push(g);")
+rep("root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined) return;", "root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined || o.userData.nobake) return;")
 
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
@@ -186,18 +190,6 @@ s = s[:i] + "\nTOWN.afterPeople();" + s[i:]
 # Sun shadows follow the player across town.
 rep("  camera.rotation.set(pitch,yaw,0,'YXZ');\n", "  camera.rotation.set(pitch,yaw,0,'YXZ');\n  TOWN.cam();\n")
 rep("  NET.frame(dt, t);\n", "  NET.frame(dt, t);\n  TOWN.frame(dt, t);\n")
-# GAME-87: other players' arms can move. With o.armRig, vagrant() builds each arm on its
-# own shoulder pivot (not baked into the body) so the client can swing them forward to
-# grab, push and drag things.
-rep("""  } else {
-    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""",
-"""  } else if(o.armRig){
-    for(const [i,s] of [[0,-1],[1,1]]){ const pv=new THREE.Group(), rel=v=>[v[0]-sh[i][0],v[1]-sh[i][1],v[2]-sh[i][2]], e=rel([s*.29,1.06,-.02]), w=rel([s*.3,.82,.08]);
-      limb([0,0,0],e,.06,.065,'tx:canvas|'+o.coat,pv); limb(e,w,.05,.058,'tx:canvas|'+o.coat,pv); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,pv,...w); glove(pv,rel([s*.3,.76,.09]),[0,-1,.15],o,false);
-      bake(pv); pv.position.set(...sh[i]); o.armRig.push(pv); }
-  } else {
-    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""")
-rep("  bake(head); bake(g); head.position.y=1.62; g.add(head);", "  bake(head); bake(g); head.position.y=1.62; g.add(head); if(o.armRig) for(const pv of o.armRig) g.add(pv);")
 # First-person hands reach out, grip and strain while you hold something (net-client.js vmPose).
 rep("NET.heldVisible(handKick); NET.vmAnim(dt);", "NET.heldVisible(handKick); NET.vmPose(dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);")
 
@@ -241,9 +233,15 @@ rep(",Math.sin(a)*.35*s); } }", ",Math.sin(a)*.35*s); } bake(g); g.position.set(
 # Burning plants update with the other fire effects.
 rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAct();")
 
+# Player animation (GAME-92): the first-person hand and camera take offsets from the shared
+# animation helper (tools/anim.js); other players' vagrants are posed through p.parts in net-client.
+rep("NET.vmPose(dt,ml>0);", "vm.rotation.y=0; vm.rotation.z=0; NET.vmPose(dt,ml>0); ANIM.applyFP(vm,heldBottle,dt,ml>0);")
+rep("player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()", "player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()+ANIM.camY()")
+rep("camera.rotation.set(pitch,yaw,0,'YXZ');", "camera.rotation.set(pitch+ANIM.camPitch(),yaw,0,'YXZ');")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + ANIMJS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
