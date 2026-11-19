@@ -133,6 +133,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 #status{position:fixed;z-index:25;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border-radius:18px;padding:12px 20px;font-family:var(--display);font-weight:600;font-size:18px;box-shadow:0 4px 0 rgba(20,60,140,.3);display:none}
 .pop.say{color:var(--ink);font-size:20px;-webkit-text-stroke:4px #fff}
 .pop.honk{color:#E8343F;font-size:30px}
+.pop.cash{color:#2FAE6A;font-size:30px}
 @media (pointer:coarse){ #help{display:none} }
 @media (max-width:640px){ #board{display:none} #zone{top:calc(64px + env(safe-area-inset-top,0px))} }
 #gear{position:fixed;z-index:8;right:max(12px,env(safe-area-inset-right,0px));top:calc(64px + env(safe-area-inset-top,0px));width:40px;height:40px;padding:0;font-size:20px;line-height:40px;background:rgba(255,255,255,.92);box-shadow:0 3px 0 rgba(20,60,140,.25)}
@@ -196,11 +197,16 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 #bigLegend p{margin:4px 0 0;font-size:12px;color:var(--ink-soft);font-weight:700}
 #bigMap .close{font-size:12.5px;color:var(--ink-soft);font-weight:700;margin-top:6px}
 @media (max-width:640px){ :root{--mm:124px} #miniKey{display:none} #miniInfo small{display:none} #bigMap .card{grid-template-columns:1fr} #bigMapCv{width:min(calc(100vw - 64px),calc(100vh - 260px))} }
+#inv{position:fixed;z-index:5;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(96px + env(safe-area-inset-bottom,0px));background:rgba(255,255,255,.94);border-radius:14px;padding:6px 14px;font-size:13.5px;font-weight:700;display:flex;gap:8px;align-items:center;box-shadow:0 3px 0 rgba(20,60,140,.2)}
+#inv[hidden]{display:none}
+#inv i{width:9px;height:16px;border-radius:3px;background:linear-gradient(#9AA0B6 0 28%,#D8343F 28%)}
+#inv em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
 </style>
 <div class="hud chip" id="zone"><b id="zoneName">Sunnyside</b><span id="zoneOwner">nobody owns this turf</span></div>
 <div id="board"><h3>Vagrants</h3><div id="rows"></div></div>
 <div id="feed"></div>
-<div id="help">Click to look around · <kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump<br>Click throws a bottle · <kbd>E</kbd> do the thing · <kbd>G</kbd> grab or drag<br>Close the tab and your vagrant lies down right where you are.</div>
+<div id="inv" hidden></div>
+<div id="help">Click to look around · <kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump<br><kbd>E</kbd> pick up junk or do the thing · click throws it · <kbd>Q</kbd> drop · <kbd>F</kbd> light it · <kbd>G</kbd> drag<br>Close the tab and your vagrant lies down right where you are.</div>
 <div id="status"></div>
 <div id="login"><div class="card"><h1>Turf War</h1><p>Pick a name, vagrant.</p><input id="nameInput" maxlength="16" placeholder="Sunny Steve" autocomplete="off"><button type="button" id="go">Wake up</button></div></div>
 <div id="mini" title="Your turf (M for the big map)"><canvas id="miniMap"></canvas><div id="miniN">N</div><div id="miniKey"><kbd>M</kbd> map</div></div>
@@ -641,19 +647,21 @@ house(-30,11,6,6,3.2,'tx:sidLav','tx:shTang',TRIM,Math.PI,P.tang);
 })();
 
 // ---------- trees and bushes (faceted, layered) ----------
+const burnGroup=new THREE.Group(); scene.add(burnGroup); const BURN=[];
 function lumpy(rad,sd){ const g=new THREE.SphereGeometry(rad,16,11), p=g.attributes.position, v=new THREE.Vector3();
   for(let i=0;i<p.count;i++){ v.fromBufferAttribute(p,i).normalize(); let d=1+.16*Math.sin(v.x*6+sd)*Math.sin(v.y*5+sd*1.7)*Math.sin(v.z*6+sd*.6)+.07*Math.sin(v.x*14+v.z*12+sd)+.05*Math.sin(v.y*17+v.x*9-sd); if(v.y<-.2) d*=1-(-.2-v.y)*.45; p.setXYZ(i,v.x*rad*d,v.y*rad*d*.88,v.z*rad*d); }
   g.computeVertexNormals(); return g; }
 function tree(x,z,s=1,hexA='tx:leafA'){
-  const g=grp(city,x,0,z,R()*6);
+  const g=grp(burnGroup,0,0,0), ry0=R()*6;
   put(CYL(.12*s,.22*s,2.2*s,8),'tx:pole',g,0,1.1*s,0);
   for(let k=0;k<3;k++){ const a=k/3*6.28+R(); tube([[0,1.5*s,0],[Math.cos(a)*.45*s,2.0*s,Math.sin(a)*.45*s],[Math.cos(a)*.8*s,2.5*s,Math.sin(a)*.8*s]],.06*s,'tx:pole',g,6); }
   const n=5+((R()*3)|0);
   for(let k=0;k<n;k++){ const a=k/n*6.28+R()*.6, r=(.5+R()*.4)*s, y=2.6*s+R()*1.0*s; put(lumpy((.75+R()*.35)*s,R()*50),k%3===0?'tx:leafB':hexA,g,Math.cos(a)*r,y,Math.sin(a)*r,{ry:R()*3}); }
   put(lumpy(1.15*s,R()*50),hexA,g,0,3.5*s,0);
+  bake(g); g.position.set(x,0,z); g.rotation.y=ry0; BURN.push({id:'t:'+BURN.length,type:'tree',g,x,z,s});
   const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.25*s,.25*s,2.2*s,8)}); b.position.set(x,1.1*s,z); world.addBody(b);
 }
-function bush(x,z,s=1){ const g=grp(city,x,0,z); for(let k=0;k<4;k++){ const a=R()*6.28; put(lumpy((.36+R()*.22)*s,R()*50),k%2?'tx:leafA':'tx:leafB',g,Math.cos(a)*.35*s,.3*s+R()*.2*s,Math.sin(a)*.35*s); } }
+function bush(x,z,s=1){ const g=grp(burnGroup,0,0,0); for(let k=0;k<4;k++){ const a=R()*6.28; put(lumpy((.36+R()*.22)*s,R()*50),k%2?'tx:leafA':'tx:leafB',g,Math.cos(a)*.35*s,.3*s+R()*.2*s,Math.sin(a)*.35*s); } bake(g); g.position.set(x,0,z); BURN.push({id:'t:'+BURN.length,type:'bush',g,x,z,s}); }
 [[-4,-6.7],[10.8,-6.7],[-36,-7],[-18,-6.6],[-4,6.6],[15,6.6],[26,-14],[31,-10],[-36,8],[31,14],[-6,22],[4,26],[16,22],[-24,-18],[-14,18],[28,22]].forEach(([x,z],i)=>tree(x,z,.9+((i*37)%5)/10, i%3?'tx:leafA':'tx:leafB'));
 [[-17,-8],[-25.5,-8],[-26,8],[-17,8.2],[8.6,-6.6],[18,-6.7],[-33.5,-8],[-33.5,8]].forEach(([x,z])=>bush(x,z,1+R()*.4));
 for(let i=0;i<14;i++){ const a=i/14*Math.PI*2; const r=170+(i%3)*25; const h=put(new THREE.IcosahedronGeometry(40+(i%4)*10,2),i%2?0x54D46A:P.hedge,city,Math.cos(a)*r,-14,Math.sin(a)*r,{ns:true}); h.scale.y=.55; }
@@ -687,12 +695,60 @@ for(let x=-34;x<=34;x+=17){ const g=grp(city,x,0,5.5); put(CYL(.07,.11,6.4,10),0
   sign(['NO DUMPING'],1.0,.22,'#FFFFFF','#E8343F',g,0,1.1,.81);
   staticBox(9.6,.85,-7.6,1.5,.85,.8); })();
 // detailed sedans
+// GAME-83: see-through car cabin. Model frame of car(): nose at -x, width along z,
+// beltline at y ~.95, roof at 1.4. Glass is its own (unbaked) transparent mesh.
+let carGlassMat = null;
+const CAR_GROUPS = [];   // parked cars' model groups, so car damage can find them
+function carGlass(m){ if(!carGlassMat){ carGlassMat = glassMat.clone(); carGlassMat.color.set(0x8CC6E6); carGlassMat.opacity = .42; carGlassMat.side = THREE.DoubleSide; }
+  m.material = carGlassMat; delete m.userData.c; m.castShadow = false; m.receiveShadow = false; return m; }
+function carPane(parent, a, b, w){   // a flat pane spanning the car's width between two (x,y) points
+  const dx = b[0]-a[0], dy = b[1]-a[1], len = Math.hypot(dx, dy);
+  return carGlass(put(B(len, .012, w), 0xFFFFFF, parent, (a[0]+b[0])/2, (a[1]+b[1])/2, 0, { rz: Math.atan2(dy, dx) }));
+}
+function carCabin(g, Wd, bodyHex){
+  const hw = Wd/2 - .05, SEAT = 0x4E4466, DASH = 0x2E2A40;
+  // roof and pillars (A at the windshield, B behind the doors, C at the back glass)
+  shapeExtrude([[-.4,1.35],[.82,1.35],[.86,1.42],[-.37,1.42]], Wd-.04, bodyHex, g, .02);
+  for(const s of [-1,1]){
+    limb([-.93,.93,s*hw],[-.39,1.37,s*hw], .035, .04, bodyHex, g, 6);
+    limb([1.47,.99,s*hw],[.83,1.37,s*hw], .05, .05, bodyHex, g, 6);
+    put(B(.08,.43,.05), bodyHex, g, .24, 1.15, s*hw);
+    put(B(.02,.02,.42), 0x2A3050, g, -.9, .965, s*.32, { ry: s*.35 });          // wipers
+  }
+  // inside: dash, steering wheel, front seats, back bench
+  put(B(.26,.14,Wd-.16), DASH, g, -.78, .99, 0);
+  put(new THREE.TorusGeometry(.13,.022,6,18), DASH, g, -.58, 1.08, -.36, { ry: Math.PI/2, rz: .45 });
+  for(const s of [-1,1]){
+    put(B(.44,.1,.42,.03), SEAT, g, -.12, .74, s*.37);
+    put(B(.1,.5,.42,.03), SEAT, g, .13, 1.0, s*.37, { rz: -.18 });
+    put(B(.08,.13,.26,.03), SEAT, g, .19, 1.3, s*.37, { rz: -.18 });
+  }
+  put(B(.44,.1,Wd-.28,.03), SEAT, g, .88, .74, 0);
+  put(B(.1,.42,Wd-.28,.03), SEAT, g, 1.1, .97, 0, { rz: -.25 });
+  // glass: windshield, back glass, side windows
+  // panes and their outward normals (model frame), for cracks (car-damage.js)
+  const paneN = m => { const n = new THREE.Vector3(0,1,0).applyQuaternion(m.quaternion); return n.x > 0 && n.y < 0 ? n.negate() : n.y < 0 ? n.negate() : n; };
+  const front = carPane(g, [-.93,.94], [-.39,1.365], Wd-.1), back = carPane(g, [1.47,1.0], [.83,1.365], Wd-.1);
+  g.userData.glass = { front: { m: front, n: paneN(front) }, back: { m: back, n: paneN(back) } };
+  for(const s of [-1,1]){
+    const w = shapeExtrude([[-.9,.95],[-.4,1.345],[.8,1.345],[1.44,1.0]], .012, 0xFFFFFF, g);
+    w.position.z = s*(hw+.005); carGlass(w);
+    g.userData.glass[s < 0 ? 'left' : 'right'] = { m: w, n: new THREE.Vector3(0, 0, s) };
+  }
+  // a bright streak on the windshield so it reads as glass from far away
+  const streakMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: .5, depthWrite: false });
+  for(const [z, w] of [[.3, .07], [.16, .03]]){
+    const st = put(B(.5,.004,w), 0xFFFFFF, g, -.655, 1.16, z, { rz: Math.atan2(.425,.54) }); st.position.y += .012;
+    st.material = streakMat; delete st.userData.c; st.castShadow = false;
+  }
+}
+
 function car(x,z,ry,bodyHex){
   const g=grp(city,x,0,z,ry); const L=4.4, Wd=1.75;
-  const prof=[[-2.2,.32],[-2.26,.62],[-2.12,.8],[-.95,.94],[-.35,1.4],[.8,1.4],[1.5,1.0],[2.15,.93],[2.26,.62],[2.2,.32],[1.78,.32],[1.72,.55],[1.35,.72],[.98,.55],[.92,.32],[-.92,.32],[-.98,.55],[-1.35,.72],[-1.72,.55],[-1.78,.32]];
-  shapeExtrude(prof,Wd,bodyHex,g,.04);
-  const win=[[-.88,.95],[-.33,1.36],[.78,1.36],[1.44,1.0]]; const wm=shapeExtrude([...win,[1.44,.96],[-.88,.92]],Wd+.04,0x2A3050,g);
-  put(B(.03,.42,Wd+.06),bodyHex,g,.25,1.15,0); put(B(.03,.4,Wd+.06),bodyHex,g,-.35,1.15,0,{rz:-.6});
+  const prof=[[-2.2,.32],[-2.26,.62],[-2.12,.8],[-.95,.94],[1.5,1.0],[2.15,.93],[2.26,.62],[2.2,.32],[1.78,.32],[1.72,.55],[1.35,.72],[.98,.55],[.92,.32],[-.92,.32],[-.98,.55],[-1.35,.72],[-1.72,.55],[-1.78,.32]];
+  g.userData.body=shapeExtrude(prof,Wd,bodyHex,g,.04); g.userData.body.userData.nobake=1; CAR_GROUPS.push(g);
+  carCabin(g,Wd,bodyHex);
+  
   for(const s of [-1,1]){ put(B(4.3,.02,.02),0x2A3050,g,0,.62,s*(Wd/2+.05)); put(B(.02,.55,.02),0x2A3050,g,.0,.66,s*(Wd/2+.05)); put(B(.02,.55,.02),0x2A3050,g,1.05,.68,s*(Wd/2+.05)); put(B(.02,.55,.02),0x2A3050,g,-1.0,.66,s*(Wd/2+.05));
     put(B(.16,.04,.04),0xE8ECF6,g,-.2,.83,s*(Wd/2+.06)); put(B(.16,.04,.04),0xE8ECF6,g,.85,.83,s*(Wd/2+.06)); put(B(.18,.1,.12),bodyHex,g,-.85,1.0,s*(Wd/2+.08)); }
   put(B(.14,.26,Wd*.95,.04),0xD8DCE8,g,-2.28,.45,0); put(B(.14,.26,Wd*.95,.04),0xD8DCE8,g,2.28,.45,0);
@@ -700,7 +756,7 @@ function car(x,z,ry,bodyHex){
   for(const s of [-1,1]){ put(B(.06,.14,.34,.03),0xFFFBEA,g,-2.24,.7,s*.62); put(B(.06,.14,.36,.03),0xFF3B5C,g,2.24,.72,s*.6); }
   sign(['TRF 420'],.5,.16,'#FFFFFF','#2E2350',g,-2.36,.48,0,-Math.PI/2); sign(['TRF 420'],.5,.16,'#FFFFFF','#2E2350',g,2.36,.48,0,Math.PI/2);
   for(const [wx,wz] of [[1.35,1],[-1.35,1],[1.35,-1],[-1.35,-1]]){ const w=grp(g,wx,.34,wz*(Wd/2-.08)); put(CYL(.34,.34,.24,20),0x23202E,w,0,0,0,{rx:Math.PI/2}); put(CYL(.22,.22,.26,16),0xC8CDDD,w,0,0,0,{rx:Math.PI/2}); for(let k=0;k<5;k++) put(B(.04,.36,.02),0x8E95AE,w,0,0,wz*.135,{rz:k/5*Math.PI}); put(CYL(.06,.06,.28,8),0xE8ECF6,w,0,0,0,{rx:Math.PI/2}); }
-  const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry); staticBox(x,.8,z,Math.abs(s.x)*2.2+Math.abs(s.z)*.9,.8,Math.abs(s.z)*2.2+Math.abs(s.x)*.9);
+  const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry), ax=Math.abs(s.x), az=Math.abs(s.z); staticBox(x,.545,z,ax*2.2+az*.875,.385,az*2.2+ax*.875); staticBox(x+s.x*.25,1.165,z+s.z*.25,ax*.9+az*.8,.235,az*.9+ax*.8);
 }
 car(13.3,-11.6,Math.PI/2,0xFF8A7A); car(-24,3.1,0,P.mint);
 // bench with slats
@@ -715,7 +771,7 @@ glowDecal(0xFF3D8B,-9,-6,6); glowDecal(0x26D3A0,20,7,7);
 function worldUV(g,tile){ const p=g.attributes.position, n=g.attributes.normal; const uv=new Float32Array(p.count*2); for(let i=0;i<p.count;i++){ const ax=Math.abs(n.getX(i)), ay=Math.abs(n.getY(i)), az=Math.abs(n.getZ(i)); let u,v; if(ax>=ay&&ax>=az){u=p.getZ(i);v=p.getY(i);} else if(ay>=ax&&ay>=az){u=p.getX(i);v=p.getZ(i);} else {u=p.getX(i);v=p.getY(i);} uv[i*2]=u/tile; uv[i*2+1]=v/tile; } g.setAttribute('uv',new THREE.BufferAttribute(uv,2)); }
 function bake(root){
   root.updateMatrixWorld(true); const groups=new Map(), kill=[];
-  root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined) return; let g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
+  root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined || o.userData.nobake) return; let g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
     for(const k of Object.keys(g.attributes)) if(!['position','normal','uv'].includes(k)) g.deleteAttribute(k);
     if(!g.attributes.uv) g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(g.attributes.position.count*2),2));
     const key=o.userData.c; if(typeof key==='string'){ const t=TILE[key.slice(3).split('|')[0]]; if(t) worldUV(g,t); }
@@ -817,7 +873,256 @@ function boot(parent,x,o){
   for(let i=0;i<4;i++) put(B(.075,.008,.012),0xE8DCC8,f,0,.135+i*.022,.09-i*.028,{rx:-.5}); // laces
   put(CYL(.07,.068,.08,12),o.boot,f,0,.21,-.02);                 // shaft
 }
-function vagrant(o){
+// ===================== city vagrants (GAME-93) =====================
+// Replaces the look test's camper/hiker vagrant (canvas field jacket, bedroll, hiking boots)
+// with city street looks: hoodies, puffers, track jackets, flannels and bombers over joggers,
+// baggy jeans or cargos, sneakers or slides with socks, caps, watch caps, hoods and bucket hats.
+// Same skin, sleepy face and fingerless gloves as before, so the first-person hand still matches.
+//
+// Part layout shared with the ragdoll (GAME-83) and fist fights (GAME-85): p.parts holds six
+// THREE.Groups, all children of p.g (origin at the feet, facing +z), each pivoting at its joint
+// with an identity rest rotation:
+//   torso (hips, ~(0,.92,0)), head (neck), armL / armR (shoulders, arm hangs straight down),
+//   legL / legR (hips). armL / legL are on -x. parts.foreL / foreR are children of the arms at
+//   the elbows. p.head === parts.head, p.sign is the panhandler's cardboard sign.
+// Look keys stay compatible with npcs.json (coat, coatSh, hat, hatSh, pants, hoodie, skin, skinSh,
+// beard, scarf, pack, roll, boot, brow, sign); style keys (top, bottom, shoe, headwear, hair,
+// face, acc) are optional and picked from a seed when missing.
+
+// extra fabrics: heather fleece (hoodies, joggers), nylon (puffers, bombers), plaid (flannels)
+mkTex('fleece', 128, .28, (g, s) => { g.fillStyle = '#fff'; g.fillRect(0, 0, s, s); speckle(g, s, 2600, ['rgba(0,0,0,.10)', 'rgba(255,255,255,.18)', 'rgba(40,40,80,.08)'], 1.3); for (let x = 0; x < s; x += 4) { g.fillStyle = 'rgba(0,0,0,.04)'; g.fillRect(x, 0, 1, s); } blotch(g, s, 5, 'rgba(60,40,30,.08)', 8, 26); }, 1.4);
+mkTex('nylon', 128, .5, (g, s) => { g.fillStyle = '#fff'; g.fillRect(0, 0, s, s); for (let y = 0; y < s; y += 2) { g.fillStyle = 'rgba(0,0,0,.035)'; g.fillRect(0, y, s, 1); } speckle(g, s, 500, ['rgba(0,0,0,.08)', 'rgba(255,255,255,.2)'], 1.1); blotch(g, s, 4, 'rgba(50,40,30,.09)', 10, 30); }, 1.3);
+mkTex('plaid', 128, .32, (g, s) => { g.fillStyle = '#fff'; g.fillRect(0, 0, s, s); g.fillStyle = 'rgba(20,20,40,.42)'; g.fillRect(0, 0, s, s * .34); g.fillRect(0, 0, s * .34, s);
+  g.fillStyle = 'rgba(20,20,40,.25)'; g.fillRect(0, s * .6, s, s * .08); g.fillRect(s * .6, 0, s * .08, s); g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(0, s * .82, s, 3); g.fillRect(s * .82, 0, 3, s);
+  for (let y = 0; y < s; y += 2) { g.fillStyle = 'rgba(0,0,0,.05)'; g.fillRect(0, y, s, 1); } speckle(g, s, 400, ['rgba(0,0,0,.08)', 'rgba(255,255,255,.12)'], 1.2); }, 1.2);
+
+const CITY = {
+  tops: ['hoodie', 'puffer', 'track', 'flannel', 'bomber'],
+  bottoms: ['joggers', 'baggy', 'cargo', 'trackpants'],
+  shoes: ['runner', 'hightop', 'slides'],
+  headwear: ['cap', 'capBack', 'watch', 'hood', 'bucket', 'cap', 'watch', 'hood', 'none'],
+  hair: ['buzz', 'fro', 'messy', 'curls', 'buzz', 'messy', 'bald'],
+  face: ['scruff', 'goatee', 'beard', 'stache', 'clean'],
+  pants: [0x2B2D35, 0x4A4E5C, 0x8E93A3, 0x2E3F66, 0x5B6B45, 0x4D6FC9, 0x7FA0D8, 0x8A7356],
+  shoeCol: [0xF4F2EE, 0x2B2D35, 0xE8343F, 0x8E93A3, 0x3FA8E8, 0xF2C230],
+  hats: [0x2B2D35, 0xE8343F, 0x2E3F66, 0xF4F2EE, 0xD9A400, 0x26A37A, 0xFF5D8F],
+  inner: [0xF4F2EE, 0x8E93A3, 0x2B2D35, 0x7A3E4E, 0x3E5A8A, 0x3E7A5A],
+  hairCol: [0x1E1814, 0x2E221A, 0x5A3A2A, 0x8B5A3C, 0xD9C6A8, 0xB04A2A],
+  accent: [0xE8343F, 0x3FA8E8, 0xF2C230, 0xF4F2EE, 0x26D3A0],
+};
+function cityShade(hex, l) { const c = new THREE.Color(hex); c.offsetHSL(0, 0, l); return c.getHex(); }
+function cityMix(a, b, t) { return new THREE.Color(a).lerp(new THREE.Color(b), t).getHex(); }
+function citySeed(v) { let h = 7; for (const ch of String(v)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
+// Seeds are mixed first: ids like 'p1', 'p2' hash to nearby numbers, which would otherwise pick near-identical outfits.
+function cityRng(seed) { let h = seed >>> 0; h = Math.imul(h ^ (h >>> 16), 0x85EBCA6B); h = Math.imul(h ^ (h >>> 13), 0xC2B2AE35); h ^= h >>> 16; let q = ((h >>> 0) % 2147483646) + 1; const next = () => (q = (q * 16807) % 2147483647) / 2147483647; next(); next(); return next; }
+// Fills every style key the caller left out, picked from a seed so the same vagrant always looks the same.
+function cityStyle(o, seed) {
+  const r = cityRng(seed), pick = a => a[Math.floor(r() * a.length) % a.length];
+  const s = { top: pick(CITY.tops), bottom: pick(CITY.bottoms), shoe: pick(CITY.shoes), headwear: pick(CITY.headwear), hair: pick(CITY.hair), face: pick(CITY.face) };
+  const acc = []; for (const a of ['headphones', 'shades', 'chain', 'sling', 'daypack', 'tape']) if (r() < (a === 'tape' ? .45 : .28)) acc.push(a);
+  if (s.headwear === 'hood' && !['hoodie', 'bomber'].includes(o.top ?? s.top)) s.headwear = 'watch';
+  return { ...s, acc, pants: pick(CITY.pants), boot: pick(CITY.shoeCol), hat: pick(CITY.hats), hoodie: pick(CITY.inner), hair: s.hair, hairCol: pick(CITY.hairCol), accent: pick(CITY.accent), ...o };
+}
+// Look for a networked vagrant: the player's colour is the outer layer, the rest comes from their id.
+const CITY_SKINS = [[0xFFD9B8, 0xE9AE88], [0xC98A5E, 0xA86F48], [0xFFE7D6, 0xF0C4A6], [0x8D5A3B, 0x6E432B], [0xE8B48A, 0xC98F66]];
+function charLook(id, color) {
+  const h = citySeed(id), coat = new THREE.Color(color || '#ff6e9e').getHex(), [skin, skinSh] = CITY_SKINS[h % CITY_SKINS.length];
+  const hairCol = CITY.hairCol[(h >> 4) % CITY.hairCol.length];
+  return cityStyle({ coat, coatSh: cityShade(coat, -.12), skin, skinSh, beard: hairCol, hairCol }, h);
+}
+window.charLook = charLook;
+
+// The client turns bake() off while it builds networked vagrants (it splits and bakes old
+// models itself); these parts are already split, so they always bake with the real one.
+const cityBake = bake;
+function vagrant(o) {
+  o = { skin: 0xFFD9B8, skinSh: 0xE9AE88, beard: 0x2E221A, glove: 0x4A4A5E, coat: 0xFF6E9E, ...o };
+  o = cityStyle(o, citySeed([o.coat, o.skin, o.beard, o.hat, o.pants].join()));
+  o.coatSh ??= cityShade(o.coat, -.12); o.hatSh ??= cityShade(o.hat, -.1); o.hairCol ??= o.beard;
+  if (o.scarf) o.accent = o.scarf;                       // old scarf colour becomes the accent (headphones, stripes)
+  const acc = new Set(o.acc), S = o.skin, top = o.top, C = o.coat, CS = o.coatSh;
+  const fab = { hoodie: 'tx:fleece|', puffer: 'tx:nylon|', track: '', flannel: 'tx:plaid|', bomber: 'tx:nylon|' }[top] ?? 'tx:fleece|';
+  const TOP = fab ? fab + C : C, TOPSH = fab ? fab + CS : CS;
+  const IN = 'tx:fleece|' + o.hoodie;                    // inner layer: hoodie or tee under the jacket
+  const PANT = (o.bottom === 'baggy' ? 'tx:denim|' : o.bottom === 'cargo' ? 'tx:canvas|' : 'tx:fleece|') + o.pants;
+  const g = new THREE.Group(), parts = {};
+  // Builds a part in body coordinates, bakes it (optionally posed by quaternion q about the
+  // pivot, so a posed part still rests at identity), and returns it pivoting at `pivot`.
+  const part = (name, pivot, build, q) => { const P = new THREE.Group(), Q = new THREE.Group(), I = new THREE.Group(); if (q) Q.quaternion.copy(q); I.position.set(-pivot[0], -pivot[1], -pivot[2]); Q.add(I); P.add(Q); build(I); cityBake(P); P.remove(Q); P.position.set(...pivot); parts[name] = P; return P; };
+
+  // ---------- legs + shoes ----------
+  for (const [name, s] of [['legL', -1], ['legR', 1]]) g.add(part(name, [s * .1, .92, 0], L => {
+    const x = s * .1, baggy = o.bottom === 'baggy';
+    const rT = baggy ? .1 : o.bottom === 'cargo' ? .09 : .086, rK = baggy ? .095 : .078, rA = baggy ? .1 : o.bottom === 'cargo' ? .072 : .06;
+    limb([x, .92, 0], [x, .52, .01], rK, rT, PANT, L, 12);
+    limb([x, .52, .01], [x * 1.05, baggy ? .1 : .16, 0], rA, rK, PANT, L, 12);
+    if (baggy) { for (const [y, r] of [[.13, .108], [.2, .104], [.29, .1]]) put(new THREE.TorusGeometry(r, .016, 6, 14), PANT, L, x * 1.05, y, 0, { rx: Math.PI / 2 + (y - .2) * 1.5 }); // stacked hem
+      if ((citySeed(o.coat) >> 3) % 2) put(B(.07, .05, .012, .006), S, L, x, .55, .085, { rz: .3 * s }); } // ripped knee
+    else put(CYL(rA + .004, rA + .004, .07, 12), 'tx:knit|' + o.pants, L, x * 1.05, .19, 0);        // ribbed ankle cuff
+    if (o.bottom === 'cargo') { put(B(.035, .12, .1, .01), PANT, L, x + s * .085, .62, .0); put(B(.04, .025, .11, .008), PANT, L, x + s * .088, .69, .0); }
+    if (o.bottom === 'trackpants') put(B(.006, .74, .02), 0xF4F2EE, L, x + s * .084, .56, 0, { rz: s * -.01 });
+    // shoes
+    const f = grp(L, x * 1.05, 0, .02), U = o.boot, W = 0xF4F2EE;
+    if (o.shoe === 'slides') {
+      put(B(.1, .05, .2, .02), W, f, 0, .05, .03); put(CYL(.052, .055, .13, 10), W, f, 0, .12, -.02);           // white socks
+      put(CYL(.056, .056, .03, 10), 0xC9CCD4, f, 0, .17, -.02);
+      put(B(.12, .03, .28, .012), 0x2B2D35, f, 0, .015, .03); put(B(.125, .035, .11, .015), U === W ? 0x2B2D35 : U, f, 0, .05, .07);
+    } else {
+      const high = o.shoe === 'hightop';
+      put(B(.125, high ? .05 : .042, .3, .015), W, f, 0, high ? .025 : .021, .03);                       // midsole
+      put(B(.127, .012, .302, .005), 0x8E93A3, f, 0, .004, .03);                                          // outsole
+      put(B(.115, high ? .12 : .08, .25, .04), U, f, 0, high ? .1 : .075, .02);                           // upper
+      put(B(.11, .05, .08, .025), U === W ? 0xE8E4EA : W, f, 0, high ? .07 : .06, .14);                   // toe cap
+      put(B(.06, .006, .12, .003), U === W ? 0x8E93A3 : W, f, 0, high ? .165 : .118, .07, { rx: -.35 });  // laces
+      for (const sd of [-1, 1]) put(B(.006, .028, .13, .003), o.accent ?? 0xE8343F, f, sd * .059, high ? .09 : .07, .0, { rz: 0, rx: -.25 }); // side stripe
+      if (high) put(CYL(.072, .075, .09, 12), U, f, 0, .2, -.02); else put(B(.08, .05, .04, .015), U, f, 0, .11, -.1);
+    }
+  }));
+
+  // ---------- torso ----------
+  const T = part('torso', [0, .92, 0], t => {
+    put(CYL(.175, .17, .14, 16), PANT, t, 0, .92, 0, { s: [1, 1, .72] });                         // seat / hips
+    put(CYL(.178, .178, .04, 16), o.bottom === 'baggy' ? 0x3B2C26 : 'tx:knit|' + o.pants, t, 0, .985, 0, { s: [1, 1, .73] }); // belt or waistband
+    if (o.bottom === 'baggy') put(CYL(.16, .16, .03, 16), 'tx:knit|0xF4F2EE', t, 0, 1.02, 0, { s: [1, 1, .7] }); // boxers showing
+    const prof = (w, y0) => [[.19 + w, y0], [.2 + w, .92], [.215 + w, 1.1], [.225 + w, 1.26], [.21 + w, 1.36], [.15 + w, 1.43], [.07, 1.47]];
+    const shell = (pts, key, ps, pl, sz = .72) => lathe(pts, key, t, 22, ps ?? 0, pl ?? Math.PI * 2).scale.set(1, 1, sz);
+    const hoodBack = key => { put(new THREE.SphereGeometry(.14, 12, 8), key, t, 0, 1.42, -.13, { s: [1.15, .62, .6] }); for (const s of [-1, 1]) limb([s * .045, 1.42, .14], [s * .05, 1.2, .175], .008, .008, 0xE8E4F0, t, 6); };
+    if (top === 'hoodie') {
+      shell(prof(0, .82), TOP);
+      put(CYL(.2, .195, .06, 20), 'tx:knit|' + CS, t, 0, .83, 0, { s: [1, 1, .73] });          // hem band
+      put(B(.24, .13, .02, .012), TOPSH, t, 0, .99, .158, { rx: -.08 });                        // kangaroo pocket
+      put(B(.09, .06, .004), o.accent ?? 0xF4F2EE, t, 0, 1.24, .17, { rx: -.12 });              // chest print
+      if (o.headwear !== 'hood') hoodBack(TOP);
+    } else if (top === 'puffer') {
+      const pts = []; for (let i = 0; i <= 24; i++) { const y = .8 + i * .027, k = i / 24; const base = k < .55 ? .225 + k * .06 : .258 - (k - .55) * .2; pts.push([base + .02 + Math.abs(Math.sin(i * Math.PI / 4)) * .022, y]); }
+      pts.push([.12, 1.47]); shell(pts, TOP, 0, Math.PI * 2, .78);
+      put(CYL(.115, .135, .12, 18), TOP, t, 0, 1.47, .0, { s: [1, 1, .85] });                 // tall collar
+      put(B(.014, .62, .012), 0x2B2D35, t, 0, 1.12, .215);                                       // zipper
+      put(B(.03, .05, .012, .004), 0xC9CCD4, t, .01, 1.4, .222);
+      if (acc.has('tape')) { put(B(.12, .025, .006), 0xC9CCD4, t, -.1, 1.05, .225, { rz: .7 }); put(B(.12, .025, .006), 0xC9CCD4, t, -.1, 1.05, .226, { rz: -.7 }); } // duct tape patch
+    } else if (top === 'track') {
+      shell(prof(-.01, .84), TOP);
+      put(CYL(.2, .19, .05, 20), CS, t, 0, .85, 0, { s: [1, 1, .73] });
+      put(CYL(.1, .115, .07, 18), CS, t, 0, 1.46, 0, { s: [1, 1, .9] });                       // stand collar
+      put(B(.012, .58, .012), 0xC9CCD4, t, 0, 1.15, .162); put(B(.025, .045, .01, .004), 0xC9CCD4, t, .0, 1.38, .158);
+      for (const s of [-1, 1]) put(B(.02, .5, .006), o.accent ?? 0xF4F2EE, t, s * .19, 1.16, .07, { rz: s * .03 }); // side stripes
+      put(new THREE.SphereGeometry(.06, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), IN, t, 0, 1.43, .08, { s: [1, .4, .5] }); // tee at the neck
+    } else if (top === 'flannel') {
+      shell(prof(-.01, .86), IN);                                                                 // tee
+      shell(prof(.012, .78).slice(0, 6).concat([[.11, 1.44]]), TOP, .45, Math.PI * 2 - .9, .74);  // open flannel
+      for (const s of [-1, 1]) { put(B(.075, .07, .012, .004), TOP, t, s * .08, 1.41, .15, { rz: s * .6, rx: -.4 }); put(B(.07, .06, .01, .004), TOPSH, t, s * .13, 1.22, .158, { ry: s * .35 }); } // collar points, pockets
+      put(B(.1, .07, .004), o.accent ?? 0x2B2D35, t, 0, 1.2, .162);                              // tee print
+    } else { // bomber over a hoodie
+      shell(prof(-.01, .86), IN); hoodBack(IN);
+      shell(prof(.02, .9).slice(1).map(([r, y], i) => [r, i === 0 ? .88 : y]).slice(0, 6).concat([[.12, 1.43]]), TOP, .3, Math.PI * 2 - .6, .74);
+      put(CYL(.235, .225, .07, 20), 'tx:knit|' + CS, t, 0, .88, 0, { s: [1, 1, .74] });          // ribbed hem
+      put(new THREE.TorusGeometry(.13, .025, 6, 18), 'tx:knit|' + CS, t, 0, 1.43, 0, { rx: Math.PI / 2, s: [1, .8, 1] });
+      for (const s of [-1, 1]) put(B(.03, .1, .02, .006), CS, t, s * .14, 1.0, .16, { rz: s * .3 }); // welt pockets
+      put(B(.04, .1, .006), o.accent ?? 0xF2C230, t, -.24, 1.26, .0, { rz: .1 });               // sleeve pocket hint
+    }
+    // accessories on the body
+    if (acc.has('chain')) put(new THREE.TorusGeometry(.085, .008, 5, 18), 0xF2C94C, t, 0, 1.42, .1, { rx: Math.PI / 2 - .9 });
+    if (acc.has('headphones') && o.headwear !== 'hood') { put(new THREE.TorusGeometry(.1, .014, 6, 16, Math.PI), 0x2B2D35, t, 0, 1.47, .02, { rx: -Math.PI / 2 - .4 }); for (const s of [-1, 1]) put(CYL(.045, .045, .03, 12), o.accent ?? 0xE8343F, t, s * .1, 1.47, .05, { rz: Math.PI / 2 }); }
+    if (acc.has('daypack')) { const P = o.pack ?? 0x2B2D35; put(B(.28, .34, .12, .04), P, t, 0, 1.14, -.22); put(B(.2, .14, .05, .02), cityShade(P, -.08), t, 0, 1.06, -.29); for (const s of [-1, 1]) put(B(.04, .36, .012), 0x2B2D35, t, s * .11, 1.18, .12, { rx: -.08 }); }
+    else if (acc.has('sling')) { const P = o.pack ?? 0x2B2D35; put(B(.025, .62, .008), 0x2B2D35, t, .0, 1.15, .175, { rz: .72 }); put(B(.22, .1, .065, .025), P, t, .13, .98, .17, { rz: .2 }); put(B(.15, .012, .07), 0xC9CCD4, t, .13, 1.02, .175, { rz: .2 }); }
+  });
+  g.add(T);
+
+  // ---------- arms (hang straight down at rest), forearms, fingerless gloves ----------
+  const SL = { hoodie: [.07, .066, .062, .058], puffer: [.088, .084, .08, .072], track: [.062, .06, .057, .054], flannel: [.064, .062, .058, .055], bomber: [.075, .07, .066, .06] }[top];
+  // The panhandler holds his sign out front: that pose is baked into his arms, like before.
+  const qArm = s => o.sign ? new THREE.Quaternion().setFromEuler(new THREE.Euler(-.65, 0, s * -.12)) : null;
+  const qFore = s => o.sign ? qArm(s).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-.95, 0, 0))) : null;
+  for (const [name, fname, s] of [['armL', 'foreL', -1], ['armR', 'foreR', 1]]) {
+    const x = s * .235, sh = [x, 1.36, 0], el = [x, 1.08, 0], wr = [x, .84, 0];
+    const A = part(name, sh, a => {
+      put(new THREE.SphereGeometry(SL[0] + .006, 10, 8), TOP, a, x, 1.36, 0);
+      limb(el, sh, SL[1], SL[0], TOP, a, 12);
+      if (top === 'puffer') for (const y of [1.28, 1.17]) put(new THREE.TorusGeometry(SL[0] - .004, .012, 6, 14), TOP, a, x, y, 0, { rx: Math.PI / 2 });
+      if (top === 'track') put(B(.006, .3, .02), o.accent ?? 0xF4F2EE, a, x + s * SL[0], 1.22, 0);
+    }, qArm(s));
+    const F = part(fname, el, f => {
+      put(new THREE.SphereGeometry(SL[1], 10, 8), TOP, f, x, 1.08, 0);
+      limb([x, .87, 0], el, SL[3], SL[2], TOP, f, 12);
+      if (top === 'puffer') put(new THREE.TorusGeometry(SL[2] - .004, .012, 6, 14), TOP, f, x, .98, 0, { rx: Math.PI / 2 });
+      if (top === 'track') put(B(.006, .2, .02), o.accent ?? 0xF4F2EE, f, x + s * SL[2], .97, 0);
+      const cuff = top === 'flannel' ? TOPSH : top === 'track' ? CS : 'tx:knit|' + (top === 'bomber' ? CS : C);
+      put(CYL(SL[3] + .004, SL[3] + .004, .045, 12), cuff, f, x, .865, 0);
+      glove(f, [x, wr[1] - .02, .0], [0, -1, .02], o, false);
+    }, qFore(s));
+    F.position.set(0, el[1] - sh[1], 0); if (o.sign) F.position.applyQuaternion(qArm(s)); A.add(F); parts[fname] = F; g.add(A);
+  }
+
+  // ---------- head: sleepy face, city hair and headwear ----------
+  const H = part('head', [0, 1.5, 0], hp => {
+    put(CYL(.055, .06, .12, 12), S, hp, 0, 1.51, 0);                                            // neck
+    const h = grp(hp, 0, 1.62, 0);
+    put(new THREE.SphereGeometry(.135, 24, 18), S, h, 0, .02, 0, { s: [1, 1.12, 1.05] });
+    put(B(.2, .1, .18, .05), S, h, 0, -.08, .02);                                               // jaw
+    const brow = o.brow ?? o.hairCol;
+    for (const s of [-1, 1]) {
+      put(new THREE.SphereGeometry(.035, 10, 8), o.skinSh, h, s * .135, .0, -.01, { s: [.5, 1, .8] });
+      put(new THREE.SphereGeometry(.036, 14, 10), 0xF6F2EA, h, s * .052, .03, .118, { s: [1.25, .8, .5] });
+      put(new THREE.SphereGeometry(.017, 10, 8), 0x2A1F3A, h, s * .05, .024, .132, { s: [1, 1, .5] });
+      put(new THREE.SphereGeometry(.039, 14, 10, 0, Math.PI * 2, 0, Math.PI * .55), o.skinSh, h, s * .052, .032, .118, { s: [1.28, .85, .58], rx: .15 });
+      put(B(.06, .008, .01), o.skinSh, h, s * .052, -.005, .128, { rz: s * .12 });
+      put(B(.065, .016, .02, .006), brow, h, s * .055, .083, .128, { rz: s * -.18 });
+    }
+    put(new THREE.SphereGeometry(.03, 12, 10), 0xE88F78, h, 0, -.025, .15, { s: [1, .9, 1] });
+    put(B(.03, .05, .04, .012), S, h, 0, .01, .135);
+    // facial hair
+    const BD = o.beard, scruff = cityMix(S, BD, .45);
+    if (o.face !== 'clean') put(new THREE.SphereGeometry(.124, 16, 10, 0, Math.PI * 2, Math.PI * .5, Math.PI * .5), o.face === 'beard' ? BD : scruff, h, 0, -.035, .025, { s: [1, 1.02, 1.04] });
+    if (['goatee', 'stache', 'beard'].includes(o.face)) put(B(.085, .016, .02, .008), BD, h, 0, -.058, .137);
+    if (o.face === 'goatee') { put(B(.05, .05, .03, .012), BD, h, 0, -.125, .1); put(new THREE.ConeGeometry(.02, .04, 5), BD, h, 0, -.16, .1, { rx: Math.PI }); }
+    if (o.face === 'beard') { let q = 11; for (let i = 0; i < 14; i++) { q = (q * 16807) % 2147483647; const a = -1.2 + i / 13 * 2.4, len = .03 + (q / 2147483647) * .03; put(new THREE.ConeGeometry(.02, len, 5), BD, h, Math.sin(a) * .1, -.13 - len * .3 + Math.abs(Math.sin(a)) * .04, .03 + Math.cos(a) * .08, { rx: Math.PI + Math.cos(a) * .3, rz: -Math.sin(a) * .4 }); } }
+    // hair (hidden under a hood)
+    const HC = o.hairCol, hw = o.headwear;
+    if (hw !== 'hood') {
+      if (o.hair === 'buzz') put(new THREE.SphereGeometry(.141, 18, 10, 0, Math.PI * 2, 0, Math.PI * .45), HC, h, 0, .025, -.005, { s: [1, 1.1, 1.05] });
+      else if (o.hair === 'fro') { put(new THREE.SphereGeometry(.18, 16, 12), HC, h, 0, .08, -.02, { s: [1.05, .9, 1] }); }
+      else if (o.hair === 'curls') { put(new THREE.SphereGeometry(.143, 16, 10, 0, Math.PI * 2, 0, Math.PI * .5), HC, h, 0, .03, -.005, { s: [1, 1.1, 1.05] }); for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; put(new THREE.SphereGeometry(.035, 6, 5), HC, h, Math.cos(a) * .11, .12 + (i % 2) * .02, Math.sin(a) * .1 - .01); } }
+      else if (o.hair === 'messy') { put(new THREE.SphereGeometry(.145, 16, 10, Math.PI * 1.5 - 1.2, 2.4, 0, Math.PI * .62), HC, h, 0, .025, -.004, { s: [1, 1.12, 1.05] }); for (let i = 0; i < 8; i++) { const a = Math.PI * 1.5 - 1 + i * .28; put(new THREE.ConeGeometry(.022, .07, 5), HC, h, -Math.cos(a) * .14, -.05, Math.sin(a) * .14, { rx: Math.PI + Math.sin(a) * .3, rz: Math.cos(a) * .3 }); } }
+      else put(new THREE.SphereGeometry(.142, 16, 8, Math.PI * 1.5 - 1.3, 2.6, Math.PI * .38, Math.PI * .18), HC, h, 0, .02, 0, { s: [1, 1.1, 1.05] }); // bald with a ring
+    }
+    // headwear
+    if (hw === 'cap' || hw === 'capBack') {
+      const c = grp(h, 0, 0, 0, hw === 'capBack' ? Math.PI : 0), puff = o.hair === 'fro' ? .02 : 0;
+      put(new THREE.SphereGeometry(.148 + puff, 20, 12, 0, Math.PI * 2, 0, Math.PI * .5), o.hat, c, 0, .075, 0, { s: [1, .8, 1.06] });
+      put(CYL(.15 + puff, .15 + puff, .03, 20), o.hat, c, 0, .075, 0, { s: [1, 1, 1.06] });
+      put(CYL(.016, .016, .01, 8), o.hatSh, c, 0, .195 + puff * .8, 0);
+      put(B(.2, .014, .13, .006), o.hatSh, c, 0, .07, .19, { rx: .1 });                          // brim
+      put(B(.05, .03, .006), o.accent ?? 0xF4F2EE, c, 0, .12, .15 + puff, { rx: -.5 });           // front patch
+    } else if (hw === 'watch') {
+      lathe([[.152, .1], [.15, .15], [.128, .2], [.07, .232], [.0, .24]], 'tx:knit|' + o.hat, h, 22);
+      put(CYL(.158, .155, .06, 22), 'tx:knit|' + o.hatSh, h, 0, .125, 0);                          // high cuff above the ears
+    } else if (hw === 'bucket') {
+      put(CYL(.13, .152, .11, 20), 'tx:canvas|' + o.hat, h, 0, .15, 0, { s: [1, 1, 1.05] });
+      put(CYL(.135, .135, .02, 20), 'tx:canvas|' + o.hat, h, 0, .206, 0);
+      put(CYL(.15, .2, .045, 24), 'tx:canvas|' + o.hatSh, h, 0, .085, 0, { s: [1, 1, 1.05] });   // short brim sloping down
+    } else if (hw === 'hood') {
+      const HK = top === 'hoodie' ? TOP : IN;
+      put(new THREE.SphereGeometry(.18, 18, 12, Math.PI / 2 + .95, Math.PI * 2 - 1.9, 0, Math.PI * .78), HK, h, 0, .03, -.01, { s: [1, 1.1, 1.08] });
+      put(new THREE.TorusGeometry(.125, .03, 8, 20), HK, h, 0, .0, .125, { s: [1, 1.25, 1] });     // rim around the face
+      for (const s of [-1, 1]) limb([s * .05, -.11, .15], [s * .055, -.3, .17], .008, .008, 0xE8E4F0, h, 6);
+    }
+    if (acc.has('shades')) { for (const s of [-1, 1]) put(B(.06, .032, .012, .008), 0x1E1B26, h, s * .052, .03, .145); put(B(.04, .008, .01), 0x1E1B26, h, 0, .04, .146); for (const s of [-1, 1]) put(B(.008, .008, .12), 0x1E1B26, h, s * .1, .035, .09); }
+  });
+  g.add(H);
+
+  // arms for the grab / push / fight animations (GAME-87, GAME-85), left first
+  if (o.armRig) o.armRig.push(parts.armL, parts.armR);
+  let sign = null;
+  if (o.sign) {
+    sign = new THREE.Mesh(new THREE.BoxGeometry(.66, .42, .012), [0, 0, 0, 0, new THREE.MeshLambertMaterial({ map: labelTex(o.sign, 512, 330, '#D9A866', '#3A2410', 42) }), 0].map(m => m || new THREE.MeshLambertMaterial({ color: 0xB98A50 })));
+    sign.position.set(0, 1.0, .46); sign.rotation.set(-.12, 0, -.04); sign.castShadow = true; g.add(sign);
+  }
+  g.position.set(o.x ?? 0, 0, o.z ?? 0); g.rotation.y = o.ry ?? 0; scene.add(g);
+  const b = new CANNON.Body({ mass: 0, shape: new CANNON.Cylinder(.3, .3, 1.85, 10) }); b.position.set(o.x ?? 0, .93, o.z ?? 0); world.addBody(b);
+  const p = { g, head: H, parts, arms: [parts.armL, parts.armR], sign, look: o, ph: Math.random() * 6, wob: 0, bodyRef: b, hy: 1.5 }; b.tw = { type: 'person', p }; people.push(p); return p;
+}
+
+function campVagrant(o){
   o={ skin:0xFFD9B8, skinSh:0xE9AE88, beard:0x8B5A3C, glove:0x4A4A5E, boot:0x7A4E34, hoodie:0x9AA3B8, scarf:0xE8343F, ...o };
   const g=new THREE.Group(), S=o.skin;
   // boots + jeans (tapered, cuffed, knee patch, back pockets)
@@ -852,7 +1157,12 @@ function vagrant(o){
   for(const s of [-1,1]){ put(B(.025,.21,.02),0x3B2C26,g,s*.16,1.42,-.24,{s:[1,1,1]}); put(B(.04,.36,.012),0x3B2C26,g,s*.11,1.18,.1,{rx:-.08}); }
   // arms: jacket sleeves, cuffs, gloves
   const sh=[[-.24,1.34,0],[.24,1.34,0]];
-  if(o.sign){
+  if(o.sign && o.armRig){
+    for(const [i,s] of [[0,-1],[1,1]]){ const pv=new THREE.Group(), rel=v=>[v[0]-sh[i][0],v[1]-sh[i][1],v[2]-sh[i][2]], e=rel([s*.27,1.08,.1]), w=rel([s*.17,1.0,.33]);
+      limb([0,0,0],e,.06,.065,'tx:canvas|'+o.coat,pv); limb(e,w,.05,.058,'tx:canvas|'+o.coat,pv); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,pv,...w); glove(pv,rel([s*.2,1.0,.39]),[0,1,.2],o,false);
+      bake(pv); pv.position.set(...sh[i]); o.armRig.push(pv); }
+    const sg=new THREE.Mesh(new THREE.BoxGeometry(.66,.42,.012),[0,0,0,0,new THREE.MeshLambertMaterial({map:labelTex(o.sign,512,330,'#D9A866','#3A2410',42)}),0].map(m=>m||new THREE.MeshLambertMaterial({color:0xB98A50}))); sg.position.set(0,1.02,.4); sg.rotation.set(-.15,0,-.05); g.add(sg); sg.castShadow=true; o._sign=sg;
+  } else if(o.sign){
     for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.27,1.08,.1], w=[s*.17,1.0,.33]; limb(sh[i],e,.06,.065,'tx:canvas|'+o.coat,g); limb(e,w,.05,.058,'tx:canvas|'+o.coat,g); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,g,...w); }
     const sg=new THREE.Mesh(new THREE.BoxGeometry(.66,.42,.012),[0,0,0,0,new THREE.MeshLambertMaterial({map:labelTex(o.sign,512,330,'#D9A866','#3A2410',42)}),0].map(m=>m||new THREE.MeshLambertMaterial({color:0xB98A50}))); sg.position.set(0,1.02,.4); sg.rotation.set(-.15,0,-.05); g.add(sg); sg.castShadow=true;
     g.updateMatrixWorld(true); for(const s of [-1,1]) glove(g,[s*.2,1.0,.39],[0,1,.2],o,false);
@@ -887,10 +1197,10 @@ function vagrant(o){
   lathe([[.153,.085],[.15,.14],[.13,.19],[.08,.232],[.0,.245]],'tx:knit|'+o.hat,head,22);
   put(CYL(.162,.158,.065,22),'tx:knit|'+(o.hatSh??o.hat),head,0,.112,0);
   put(new THREE.SphereGeometry(.075,10,8),'tx:knit|'+o.hat,head,0,.235,-.06,{s:[1.2,.7,1]});
-  bake(head); head.position.y=1.62; let parts=null; if(o.rig) parts=ANIM.rigVagrant(g,head); else bake(g); g.add(head);
+  bake(head); bake(g); head.position.y=1.62; g.add(head);
   g.position.set(o.x,0,o.z); g.rotation.y=o.ry??0; scene.add(g);
   const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.3,.3,1.85,10)}); b.position.set(o.x,.93,o.z); world.addBody(b);
-  const p={g,head,parts,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62}; b.tw={type:'person',p}; people.push(p); return p;
+  const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62,sign:o._sign||null}; b.tw={type:'person',p}; people.push(p); return p;
 }
 vagrant({x:-9.4,z:-4.4,ry:.5,coat:0xE07A2E,coatSh:0xB85E1E,hat:0xFF5D8F,hatSh:0xE03A72,pants:0x4D6FC9,hoodie:0x9AA3B8,scarf:0,sign:['ANYTHING','HELPS :)']});
 vagrant({x:19.4,z:8.6,ry:2.2,coat:0x5FA88A,coatSh:0x4A8A70,hat:0xF2C230,hatSh:0xD9A400,pants:0x5A4C80,hoodie:0x7A3E4E,skin:0xC98A5E,skinSh:0xA86F48,beard:0x2E221A,pack:0x8A6A44,packSh:0x6E5434,roll:0x3E6A9A});
@@ -1008,13 +1318,13 @@ const handG=new THREE.Group();
   // wrist: glove cuff, hoodie cuff, then the canvas jacket sleeve running off to the lower right
   limb([BX+.11,-.01,BZ+.06],[BX+.16,-.1,BZ+.1],.06,.058,GL,handG,14);
   put(CYL(.072,.072,.05,14),'tx:knit|'+0x9AA3B8,handG,BX+.165,-.11,BZ+.105,{rz:.5,rx:-.3});
-  limb([BX+.17,-.12,BZ+.11],[BX+.36,-.52,BZ+.42],.11,.088,'tx:canvas|'+0xE07A2E,handG,16);
-  put(CYL(.094,.094,.05,16),0xB85E1E,handG,BX+.18,-.14,BZ+.125,{rz:.5,rx:-.45});               // sleeve hem
-  for(let k=0;k<3;k++) put(B(.13,.012,.012,.004),0xB85E1E,handG,BX+.22+k*.04,-.22-k*.08,BZ+.18+k*.06,{rz:.9,rx:-.5}); // creases
+  limb([BX+.17,-.12,BZ+.11],[BX+.36,-.52,BZ+.42],.11,.088,'tx:fleece|'+0x5A5F70,handG,16);
+  put(CYL(.094,.094,.05,16),'tx:knit|'+0x4A4E5C,handG,BX+.18,-.14,BZ+.125,{rz:.5,rx:-.45});               // sleeve hem
+  for(let k=0;k<3;k++) put(B(.13,.012,.012,.004),0x464A58,handG,BX+.22+k*.04,-.22-k*.08,BZ+.18+k*.06,{rz:.9,rx:-.5}); // creases
   const sl=new THREE.Group(); sl.position.set(BX+.265,-.32,BZ+.265); sl.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),new THREE.Vector3(.19,-.4,.31).normalize()); handG.add(sl);
-  put(B(.1,.13,.02,.006),'tx:denim|'+0x6A86C8,sl,-.03,.02,.088,{rx:-.1,ry:-.3});                 // denim elbow patch
-  for(let k=0;k<5;k++) put(B(.012,.012,.012),0xF4ECD8,sl,-.085+k*.028,.088,.098,{ry:-.3});          // stitches
-  put(B(.008,.36,.008),0x9A4C18,sl,.095,0,.0);                                                     // seam
+  put(B(.12,.03,.012,.004),0xC9CCD4,sl,-.03,.02,.092,{rx:-.1,ry:-.3,rz:.6}); put(B(.12,.03,.012,.004),0xC9CCD4,sl,-.03,.02,.094,{rx:-.1,ry:-.3,rz:-.6});                 // denim elbow patch
+            // stitches
+  put(B(.008,.36,.008),0x464A58,sl,.095,0,.0);                                                     // seam
 })();
 bake(handG); vm.add(handG);
 const heldBottle=bottleMesh(); heldBottle.position.set(-.01,.09,.05); heldBottle.rotation.z=0; vm.add(heldBottle);
@@ -1236,7 +1546,7 @@ function tick(){
   const speed=(SET.running()?8:4.6)*NET.speedScale();
   fwd.set(-Math.sin(yaw),0,-Math.cos(yaw)); right.set(Math.cos(yaw),0,-Math.sin(yaw));
   player.velocity.x=(fwd.x*mz+right.x*mx)*speed; player.velocity.z=(fwd.z*mz+right.z*mx)*speed;
-  if(SET.down('jump') && player.position.y<.4){ player.velocity.y=6.5; }
+  if(SET.down('jump') && (player.position.y<.4 || NET.grounded())){ player.velocity.y=6.5; }
   NET.beforeStep(dt, mx, mz, speed);
   if(ml>0) player.wakeUp();
   world.step(1/90,dt,6);
@@ -1244,7 +1554,7 @@ function tick(){
   processBreaks();
   for(const {m,b} of dyn){ m.position.copy(b.position); m.quaternion.copy(b.quaternion); }
   for(const e of bottles){ e.m.position.copy(e.b.position); e.m.quaternion.copy(e.b.quaternion); }
-  for(const d of debris){ if(d.b && d.b.sleepState!==2){ d.m.position.copy(d.b.position); d.m.quaternion.copy(d.b.quaternion);} } updatePiles(dt); updateAct();
+  for(const d of debris){ if(d.b && d.b.sleepState!==2){ d.m.position.copy(d.b.position); d.m.quaternion.copy(d.b.quaternion);} } updatePiles(dt); FIRE.update(dt); updateAct();
   for(let i=chunks.length-1;i>=0;i--){ const c=chunks[i]; c.t+=dt; c.m.position.copy(c.b.position); c.m.quaternion.copy(c.b.quaternion); if(c.t>5){ const s=Math.max(0,1-(c.t-5)/.6); c.m.scale.setScalar(s); if(s<=0){ scene.remove(c.m); world.removeBody(c.b); chunks.splice(i,1);} } }
   for(let i=sparks.length-1;i>=0;i--){ const s=sparks[i]; s.userData.t+=dt; s.userData.v.y-=12*dt; s.position.addScaledVector(s.userData.v,dt); s.material.opacity=1-s.userData.t/.9; s.material.rotation+=dt*4; if(s.userData.t>.9){ scene.remove(s); sparks.splice(i,1);} }
   NET.frame(dt, t);
@@ -1253,8 +1563,10 @@ function tick(){
   bobT+=dt*(ml>0?speed*2.2:0);
   camera.position.set(player.position.x, player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()+ANIM.camY(), player.position.z);
   camera.rotation.set(pitch+ANIM.camPitch(),yaw,0,'YXZ');
+  FIGHT.afterCamera(dt, t);
+  NET.knockedCamera(dt);
   // viewmodel
-  handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6; vm.rotation.y=0; vm.rotation.z=0; NET.vmPose(dt,ml>0); ANIM.applyFP(vm,heldBottle,dt,ml>0);
+  handKick=Math.max(0,handKick-dt*4); vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1-NET.handDrop(),-.45+handKick*.06); vm.rotation.x=-handKick*.9; NET.heldVisible(handKick); vm.rotation.y=0; vm.rotation.z=0; NET.vmPose(dt,ml>0); ANIM.applyFP(vm,heldBottle,dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);
   // ambient life
   updateFX(dt,t);
   for(const p of people){ p.wob=Math.max(0,p.wob-dt*1.4); const w=Math.sin(t*18)*p.wob*.25; p.g.rotation.z=w; p.g.scale.set(1+Math.sin(t*20)*p.wob*.08,1-Math.sin(t*20)*p.wob*.08,1); p.head.rotation.z=Math.sin(t*1.3+p.ph)*.08; p.head.position.y=p.hy+Math.sin(t*2+p.ph)*.015; }
@@ -1276,7 +1588,8 @@ const SET = (() => {
   const KEY = 'tw_settings';
   const BIND_ACTIONS = [
     ['fwd', 'Walk forward', 'KeyW'], ['back', 'Walk back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
-    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Do the thing', 'KeyE'], ['grab', 'Grab or drag', 'KeyG'],
+    ['jump', 'Jump', 'Space'], ['run', 'Run', 'ShiftLeft'], ['act', 'Pick up / do the thing', 'KeyE'], ['light', 'Light it on fire', 'KeyF'],
+    ['drop', 'Drop what you hold', 'KeyQ'], ['grab', 'Grab or drag', 'KeyG'], ['punch', 'Punch', 'KeyV'],
     ['map', 'Big town map', 'KeyM'],
   ];
   // Arrow keys and the right-hand Shift always work too, whatever the bindings say.
@@ -1319,7 +1632,7 @@ const SET = (() => {
   function applyHud() {
     const show = (id, on) => { const e = el(id); if (e) e.style.visibility = on ? '' : 'hidden'; };
     show('help', s.help); show('board', s.board); show('xh', s.xhair);
-    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br>Click throws a bottle · <kbd>${keyName(s.binds.act)}</kbd> do the thing · <kbd>${keyName(s.binds.grab)}</kbd> grab or drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
+    el('help').innerHTML = `Click to look around · <kbd>${keyName(s.binds.fwd)}${keyName(s.binds.left)}${keyName(s.binds.back)}${keyName(s.binds.right)}</kbd> walk · <kbd>${keyName(s.binds.run)}</kbd> run${s.toggleRun ? ' (toggle)' : ''} · <kbd>${keyName(s.binds.jump)}</kbd> jump<br><kbd>${keyName(s.binds.act)}</kbd> pick up junk or do the thing · click throws it (punches with empty hands) · <kbd>${keyName(s.binds.punch)}</kbd> punch · <kbd>${keyName(s.binds.drop)}</kbd> drop · <kbd>${keyName(s.binds.light)}</kbd> light it · <kbd>${keyName(s.binds.grab)}</kbd> drag · <kbd>${keyName(s.binds.map)}</kbd> map · <kbd>Esc</kbd> settings<br>Close the tab and your vagrant lies down right where you are.`;
   }
   function applyAll() { applyVideo(); applyHud(); }
 
@@ -1472,6 +1785,8 @@ const SET = (() => {
 // The vagrant model is posed through p.parts = { torso, head, armL, armR, legL, legR }: each a
 // Group child of p.g, pivot at its joint, rest rotation identity, origin at the feet facing +z.
 // Arm rotation x < 0 swings an arm forward/up; leg rotation x < 0 swings a leg forward.
+// In clips, armR / legR mean the character's right side (-x, the hand that holds things),
+// whichever part carries that name. The held item is v.heldObj (GAME-82), on that arm.
 const ANIM = (() => {
   const clips = {};
   const clamp01 = k => k < 0 ? 0 : k > 1 ? 1 : k;
@@ -1503,15 +1818,15 @@ const ANIM = (() => {
 
   // ---------- first person ----------
   const fpS = {};
-  const fpOut = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, camY: 0, camPitch: 0, hideHeld: false };
+  const fpOut = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, camY: 0, camPitch: 0, hideHeld: false, w: 0 };
   function play(name, m) { if (clips[name]) start(fpS, name, m); }
   // The server echoes your own clips back; skip the echo if we already predicted it.
-  function echo(name, m) { if (fpS.name === name && performance.now() - fpS.at < 1500) return; play(name, m); }
+  function echo(name, m) { if ((m && m.tpOnly) || (fpS.name === name && performance.now() - fpS.at < 1500)) return; play(name, m); }
   function fpTick(dt, moving) {
     for (const k in fpOut) fpOut[k] = k === 'hideHeld' ? false : 0;
     const r = step(fpS, dt, moving); if (!r || !r.c.fp) return fpOut;
-    const p = r.c.fp(r.k, r.s.t, r.s.m) || {};
-    for (const k in p) { if (k === 'hideHeld') fpOut.hideHeld = !!p[k] && r.w > .3; else fpOut[k] = p[k] * r.w; }
+    const p = r.c.fp(r.k, r.s.t, r.s.m) || {}; fpOut.w = r.w;
+    for (const k in p) { if (k === 'w') continue; if (k === 'hideHeld') fpOut.hideHeld = !!p[k] && r.w > .3; else fpOut[k] = p[k] * r.w; }
     return fpOut;
   }
   // Applied right after the look test poses the viewmodel each frame.
@@ -1520,6 +1835,8 @@ const ANIM = (() => {
     vm.position.x += o.x; vm.position.y += o.y; vm.position.z += o.z;
     vm.rotation.x += o.rx; vm.rotation.y += o.ry; vm.rotation.z += o.rz;
     if (o.hideHeld) held.visible = false;
+    // Empty hands sit lowered out of view (GAME-82); bring the glove up while a clip plays.
+    if (o.w > .02) { if (typeof NET !== 'undefined' && NET.handDrop) vm.position.y += NET.handDrop() * o.w; handG.visible = true; }
   }
   const camY = () => fpOut.camY, camPitch = () => fpOut.camPitch;
 
@@ -1558,8 +1875,11 @@ const ANIM = (() => {
     const blend = (base, key) => { const a = pose && pose[key]; return a ? base.map((b, i) => b * (1 - w) + a[i] * w) : base; };
     g.position.set(0, -0.9 + y + (pose ? (pose.y || 0) * w : 0), pose ? (pose.fwd || 0) * w : 0);
     g.rotation.set(lean + (pose ? (pose.lean || 0) * w : 0), pose ? (pose.turn || 0) * w : 0, tilt + (pose ? (pose.tilt || 0) * w : 0));
-    setRot(P.armR, blend(arm, 'armR'), null, 0); setRot(P.armL, blend(armL, 'armL'), null, 0);
-    setRot(P.legR, blend(legR, 'legR'), null, 0); setRot(P.legL, blend(legL, 'legL'), null, 0);
+    // Clips name limbs by the character's side: right = -x (the hand that holds things).
+    const rx = P.armR.position.x < 0, R = rx ? P.armR : P.armL, L = rx ? P.armL : P.armR;
+    const lx = P.legR.position.x < 0, RL = lx ? P.legR : P.legL, LL = lx ? P.legL : P.legR;
+    setRot(R, blend(arm, 'armR'), null, 0); setRot(L, blend(armL, 'armL'), null, 0);
+    setRot(RL, blend(legR, 'legR'), null, 0); setRot(LL, blend(legL, 'legL'), null, 0);
     setRot(P.torso, ZERO, pose && pose.torso, w);
     P.head.rotation.set(pose && pose.head ? pose.head[0] * w : 0, pose && pose.head ? pose.head[1] * w : 0, Math.sin(t * 1.3 + v.model.ph) * .08 + (pose && pose.head ? pose.head[2] * w : 0));
     if (pose && pose.world && w > 0) {   // slide toward a spot, e.g. onto the couch
@@ -1568,36 +1888,10 @@ const ANIM = (() => {
       g.position.x += (dx * c + dz * s) * w; g.position.z += (-dx * s + dz * c) * w;
       if (face !== undefined) { let d = face - o.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); g.rotation.y += d * w; }
     }
-    if (v.model.held) v.model.held.visible = !hide && re < .25;
+    if (v.heldObj) v.heldObj.visible = !hide;
   }
 
-  // Split a freshly built vagrant into posable parts (same parts and materials, baked per part).
-  // Used by vagrant({ rig: true }) until the character module (GAME-93) supplies p.parts itself.
-  function rigVagrant(g, head) {
-    g.updateMatrixWorld(true);
-    const PIV = { torso: [0, .9, 0], armR: [-.24, 1.34, 0], armL: [.24, 1.34, 0], legR: [-.1, .9, 0], legL: [.1, .9, 0] };
-    const tmp = {}; for (const k in PIV) tmp[k] = new THREE.Group();
-    const box = new THREE.Box3(), c = new THREE.Vector3(), list = [];
-    g.traverse(o => { if (o.isMesh && o.userData.c !== undefined) list.push(o); });
-    for (const o of list) {
-      box.setFromObject(o).getCenter(c);
-      // Model faces +z, so the character's right side is -x.
-      const part = Math.abs(c.x) > .2 && c.y > .7 && c.y < 1.45 ? (c.x < 0 ? 'armR' : 'armL') : c.y < .88 ? (c.x < 0 ? 'legR' : 'legL') : 'torso';
-      tmp[part].attach(o);
-    }
-    for (const o of [...g.children]) if (!o.isMesh && !o.children.length) g.remove(o);   // empty glove groups
-    const parts = {};
-    for (const k in PIV) {
-      bake(tmp[k]);
-      const pg = new THREE.Group(); pg.position.set(...PIV[k]); pg.name = k;
-      for (const m of [...tmp[k].children]) { m.geometry.translate(-PIV[k][0], -PIV[k][1], -PIV[k][2]); pg.add(m); }
-      g.add(pg); parts[k] = pg;
-    }
-    parts.head = head;
-    return parts;
-  }
-
-  const api = { define, keys, ease, play, echo, applyFP, camY, camPitch, playOn, poseVagrant, rigVagrant, clips, get fp() { return fpS; } };
+  const api = { define, keys, ease, play, echo, applyFP, camY, camPitch, playOn, poseVagrant, clips, get fp() { return fpS; } };
   window.__anim = api;   // for captures, tests and the console
   return api;
 })();
@@ -1629,7 +1923,15 @@ ANIM.define('warm', { dur: 1.2, loop: true, cancelOnMove: true, maxLoop: 6,
 ANIM.define('sit', { dur: 4, loop: true, cancelOnMove: true, fadeIn: .4, fadeOut: .3,
   fp: (k, t) => ({ camY: -.55, camPitch: .05, y: -.05, rx: .2, z: .03 + Math.sin(t * 1.6) * .006, hideHeld: false }),
   tp: (k, t, m) => ({ y: -.28, lean: -.3, world: m.seat, legR: [-1.2, 0, -.1], legL: [-1.2, 0, .1], armR: [-.25, 0, -.35], armL: [-.25, 0, .35], head: [-.1, 0, Math.sin(t * 1.6) * .05] }) });
-// Throw the beer bottle (other players see it; your hand already kicks in first person).
+// Pick something up off the ground (GAME-82 plays the first-person part): bend and scoop.
+ANIM.define('reach', { dur: .65,
+  tp: k => { const d = ANIM.keys([[0, 0], [.45, 1], [1, 0]])(k);
+    return { y: -.1 * d, lean: .45 * d, armR: [-1.1 * d, 0, .1 * d], armL: [-.3 * d, 0, 0], legR: [-.35 * d, 0, 0], legL: [.25 * d, 0, 0], head: [.35 * d, 0, 0], hideHeld: k < .45 }; } });
+// Dig through a dumpster or trash pile (GAME-82 plays the first-person part): lean in and root around.
+ANIM.define('dig', { dur: 1.2,
+  tp: (k, t) => { const r = Math.sin(t * 16);
+    return { lean: .35, fwd: .05, armR: [-1.3 + r * .25, 0, .15], armL: [-1.3 - r * .25, 0, -.15], head: [.3, 0, r * .05], tilt: r * .03, hideHeld: true }; } });
+// Throw what you hold (other players see it; your hand already kicks in first person).
 ANIM.define('throw', { dur: .6,
   tp: k => { const s = ANIM.keys([[0, 0], [.3, 1], [.55, -.5], [1, 0]])(k);
     return { armR: [-1.6 - s * 1.3, 0, .1], turn: s * .3, lean: -s * .1, hideHeld: k > .3 && k < .95 }; } });
@@ -1693,6 +1995,781 @@ const PROPS = (() => {
   return { build, has: t => !!ART[t] };
 })();
 
+// ===================== lighters and burning plants (GAME-86) =====================
+// You need a lighter to start a fire. This file draws the lighter (HUD and first-person
+// flick), the Sunny Mart lighter sticker, and trees and bushes catching fire, burning
+// down to charred, half-bare husks, and coming back once the town replants them.
+// Trees and bushes come from the look test's tree()/bush(), which build-client.py
+// patches to keep each one as its own small baked group in BURN (id "t:N", build order).
+const FIRE = (() => {
+  let lighter = 0;                                   // flicks of fuel left; 0 = no lighter
+  const BURNABLE = new Set(['pile', 'dumpster', 'tree', 'bush', 'plant']);
+  const byId = new Map(BURN.map(b => [b.id, b]));
+
+  // Charred stages share cached materials (same shader as the living leaves, new colour),
+  // so a fire never compiles a new program mid-game.
+  const STAGES = [
+    { leafA: 'tx:leafA|' + 0xA88A48, leafB: 'tx:leafB|' + 0x967238, pole: 'tx:pole|' + 0x7A604C },   // scorched, browning
+    { leafA: 'tx:leafA|' + 0x6E5440, leafB: 'tx:leafB|' + 0x5A4434, pole: 'tx:pole|' + 0x4E423A },   // charring
+    { leafA: 'tx:leafA|' + 0x6A625C, leafB: 'tx:leafB|' + 0x4A4440, pole: 'tx:pole|' + 0x3A3330 },   // burnt: ash-grey husk, still shaded so the ink lines read
+  ];
+  for (const st of STAGES) for (const k of Object.values(st)) getMat(k);   // same shader as live leaves: no new program
+  const partOf = key => typeof key === 'string' ? key.slice(3).split('|')[0] : null;
+  function prepare(b) {
+    if (b.parts) return;
+    b.parts = [];
+    for (const m of b.g.children) {
+      if (!m.isMesh) continue;
+      const part = partOf(m.userData.c);
+      const leaf = part === 'leafA' || part === 'leafB';
+      if (leaf) {   // re-centre canopy meshes so they can shrink in place as the leaves burn away
+        m.geometry.computeBoundingBox(); const c = new THREE.Vector3(); m.geometry.boundingBox.getCenter(c);
+        m.geometry.translate(-c.x, -c.y, -c.z); m.position.copy(c);
+      }
+      b.parts.push({ m, part, key: m.userData.c, leaf });
+    }
+    const top = b.type === 'tree' ? 3.9 * b.s : .6 * b.s;   // flames start at the outside of the canopy, not hidden inside it
+    b.canopy = new THREE.Vector3(b.x, top, b.z);
+    b.scorch = decal(scorchTex, b.x, b.z, b.type === 'tree' ? 2.2 * b.s : 1.3 * b.s, 0);
+  }
+  function setStage(b, k) {
+    if (b.stage === k) return; b.stage = k;
+    for (const p of b.parts) {
+      const key = k < 0 || !p.part || !STAGES[k][p.part] ? p.key : STAGES[k][p.part];
+      p.m.userData.c = key; p.m.material = getMat(key);
+    }
+  }
+  function ignite(b) {
+    prepare(b);
+    if (b.state === 'burning') return;
+    b.state = 'burning'; b.t0 = performance.now(); b.t = 0;
+    const tree = b.type === 'tree';
+    // Fires share the fixed FIRE_LIGHTS pool (never a new light, so no shader recompile).
+    b.fx = emitter(b.canopy, { radius: (tree ? .9 : .75) * b.s, fire: .1, smoke: .2 });
+    if (tree) b.skirt = emitter(new THREE.Vector3(b.x, 2.2 * b.s, b.z), { radius: 1.35 * b.s, fire: .1, smoke: 0, light: false });   // flames licking up the sides
+    if (tree) b.base = emitter(new THREE.Vector3(b.x, .15, b.z), { radius: .3 * b.s, fire: .1, smoke: 0, light: false });   // trunk flames: glow comes from the canopy fire
+  }
+  // Daylight flames: the look test's additive flames vanish against a bright sky, so burning
+  // plants also shed solid, normal-blended tongues of flame off the canopy surface. They go
+  // through the same particle list, so they age yellow -> orange -> sooty red like the rest.
+  const _v = new THREE.Vector3();
+  { // compile the tongue shader at load: prewarm.js (runs after this file) compiles the whole scene once
+    const w = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, transparent: true, depthWrite: false, toneMapped: false }));
+    w.layers.set(1); w.scale.setScalar(.001); camera.updateMatrixWorld(); w.position.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3())); scene.add(w);
+    let n = 0; (function drop() { if (++n < 5) return requestAnimationFrame(drop); scene.remove(w); })();
+  }
+  function tongues(b, dt, amount) {
+    b.accT = (b.accT || 0) + dt * amount * (b.type === 'tree' ? 110 : 40);
+    const tree = b.type === 'tree', k = 1 - (b.shrunk || 0) * (tree ? .38 : .55);
+    const cy = tree ? 3.0 * b.s : .45 * b.s, r = (tree ? 1.35 : .6) * b.s * k;
+    while (b.accT > 1) {
+      b.accT--;
+      const a = Math.random() * 6.28, up = Math.random() * .9 - .15;   // sides and top of the canopy
+      _v.set(b.x + Math.cos(a) * r * Math.sqrt(1 - up * up), cy + up * r * .9, b.z + Math.sin(a) * r * Math.sqrt(1 - up * up));
+      const hot = Math.random();
+      const mat = new THREE.SpriteMaterial({ map: flameTex, color: hot < .25 ? 0xFFB020 : hot < .8 ? 0xFF5A12 : 0xC8280A, transparent: true, depthWrite: false, opacity: .95, rotation: Math.random() * 6.28, toneMapped: false });
+      const sp = new THREE.Sprite(mat); sp.layers.set(1); sp.position.copy(_v); const s0 = (.45 + Math.random() * .45) * (tree ? b.s : .7 * b.s); sp.scale.setScalar(s0); scene.add(sp);
+      // kind 'tongue' takes the smoke path in updateFX: fixed colour, fade in then out, slows as it rises.
+      parts.push({ s: sp, kind: 'tongue', vel: new THREE.Vector3((Math.random() - .5) * .5, 1.4 + Math.random() * 1.2, (Math.random() - .5) * .5), life: .55 + Math.random() * .45, t: 0, size0: s0, size1: s0 * .3, opacity: 1.7, spin: (Math.random() - .5) * 1.2 });
+    }
+  }
+  function stop(e) { if (!e) return; e.fire = 0; e.smoke = 0; const i = emitters.indexOf(e); if (i >= 0) emitters.splice(i, 1); }
+  function charNow(b) {         // seen already burnt (joined late): go straight to the husk
+    prepare(b); stop(b.fx); stop(b.base); stop(b.skirt); b.fx = b.base = b.skirt = null;
+    b.state = 'burnt'; setStage(b, 2); shrink(b, 1); b.scorch.material.opacity = .9;
+  }
+  function shrink(b, u) {
+    const k = 1 - u * (b.type === 'tree' ? .38 : .55);
+    b.shrunk = u;
+    for (const p of b.parts) if (p.leaf) p.m.scale.set(k, k * (1 - u * .1), k);
+  }
+  function replant(b) {
+    if (!b.parts || b.state === 'idle' || !b.state) return;
+    stop(b.fx); stop(b.base); stop(b.skirt); b.fx = b.base = b.skirt = null;
+    b.state = 'idle'; setStage(b, -1); shrink(b, 0); b.scorch.material.opacity = 0;
+  }
+  function burnLen(b) { return ((MAPA && MAPA.actions[b.type] && MAPA.actions[b.type].burnSec) || 30); }
+  let MAPA = null; fetch('/town.json').then(r => r.json()).then(m => { MAPA = m; });
+
+  function update(dt) {
+    for (const b of BURN) {
+      if (b.state !== 'burning' && b.state !== 'smolder') continue;
+      b.t = (performance.now() - b.t0) / 1000;   // wall clock, so a slow frame or hidden tab keeps pace with the server
+      const L = burnLen(b), tree = b.type === 'tree';
+      if (b.state === 'burning') {
+        const ramp = Math.min(1, b.t / (tree ? 5 : 2.5)), fade = Math.max(0, Math.min(1, (L - b.t) / 6));
+        b.fx.fire = (.1 + ramp * (tree ? 2.1 : 1.4)) * fade; b.fx.smoke = (.3 + ramp * (tree ? 2.2 : 1.4)) * Math.max(.4, fade);
+        if (b.base) { b.base.fire = Math.min(1, b.t / 2) * .8 * fade; b.skirt.fire = ramp * 1.6 * fade; }
+        const u = Math.min(1, b.t / (L * .8));
+        setStage(b, u < .15 ? -1 : u < .4 ? 0 : u < .75 ? 1 : 2);
+        shrink(b, Math.max(0, (u - .2) / .8));
+        b.scorch.material.opacity = Math.min(.9, b.t / 8);
+        tongues(b, dt, ramp * fade);
+        if (b.t > L) { b.state = 'smolder'; b.t0 = performance.now(); b.t = 0; stop(b.base); stop(b.skirt); b.base = b.skirt = null; b.fx.fire = 0; b.fx.smoke = .7; setStage(b, 2); shrink(b, 1); }
+      } else {
+        b.fx.smoke = Math.max(0, .7 - b.t / 25);
+        if (b.t > 18) { stop(b.fx); b.fx = null; b.state = 'burnt'; }
+      }
+    }
+    updateOthers(dt);
+    // first-person lighter flick
+    if (flickT > 0) {
+      flickT = Math.max(0, flickT - dt);
+      const u = 1 - flickT / FLICK;                     // 0..1
+      const up = u < .2 ? u / .2 : u > .8 ? (1 - u) / .2 : 1;
+      lg.position.set(-.9, -.95 + up * .9, .1); lg.rotation.set(-.2, .35, .18 - up * .1);
+      lg.visible = up > 0;
+      const lit = u > .28 && u < .85;
+      flame.visible = lit; if (lit) { const f = .8 + Math.random() * .35; flame.scale.set(.09 * f, .16 * f, 1); }
+      wheel.rotation.x = u < .3 ? u * 30 : wheel.rotation.x;
+    }
+  }
+
+  // ---------- server state ----------
+  function onMeta(m, fixtures) {
+    for (const [id, f] of fixtures) {
+      const b = byId.get(id); if (!b) continue;
+      const st = m.objects[id] || {};
+      if (st.fire) { if (b.state !== 'burning' && b.state !== 'smolder') ignite(b); }
+      else if (st.burnt) { if (!b.state || b.state === 'idle') charNow(b); }
+      else replant(b);
+    }
+  }
+  function onInv(m) {
+    if (!('lighter' in m)) return;   // other pocket items (pliers...) send their own fields
+    const had = lighter; lighter = m.lighter || 0;
+    const el = document.getElementById('inv');
+    el.hidden = !lighter; el.innerHTML = `<i></i>Lighter <em>${lighter}</em>`;
+    el.title = `${lighter} lights left`;
+    if (lighter && !had) feed2('You have a lighter. Walk up to trash, a bush or a tree and press <kbd>F</kbd>.');
+  }
+  function feed2(html) { const f = document.getElementById('feed'), d = document.createElement('div'); d.innerHTML = html; f.prepend(d); setTimeout(() => d.remove(), 6000); }
+  // Other players see you lean in and spark the lighter at hand height for a moment.
+  const others = new Map();   // entity id -> { t, flame }
+  function onFlick(isMe, id) {
+    if (isMe) { flickT = FLICK; return; }
+    const v = window.__net && __net.ents.get(id); if (!v || !v.obj || !v.model) return;
+    let o = others.get(id);
+    if (!o) {
+      const fl = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, color: 0xFFB347, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+      fl.position.set(.22, .05, .42); fl.visible = false; fxl(fl); v.obj.add(fl);
+      o = { flame: fl, v }; others.set(id, o);
+    }
+    o.t = FLICK;
+  }
+  function updateOthers(dt) {
+    for (const [id, o] of others) {
+      o.t = Math.max(0, o.t - dt);
+      const u = 1 - o.t / FLICK, up = o.t <= 0 ? 0 : u < .2 ? u / .2 : u > .8 ? (1 - u) / .2 : 1;
+      o.v.model.g.rotation.x = up * .32;
+      const lit = o.t > 0 && u > .28 && u < .85;
+      o.flame.visible = lit; if (lit) { const f = .8 + Math.random() * .35; o.flame.scale.set(.12 * f, .22 * f, 1); }
+      if (o.t <= 0) others.delete(id);
+    }
+  }
+  // Prompt text for the nearest action, so you know before you press.
+  function verb(type, base) {
+    if (BURNABLE.has(type) && !lighter) return base + ' (need a lighter)';
+    return base;
+  }
+
+  // ---------- first-person lighter (left hand) ----------
+  const FLICK = 1.1; let flickT = 0;
+  const lg = new THREE.Group(); lg.visible = false; vm.add(lg);
+  (function () {
+    const body = 0xD8343F;
+    put(B(.11, .26, .06, .018), body, lg, 0, 0, 0);                                   // translucent-red plastic body
+    put(B(.1, .2, .005), 0xF3B7AE, lg, 0, -.02, .031);                                 // label
+    put(B(.114, .07, .064, .006), METAL, lg, 0, .16, 0);                               // steel hood
+    for (let k = 0; k < 3; k++) put(B(.016, .03, .004), DARKM, lg, -.03 + k * .03, .165, .033); // hood vents
+    put(B(.03, .03, .03), 0x2a2a2a, lg, .03, .14, 0);                                   // fork / gas valve
+    // glove: fist around the body, thumb on the wheel
+    const GL = 'tx:knit|' + 0x7C8299;
+    put(B(.16, .2, .11, .045), GL, lg, .03, -.07, -.02);
+    for (let k = 0; k < 4; k++) put(CYL(.028, .028, .09, 8), GL, lg, .0, -.13 + k * .045, .055, { rz: Math.PI / 2 });
+    tube([[.08, -.04, .03], [.06, .1, .04], [.0, .2, .02]], .03, GL, lg, 8);
+    put(new THREE.SphereGeometry(.027, 10, 8), 0xF2C6A0, lg, -.005, .205, .02);
+    limb([.07, -.15, -.03], [.2, -.6, -.1], .085, .08, 'tx:canvas|' + 0xE07A2E, lg, 14);
+  })();
+  const wheel = put(CYL(.028, .028, .05, 12), 0x5E636E, lg, -.015, .205, 0, { rz: Math.PI / 2 });
+  const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, color: 0xFFB347, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  flame.position.set(-.015, .31, 0); flame.visible = false; lg.add(flame);
+  lg.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } });
+
+  // ---------- Sunny Mart sells lighters ----------
+  const stick = sign(['LIGHTERS $5'], 1.1, .3, '#E8343F', '#FFFFFF', scene, 4.2, 1.75, -5.93);
+  stick.material.toneMapped = false;
+
+  window.__look = (y, p) => { yaw = y; pitch = p; };   // test hooks for in-engine screenshots
+  window.__burn = BURN;
+  return { update, onMeta, onInv, onFlick, verb, get lighter() { return lighter; } };
+})();
+
+// ===================== procedural glass fracture (GAME-84) =====================
+// Any glass pane can shatter from the exact point it was hit. The crack pattern is a
+// radial + concentric fracture (the "spider web" real glass makes) built from a seed,
+// so every break is different but every client builds the same one from the same
+// numbers. Pieces near the impact fall out as physics shards, the rest stay jammed in
+// the frame with cracks running through them. Later hits knock out more.
+//
+// Usage, for any THREE.Mesh whose geometry is a Box/PlaneGeometry in its local XY plane:
+//   GLASS.shatter(mesh, { seed, hits: [[u, v], ...], quiet, dir, hi })
+//     u, v in -1..1 across the pane (0,0 is the centre); optional 3rd value: 1 if hit from
+//     the side the mesh's +Z faces (default), -1 from behind. Fallen glass lands on the hit side. quiet = build it already
+//     broken (late join), with the fallen glass lying on the ground instead of flying.
+//   GLASS.board(mesh)    plywood over the hole while the town gets round to it
+//   GLASS.restore(mesh)  fresh glass, debris swept up
+//   GLASS.state(mesh)    { seed, hits, boarded } or null
+// Call GLASS.update(dt) once a frame.
+const GLASS = (() => {
+  const panes = new Map();        // mesh -> pane state
+  const flying = [];              // { m, b, t, pane }  shards with live physics bodies
+  const MAX_FLYING = 90, MAX_BODIES_PER_HIT = 18, SETTLE_S = 5;
+
+  // Seeded RNG (mulberry32): same seed, same cracks, on every client.
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+
+  // Grimy, slightly green safety glass. Kept in the main layer so the ink pass outlines
+  // the jagged hole and each loose piece.
+  // Vertex colours carry the tint and alpha: crazed white near the hit, dirty clear further out.
+  const crackedMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: .14, metalness: 0, clearcoat: .8, envMapIntensity: .9,
+    transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide });
+  const flyMat = new THREE.MeshPhysicalMaterial({ color: 0xBFE4EE, roughness: .08, clearcoat: 1, envMapIntensity: 1.5,
+    transparent: true, opacity: .72, side: THREE.DoubleSide });
+  const groundMat = new THREE.MeshPhysicalMaterial({ color: 0x86BEC2, roughness: .12, clearcoat: .6, envMapIntensity: .7,
+    transparent: true, opacity: .75, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
+  // Cracks are thin ribbons, not 1px lines, so they survive the Blend pass: an ink core with a white glint.
+  const crackMat = new THREE.MeshBasicMaterial({ color: 0xF6FCFF, transparent: true, opacity: .9, depthWrite: false, side: THREE.DoubleSide });
+  const crackInkMat = new THREE.MeshBasicMaterial({ color: 0x2C3438, transparent: true, opacity: .75, depthWrite: false, side: THREE.DoubleSide });
+
+  // ---------- plywood ----------
+  const plyTex = (() => {
+    const s = 256, cv = document.createElement('canvas'); cv.width = cv.height = s; const g = cv.getContext('2d');
+    g.fillStyle = '#C7A06A'; g.fillRect(0, 0, s, s);
+    const r = rng(77);
+    for (let i = 0; i < 70; i++) { // grain
+      g.strokeStyle = `rgba(${120 + r() * 40 | 0},${80 + r() * 30 | 0},${40 + r() * 20 | 0},${.12 + r() * .18})`; g.lineWidth = 1 + r() * 2.5;
+      const y = r() * s; g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= s; x += 16) g.lineTo(x, y + Math.sin(x * .03 + i) * (3 + r() * 5)); g.stroke();
+    }
+    for (let i = 0; i < 5; i++) { const x = r() * s, y = r() * s, rad = 5 + r() * 9; g.fillStyle = 'rgba(110,70,35,.35)'; g.beginPath(); g.ellipse(x, y, rad * 1.8, rad, 0, 0, 6.3); g.fill(); }
+    for (let i = 0; i < 30; i++) { // rain streaks and grime
+      const x = r() * s; const gr = g.createLinearGradient(0, 0, 0, s); gr.addColorStop(0, 'rgba(60,45,30,.0)'); gr.addColorStop(1, `rgba(60,45,30,${.1 + r() * .2})`);
+      g.fillStyle = gr; g.fillRect(x, r() * s * .5, 2 + r() * 6, s);
+    }
+    const eg = g.createRadialGradient(s / 2, s / 2, s * .3, s / 2, s / 2, s * .75); eg.addColorStop(0, 'rgba(40,30,20,0)'); eg.addColorStop(1, 'rgba(40,30,20,.45)');
+    g.fillStyle = eg; g.fillRect(0, 0, s, s);
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+  })();
+  const plyMat = new THREE.MeshStandardMaterial({ map: plyTex, color: 0xBFAE95, roughness: .95 }); // weathered, not lumber-yard fresh
+  const battenMat = new THREE.MeshStandardMaterial({ color: 0x8E7550, roughness: .95 });
+  const nailMat = new THREE.MeshStandardMaterial({ color: 0x55585C, roughness: .5, metalness: .6 });
+
+  // ---------- geometry helpers ----------
+  function clipRect(poly, hw, hh) { // Sutherland-Hodgman against the pane rectangle
+    const edges = [[1, 0, hw], [-1, 0, hw], [0, 1, hh], [0, -1, hh]]; // n.x*x + n.y*y <= d
+    let out = poly;
+    for (const [nx, ny, d] of edges) {
+      const inp = out; out = []; if (!inp.length) break;
+      for (let i = 0; i < inp.length; i++) {
+        const a = inp[i], b = inp[(i + 1) % inp.length];
+        const da = nx * a[0] + ny * a[1] - d, db = nx * b[0] + ny * b[1] - d;
+        if (da <= 0) out.push(a);
+        if ((da < 0) !== (db < 0) && da !== db) { const t = da / (da - db); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
+      }
+    }
+    return out;
+  }
+  function area(poly) { let s = 0; for (let i = 0; i < poly.length; i++) { const a = poly[i], b = poly[(i + 1) % poly.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; }
+  function centroid(poly) { let x = 0, y = 0; for (const p of poly) { x += p[0]; y += p[1]; } return [x / poly.length, y / poly.length]; }
+
+  // Build the fracture: rays out from the impact, rings around it, jittered and shared
+  // so neighbouring pieces fit like a real crack. Returns pieces in pane-local metres.
+  function fracture(w, h, ix, iy, seed) {
+    const r = rng(seed), hw = w / 2, hh = h / 2;
+    const R = Math.max(...[[-hw, -hh], [hw, -hh], [-hw, hh], [hw, hh]].map(([x, y]) => Math.hypot(x - ix, y - iy))) * 1.3;
+    const nRays = 9 + Math.floor(r() * 6), step = Math.PI * 2 / nRays, a0 = r() * 6.283;
+    const ang = []; for (let i = 0; i < nRays; i++) ang.push(a0 + i * step + (r() - .5) * step * .7);
+    const rings = [0]; let rr = .05 + r() * .05;
+    while (rr < R) { rings.push(rr); rr *= 1.55 + r() * .7; }
+    rings.push(R);
+    const nr = rings.length;
+    // Ring vertices, plus a kinked midpoint on every radial and ring segment.
+    const P = [], MR = [], MA = [];
+    for (let i = 0; i < nRays; i++) {
+      P[i] = []; MR[i] = []; MA[i] = [];
+      for (let j = 0; j < nr; j++) {
+        if (j === 0) { P[i][j] = [ix, iy]; continue; }
+        const a = ang[i] + (r() - .5) * .12, d = rings[j] * (j === nr - 1 ? 1 : .82 + r() * .36);
+        P[i][j] = [ix + Math.cos(a) * d, iy + Math.sin(a) * d];
+      }
+    }
+    for (let i = 0; i < nRays; i++) for (let j = 0; j < nr - 1; j++) {
+      const A = P[i][j], B = P[i][j + 1], L = Math.hypot(B[0] - A[0], B[1] - A[1]), k = (r() - .5) * .22 * L, t = .35 + r() * .3;
+      const nx = -(B[1] - A[1]) / (L || 1), ny = (B[0] - A[0]) / (L || 1);
+      MR[i][j] = [A[0] + (B[0] - A[0]) * t + nx * k, A[1] + (B[1] - A[1]) * t + ny * k];
+    }
+    for (let i = 0; i < nRays; i++) for (let j = 1; j < nr; j++) {
+      const A = P[i][j], B = P[(i + 1) % nRays][j], m = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+      const out = Math.hypot(m[0] - ix, m[1] - iy) || 1, bulge = rings[j] * (.04 + r() * .1);
+      MA[i][j] = [m[0] + (m[0] - ix) / out * bulge, m[1] + (m[1] - iy) / out * bulge];
+    }
+    // Some ring cracks never formed: those edges are drawn faint or not at all.
+    const ringCrack = []; for (let i = 0; i < nRays; i++) { ringCrack[i] = []; for (let j = 1; j < nr; j++) ringCrack[i][j] = j === nr - 1 ? 0 : (r() < (j <= 2 ? .92 : .55) ? 1 : 0); }
+    const pieces = [];
+    for (let i = 0; i < nRays; i++) {
+      const i2 = (i + 1) % nRays;
+      for (let j = 0; j < nr - 1; j++) {
+        const poly = j === 0
+          ? [P[i][0], MR[i][0], P[i][1], MA[i][1], P[i2][1], MR[i2][0]]
+          : [P[i][j], MR[i][j], P[i][j + 1], MA[i][j + 1], P[i2][j + 1], MR[i2][j], P[i2][j], MA[i][j]];
+        if (area(poly) < 0) poly.reverse();
+        const c = clipRect(poly, hw, hh); if (c.length < 3) continue;
+        const ar = Math.abs(area(c)); if (ar < 1e-4) continue;
+        const [cx, cy] = centroid(c);
+        pieces.push({ poly: c, cx, cy, area: ar, ring: j, ray: i, tilt: [(r() - .5) * .16, (r() - .5) * .16], roll: r(),
+          // Crack lines this piece owns: its leading ray and its outer ring (if it formed).
+          lines: [[P[i][j], MR[i][j], P[i][j + 1]], ...(ringCrack[i][j + 1] ? [[P[i][j + 1], MA[i][j + 1], P[i2][j + 1]]] : [])],
+          // Edges owned by neighbours, drawn only when that neighbour has fallen out (the rim of the hole).
+          inner: j > 0 ? [P[i][j], MA[i][j], P[i2][j]] : null, side: [P[i2][j], MR[i2][j], P[i2][j + 1]] });
+      }
+    }
+    return { pieces, rnd: r };
+  }
+
+  function clipSeg(a, b, hw, hh) { // Liang-Barsky
+    let t0 = 0, t1 = 1; const dx = b[0] - a[0], dy = b[1] - a[1];
+    for (const [pp, q] of [[-dx, a[0] + hw], [dx, hw - a[0]], [-dy, a[1] + hh], [dy, hh - a[1]]]) {
+      if (pp === 0) { if (q < 0) return null; continue; }
+      const t = q / pp; if (pp < 0) { if (t > t1) return null; if (t > t0) t0 = t; } else { if (t < t0) return null; if (t < t1) t1 = t; }
+    }
+    return [[a[0] + dx * t0, a[1] + dy * t0], [a[0] + dx * t1, a[1] + dy * t1]];
+  }
+  function polyGeo(poly, ox, oy, z, tilt) { // centroid fan, faceted normal so each piece glints its own way
+    const pos = [], nrm = [], n = new THREE.Vector3(tilt ? tilt[0] : 0, tilt ? tilt[1] : 0, 1).normalize();
+    const [cx, cy] = centroid(poly);
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      pos.push(cx - ox, cy - oy, z, a[0] - ox, a[1] - oy, z, b[0] - ox, b[1] - oy, z);
+      for (let k = 0; k < 3; k++) nrm.push(n.x, n.y, n.z);
+    }
+    return { pos, nrm };
+  }
+  function buildMesh(list, mat) {
+    const pos = [], nrm = []; for (const g of list) { pos.push(...g.pos); nrm.push(...g.nrm); }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    return new THREE.Mesh(geo, mat);
+  }
+  function clearGroup(p) { if (!p.group) return; p.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); p.group.parent && p.group.parent.remove(p.group); p.group = null; }
+  function clearDebris(p) {
+    for (const o of p.ground) { scene.remove(o); o.geometry.dispose(); } p.ground.length = 0;
+    for (let i = flying.length - 1; i >= 0; i--) if (flying[i].pane === p) dropFlying(i);
+  }
+  function dropFlying(i) { const f = flying[i]; scene.remove(f.m); f.m.geometry.dispose(); if (f.b) world.removeBody(f.b); flying.splice(i, 1); }
+
+  // Sidewalk slabs are visual only (physics ground is y=0), so find the floor by raycasting
+  // the rendered scene once per pane, a step out from the foot of the window.
+  const caster = new THREE.Raycaster(); caster.layers.set(0);
+  function floorAt(mesh, outward) {
+    const wp = mesh.getWorldPosition(new THREE.Vector3()).addScaledVector(outward, .8);
+    caster.set(wp, new THREE.Vector3(0, -1, 0)); caster.far = wp.y + 1; caster.camera = camera;
+    let hits = []; try { hits = caster.intersectObjects(scene.children, true); } catch { return 0; }
+    const hit = hits.find(h => h.object.isMesh && !h.object.material.transparent && h.object.visible && h.point.y < .35); // skip bins, bags, sills
+    return hit ? hit.point.y : 0;
+  }
+  function dims(mesh) { const g = mesh.geometry.parameters || {}; return [g.width || 1, g.height || 1]; }
+
+  // What falls out for a hit: everything close to it, then a fading chance further out.
+  // Pure function of the pieces and hit list, so late joiners get the same holes.
+  function decideFallen(p) {
+    const [w, h] = p.size, small = Math.min(w, h), big = w * h < 1.2;
+    for (const pc of p.pieces) pc.out = false;
+    p.hits.forEach(([hx, hy], k) => {
+      const holeR = (k === 0 ? .2 + p.holeJit * .18 : .24) * (big ? 1.7 : 1) + small * .08;
+      for (const pc of p.pieces) {
+        if (pc.out) continue;
+        const d = Math.hypot(pc.cx - hx, pc.cy - hy);
+        const chance = d < holeR ? 1 : Math.pow(holeR / d, 2.4) * (k === 0 ? .55 : .8);
+        if (pc.roll < chance) { pc.out = true; pc.outBy = k; }
+      }
+    });
+    if (p.hits.length >= 3) { // third hit: it all goes, except teeth stuck in the frame
+      const [hw, hh] = [w / 2, h / 2];
+      for (const pc of p.pieces) if (!pc.out) {
+        const edge = Math.min(hw - Math.abs(pc.cx), hh - Math.abs(pc.cy));
+        if (edge > .1 || pc.area > .05) { pc.out = true; pc.outBy = p.hits.length - 1; }
+      }
+    }
+  }
+
+  function rebuildStanding(p) {
+    clearGroup(p);
+    const { mesh } = p, g = new THREE.Group();
+    g.position.copy(mesh.position); g.quaternion.copy(mesh.quaternion); mesh.parent.add(g); p.group = g;
+    const keep = p.pieces.filter(pc => !pc.out);
+    if (keep.length) {
+      const near = (x, y) => Math.min(...p.hits.map(([hx, hy]) => Math.hypot(x - hx, y - hy)));
+      const m = buildMesh(keep.map(pc => polyGeo(pc.poly, 0, 0, 0, pc.tilt)), crackedMat);
+      const cols = [], tint = new THREE.Color(0x9CC7D2), frost = new THREE.Color(0xEAF6F8), c = new THREE.Color();
+      for (const pc of keep) {
+        const k = Math.max(0, 1 - near(pc.cx, pc.cy) / .7), a = .55 + k * .35;
+        c.copy(tint).lerp(frost, k);
+        for (let n = 0; n < pc.poly.length * 3; n++) cols.push(c.r, c.g, c.b, a);
+      }
+      m.geometry.setAttribute('color', new THREE.Float32BufferAttribute(cols, 4)); m.renderOrder = 2; g.add(m);
+      // Crack ribbons on the effects layer (no ink pass): wide on the rim of the hole, fine far out.
+      const glint = [], ink = [], [hw, hh] = [p.size[0] / 2, p.size[1] / 2], key = new Map(p.pieces.map(pc => [pc.ray + ':' + pc.ring, pc]));
+      const nRays = Math.max(...p.pieces.map(pc => pc.ray)) + 1;
+      const fell = (ray, ring) => { const n = key.get(((ray + nRays) % nRays) + ':' + ring); return !n || n.out; };
+      const ribbon = (out, a, b, w, z, off) => {
+        const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L * w, ny = dx / L * w, ox = -dy / L * off, oy = dx / L * off;
+        const A = [a[0] + ox, a[1] + oy], B = [b[0] + ox, b[1] + oy];
+        out.push(A[0] - nx, A[1] - ny, z, B[0] - nx, B[1] - ny, z, B[0] + nx, B[1] + ny, z, A[0] - nx, A[1] - ny, z, B[0] + nx, B[1] + ny, z, A[0] + nx, A[1] + ny, z);
+      };
+      const add = (ln, rim) => { for (let k = 0; k < ln.length - 1; k++) {
+        const c2 = clipSeg(ln[k], ln[k + 1], hw, hh); if (!c2) continue;
+        const d = near((c2[0][0] + c2[1][0]) / 2, (c2[0][1] + c2[1][1]) / 2), w = rim ? .02 : .007 + .009 * Math.max(0, 1 - d / 1.2);
+        ribbon(ink, c2[0], c2[1], w, .02, 0); ribbon(glint, c2[0], c2[1], w * .6, .021, w * 1.5);
+      } };
+      for (const pc of keep) {
+        for (const ln of pc.lines) add(ln, false);
+        if (pc.inner && fell(pc.ray, pc.ring - 1)) add(pc.inner, true);
+        if (fell(pc.ray + 1, pc.ring)) add(pc.side, true);
+        if (pc.ring > 0 && fell(pc.ray - 1, pc.ring)) add(pc.lines[0], true);
+      }
+      for (const [list, mat] of [[ink, crackInkMat], [glint, crackMat]]) {
+        const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(list, 3));
+        const rm = new THREE.Mesh(geo, mat); rm.layers.set(1); rm.renderOrder = 3; g.add(rm);
+      }
+    }
+  }
+
+  // Fallen pieces: thrown with physics when we saw it happen, lying on the ground if not.
+  function spill(p, pieces, quiet, dir) {
+    const { mesh } = p; mesh.updateMatrixWorld(true);
+    const q = mesh.getWorldQuaternion(new THREE.Quaternion());
+    const nrm = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    // Glass mostly lands on the side it was hit from: the street, not the (painted-on) shop interior.
+    const outward = nrm.clone().multiplyScalar(p.side);
+    if (p.floor === undefined) p.floor = floorAt(mesh, outward);
+    const r = rng(p.seed ^ (p.hits.length * 2654435761));
+    pieces.sort((a, b) => a.dist - b.dist);
+    let bodies = 0;
+    const groundList = [];
+    for (const pc of pieces) {
+      const wp = mesh.localToWorld(new THREE.Vector3(pc.cx, pc.cy, 0));
+      if (quiet || bodies >= MAX_BODIES_PER_HIT || pc.area > .5) {
+        // Lies flat near the foot of the wall, mostly on the side it was hit from.
+        if (groundList.length > 60) continue;
+        const d = .25 + r() * 1.4;
+        const gp = new THREE.Vector3(wp.x, 0, wp.z).addScaledVector(outward, d);
+        gp.x += (r() - .5) * .6; gp.z += (r() - .5) * .6;
+        gp.y = p.floor + .012 + groundList.length * .0006; // on the sidewalk, not under it
+        const s = Math.min(1, (.05 + r() * .07) / Math.sqrt(pc.area)); // it breaks up again when it lands: small bits
+        const poly = pc.poly.map(([x, y]) => [(x - pc.cx) * s, (y - pc.cy) * s]);
+        const g = polyGeo(poly, 0, 0, 0, null);
+        const m4 = new THREE.Matrix4().makeRotationX(-Math.PI / 2 + (r() - .5) * .3).premultiply(new THREE.Matrix4().makeRotationY(r() * 6.283)).setPosition(gp); // a little propped up, so the ink catches the edges
+        const v = new THREE.Vector3();
+        for (let k = 0; k < g.pos.length; k += 3) { v.set(g.pos[k], g.pos[k + 1], g.pos[k + 2]).applyMatrix4(m4); g.pos[k] = v.x; g.pos[k + 1] = v.y; g.pos[k + 2] = v.z; }
+        const nn = new THREE.Vector3(0, 0, 1).transformDirection(m4); for (let k = 0; k < g.nrm.length; k += 3) { g.nrm[k] = nn.x; g.nrm[k + 1] = nn.y; g.nrm[k + 2] = nn.z; }
+        groundList.push(g);
+        continue;
+      }
+      bodies++;
+      const g = polyGeo(pc.poly, pc.cx, pc.cy, 0, null);
+      const m = buildMesh([g], flyMat); m.position.copy(wp); m.quaternion.copy(q); m.castShadow = true; scene.add(m);
+      let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9; for (const [x, y] of pc.poly) { minx = Math.min(minx, x); maxx = Math.max(maxx, x); miny = Math.min(miny, y); maxy = Math.max(maxy, y); }
+      const b = new CANNON.Body({ mass: Math.max(.03, pc.area * 6), shape: new CANNON.Box(new CANNON.Vec3(Math.max(.02, (maxx - minx) * .35), Math.max(.02, (maxy - miny) * .35), .006)), linearDamping: .05, angularDamping: .2 });
+      b.collisionFilterGroup = 4; b.collisionFilterMask = 1;
+      b.position.set(wp.x, wp.y, wp.z); b.quaternion.set(q.x, q.y, q.z, q.w);
+      // Close to the hit: punched through along the throw. Further out: mostly just drops.
+      const kick = Math.max(.15, 1 - pc.dist / .8);
+      const v = outward.clone().multiplyScalar(.3 + r() * 1.6 * kick).addScaledVector(dir, .3 * kick);
+      b.velocity.set(v.x + (r() - .5) * .8, v.y + r() * .8 * kick, v.z + (r() - .5) * .8);
+      b.angularVelocity.set((r() - .5) * 14 * kick + (r() - .5) * 2, (r() - .5) * 8 * kick, (r() - .5) * 14 * kick + (r() - .5) * 2);
+      world.addBody(b);
+      flying.push({ m, b, t: 0, pane: p });
+      while (flying.length > MAX_FLYING) dropFlying(0);
+    }
+    if (groundList.length) { const gm = buildMesh(groundList, groundMat); gm.receiveShadow = true; scene.add(gm); p.ground.push(gm); }
+  }
+
+  function applyHit(p, k, quiet, dir) {
+    const before = new Set(p.pieces.filter(pc => pc.out));
+    decideFallen(p);
+    const [hx, hy] = p.hits[k];
+    const newly = p.pieces.filter(pc => pc.out && !before.has(pc));
+    for (const pc of newly) pc.dist = Math.hypot(pc.cx - hx, pc.cy - hy);
+    spill(p, newly, quiet, dir);
+    rebuildStanding(p);
+  }
+
+  function shatter(mesh, { seed, hits, quiet = false, dir = null, hi = null }) {
+    if (!mesh || !hits || !hits.length) return;
+    let p = panes.get(mesh);
+    if (p && (p.seed !== seed || p.boarded)) { restore(mesh); p = null; }
+    if (!p) {
+      const [w, h] = dims(mesh);
+      const [u, v] = hits[0];
+      const fr = fracture(w, h, u * w / 2 * .92, v * h / 2 * .92, seed);
+      p = { mesh, seed, side: hits[0][2] || 1, size: [w, h], pieces: fr.pieces, holeJit: fr.rnd(), hits: [], ground: [], group: null, hi, boarded: false, boards: null };
+      panes.set(mesh, p);
+      mesh.visible = false; if (hi) hi.visible = false;
+    }
+    // Kick direction: through the glass, away from whoever threw it.
+    const d = new THREE.Vector3(0, 0, -p.side).applyQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
+    for (let k = p.hits.length; k < hits.length; k++) {
+      const [u, v] = hits[k], [w, h] = p.size;
+      p.hits.push([u * w / 2 * .92, v * h / 2 * .92]);
+      applyHit(p, k, quiet, d);
+    }
+  }
+
+  function board(mesh) {
+    const p = panes.get(mesh); if (!p || p.boarded) return;
+    p.boarded = true; clearGroup(p);
+    for (let i = flying.length - 1; i >= 0; i--) if (flying[i].pane === p) dropFlying(i); // swept up
+    for (const o of p.ground) { scene.remove(o); o.geometry.dispose(); } p.ground.length = 0;
+    const [w, h] = p.size, g = new THREE.Group(), r = rng(p.seed + 99);
+    g.position.copy(mesh.position); g.quaternion.copy(mesh.quaternion); mesh.parent.add(g); p.group = g;
+    // One sheet per 1.2 m, cut a bit rough, plus a couple of battens screwed across.
+    const n = Math.max(1, Math.ceil(w / 1.25)), sw = w / n;
+    for (let i = 0; i < n; i++) {
+      const geo = new THREE.BoxGeometry(sw + .02, h + .08, .02);
+      const uv = geo.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * sw * .8 + r(), uv.getY(k) * h * .8 + r());
+      const sheet = new THREE.Mesh(geo, plyMat); sheet.position.set(-w / 2 + sw * (i + .5), (r() - .5) * .03, .1 + i * .002); sheet.rotation.z = (r() - .5) * .025;
+      sheet.castShadow = sheet.receiveShadow = true; g.add(sheet);
+    }
+    const nb = h > 1.2 ? 2 : 1;
+    for (let k = 0; k < nb; k++) {
+      const y = nb === 1 ? 0 : (k ? -1 : 1) * h * .28, bt = new THREE.Mesh(new THREE.BoxGeometry(w + .18, .09, .035), battenMat);
+      bt.position.set(0, y, .13); bt.rotation.z = (r() - .5) * .08; bt.castShadow = true; g.add(bt);
+      for (const sx of [-1, 1]) { const nl = new THREE.Mesh(new THREE.CylinderGeometry(.012, .012, .01, 6), nailMat); nl.rotation.x = Math.PI / 2; nl.position.set(sx * (w / 2 + .03), y, .152); g.add(nl); }
+    }
+  }
+
+  function restore(mesh) {
+    const p = panes.get(mesh); if (!p) return;
+    clearGroup(p); clearDebris(p);
+    mesh.visible = true; if (p.hi) p.hi.visible = true;
+    panes.delete(mesh);
+  }
+
+  function update(dt) {
+    for (let i = flying.length - 1; i >= 0; i--) {
+      const f = flying[i]; if (!f.b) continue;
+      f.t += dt;
+      // Physics ground is y=0 under the sidewalk slab: stop shards on the slab instead.
+      if (f.b.position.y < f.pane.floor + .012 && f.pane.floor > .02) { f.b.position.y = f.pane.floor + .012; f.b.velocity.set(0, 0, 0); f.b.angularVelocity.set(0, 0, 0); f.t = SETTLE_S + 1; }
+      f.m.position.copy(f.b.position); f.m.quaternion.copy(f.b.quaternion);
+      // Once it has landed, drop the physics body: the shard stays as a plain mesh.
+      if (f.t > SETTLE_S || f.b.sleepState === 2 || f.b.position.y < -2) { world.removeBody(f.b); f.b = null; if (f.m.position.y < -2) dropFlying(i); }
+    }
+  }
+
+  function state(mesh) { const p = panes.get(mesh); return p ? { seed: p.seed, hits: p.hits.length, boarded: p.boarded, standing: p.pieces.filter(pc => !pc.out).length, fallen: p.pieces.filter(pc => pc.out).length, floor: p.floor } : null; }
+  // For the shader prewarm (tools/prewarm.js): [material, needs RGBA vertex colours].
+  const materials = [[crackedMat, true], [flyMat], [groundMat], [crackMat], [crackInkMat], [plyMat], [battenMat], [nailMat]];
+  return { shatter, board, restore, update, state, fracture, materials, get flying() { return flying.length; } };
+})();
+
+// ===================== throwable junk meshes (GAME-82) =====================
+// Runs inside the look-test module, so it reuses its materials and helpers (put, B, CYL,
+// lumpy, bottleMesh, getMat). One builder per item type in items.mjs; each is centred on
+// the point the hand grips, long axis up, at world scale.
+const ITEMS = (() => {
+  const CAN_COLS = [0xE8343F, 0x3FA8E8, 0x26D3A0, 0xF2C230, 0x8F6BFF, 0xFF7B54];
+  const canLabel = {};
+  function canMat(hex) {
+    if (canLabel[hex]) return canLabel[hex];
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128; const g = cv.getContext('2d');
+    const c = '#' + new THREE.Color(hex).getHexString();
+    g.fillStyle = c; g.fillRect(0, 0, 256, 128);
+    g.fillStyle = 'rgba(255,255,255,.92)'; g.fillRect(0, 50, 256, 30);                  // white band
+    g.fillStyle = c; g.font = '900 26px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('FIZZ  POP  FIZZ', 128, 66);
+    for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(60,40,30,${Math.random() * .18})`; g.fillRect(Math.random() * 256, Math.random() * 128, 2 + Math.random() * 6, 1 + Math.random() * 3); } // scuffs
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+    return (canLabel[hex] = new THREE.MeshPhysicalMaterial({ map: t, roughness: .32, metalness: .35, clearcoat: .6 }));
+  }
+  const BUILD = {
+    bottle: () => bottleMesh(),
+    can: (seed) => {
+      const g = new THREE.Group(), hex = CAN_COLS[seed % CAN_COLS.length];
+      const body = new THREE.Mesh(CYL(.066, .066, .17, 18), canMat(hex)); g.add(body);
+      put(CYL(.058, .066, .02, 18), 0xC9CED8, g, 0, .095, 0); put(CYL(.066, .058, .02, 18), 0xC9CED8, g, 0, -.095, 0);   // shoulders
+      put(CYL(.056, .056, .006, 18), 0xB4BAC6, g, 0, .106, 0);                                                        // lid
+      put(B(.03, .004, .016, .002), 0xDDE1E8, g, .012, .11, 0);                                                     // ring pull
+      if (seed % 3 === 0) { g.scale.set(1, .82, 1); g.rotation.z = .12; }                                             // stomped flat-ish
+      return g;
+    },
+    rock: (seed) => {
+      const g = new THREE.Group();
+      const m = put(lumpy(.09, seed % 7 + 1), 'tx:conc|' + [0x9A948A, 0x8E8A84, 0xA89A86][seed % 3], g, 0, 0, 0);
+      m.scale.set(1, .85, 1.1);
+      return g;
+    },
+    brick: (seed) => {
+      const g = new THREE.Group(), base = [0xB4553C, 0xA84C36, 0xC0644A][seed % 3];
+      put(B(.12, .26, .084, .012), base, g, 0, 0, 0);
+      for (const [x, y, z] of [[.061, .06, 0], [.061, -.07, .02], [-.061, .02, -.01]]) put(B(.004, .03, .022, .002), 0x5C2A1E, g, x, y, z);   // chips
+      put(B(.124, .02, .088, .004), 0xCFC6B4, g, 0, .12, 0, { ns: true });                                  // old mortar crust
+      return g;
+    },
+  };
+  function mesh(type, seed = 0) {
+    const g = (BUILD[type] || BUILD.rock)(seed);
+    g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    return g;
+  }
+  const NAMES = { bottle: 'bottle', can: 'can', rock: 'rock', brick: 'brick' };
+  // In the first-person fist: the grip was modelled round a bottle, so smaller things sit
+  // up out of the fingers where you can see them.
+  const HAND = { rock: { y: .1, s: 1.25 }, can: { y: .04, s: 1 }, brick: { y: .05, s: 1 }, bottle: { y: 0, s: 1 } };
+  function inHand(m, type) { const h = HAND[type] || HAND.rock; m.position.y += h.y; m.scale.multiplyScalar(h.s); return m; }
+  return { mesh, inHand, name: t => NAMES[t] || t };
+})();
+
+// ===================== car damage (GAME-83) =====================
+// The server sends dents and per-pane crack levels in the car's own frame (nose +z, y from
+// the ground). The car model's frame is nose -x, so model = (-z, y, x). Each damaged car
+// gets its own finely tessellated copy of the body so dents can push real vertices in,
+// and cracked panes get a crack decal (level 1) or go frosted with a big crack (level 2).
+const CARDMG = (() => {
+  // Split triangles until no edge is longer than MAX, so a dent has vertices to push.
+  function tessellate(geo, MAX) {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    const src = g.attributes.position.array, out = [];
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+    const split = (a, b, c, depth) => {
+      const ab = a.distanceTo(b), bc = b.distanceTo(c), ca = c.distanceTo(a), m = Math.max(ab, bc, ca);
+      if (m <= MAX || depth > 9) { out.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z); return; }
+      if (m === ab) { const p = a.clone().lerp(b, .5); split(a, p, c, depth + 1); split(p, b, c, depth + 1); }
+      else if (m === bc) { const p = b.clone().lerp(c, .5); split(a, b, p, depth + 1); split(a, p, c, depth + 1); }
+      else { const p = c.clone().lerp(a, .5); split(a, b, p, depth + 1); split(p, b, c, depth + 1); }
+    };
+    for (let i = 0; i < src.length; i += 9) split(A.set(src[i], src[i + 1], src[i + 2]).clone(), B.set(src[i + 3], src[i + 4], src[i + 5]).clone(), C.set(src[i + 6], src[i + 7], src[i + 8]).clone(), 0);
+    const ng = new THREE.BufferGeometry();
+    ng.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+    ng.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(out.length / 3 * 2), 2));
+    ng.computeVertexNormals();
+    return ng;
+  }
+  // A white spiderweb crack on a transparent canvas; one texture, rotated per decal.
+  let crackTex = null;
+  function crackTexture() {
+    if (crackTex) return crackTex;
+    const S = 256, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    const rays = [];
+    for (let i = 0; i < 11; i++) {
+      const a0 = i / 11 * Math.PI * 2 + Math.random() * .3, pts = [[S / 2, S / 2]];
+      let r = 0, a = a0; while (r < S * .48) { r += 10 + Math.random() * 18; a += (Math.random() - .5) * .35; pts.push([S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r]); }
+      rays.push(pts);
+    }
+    const stroke = (w, col) => {
+      g.strokeStyle = col; g.lineWidth = w;
+      for (const pts of rays) { g.beginPath(); pts.forEach(([x, y], k) => k ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke(); }
+      for (const rr of [.12, .24, .36]) {               // rings joining neighbouring rays
+        g.beginPath();
+        rays.forEach((pts, k) => { const p = pts[Math.min(pts.length - 1, Math.round(pts.length * rr / .48))]; k ? g.lineTo(...p) : g.moveTo(...p); });
+        g.closePath(); g.stroke();
+      }
+    };
+    stroke(11, 'rgba(30,36,64,.95)'); stroke(3.5, 'rgba(255,255,255,1)');
+    g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.arc(S / 2, S / 2, 7, 0, Math.PI * 2); g.fill();
+    crackTex = new THREE.CanvasTexture(cv); crackTex.colorSpace = THREE.SRGBColorSpace;
+    return crackTex;
+  }
+  // Scraped paint: a dark smudge with bright bare-metal scratches.
+  let scuffTex = null;
+  function scuffTexture() {
+    if (scuffTex) return scuffTex;
+    const S = 128, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
+    const rg = g.createRadialGradient(S / 2, S / 2, 4, S / 2, S / 2, S / 2); rg.addColorStop(0, 'rgba(40,34,52,.55)'); rg.addColorStop(1, 'rgba(40,34,52,0)');
+    g.fillStyle = rg; g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 22; i++) {
+      const x = S * (.2 + Math.random() * .6), y = S * (.2 + Math.random() * .6), a = -.4 + Math.random() * .8, l = 10 + Math.random() * 34;
+      g.strokeStyle = i % 3 ? 'rgba(235,238,245,.85)' : 'rgba(30,26,40,.7)'; g.lineWidth = i % 3 ? 1.2 : 2;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+    }
+    scuffTex = new THREE.CanvasTexture(cv); scuffTex.colorSpace = THREE.SRGBColorSpace; return scuffTex;
+  }
+  const frostMat = () => new THREE.MeshPhysicalMaterial({ color: 0xE8F4FA, roughness: .5, transparent: true, opacity: .82, side: THREE.DoubleSide, depthWrite: false });
+  // car: the model group built by car(); it carries userData.body (mesh) and userData.glass.
+  function state(g) {
+    const u = g.userData;
+    if (!u.dmg) u.dmg = { dents: [], decals: [], glass: {}, geo: null, origGeo: null };
+    return u.dmg;
+  }
+  function ensureGeo(g) {
+    const S = state(g), body = g.userData.body;
+    if (!S.geo) { S.origGeo = body.geometry; S.geo = tessellate(body.geometry, .11); S.rest = S.geo.attributes.position.array.slice(); body.geometry = S.geo; }
+    return S.geo;
+  }
+  const toModel = (p) => new THREE.Vector3(-p[2], p[1], p[0]);
+  // Push vertices near the impact inward, with a crumpled, faceted falloff.
+  function dent(g, d) {
+    const body = g.userData.body; if (!body) return;
+    const geo = ensureGeo(g), pos = geo.attributes.position, arr = pos.array;
+    const P = toModel(d), N = toModel([d[3], d[4], d[5]]).normalize(), R = d[6] * 1.6, depth = d[6] * .7;
+    const v = new THREE.Vector3(), w = new THREE.Vector3();
+    for (let i = 0; i < arr.length; i += 3) {
+      v.set(arr[i], arr[i + 1], arr[i + 2]); w.copy(v).sub(P);
+      const along = w.dot(N); if (along < -.35 || along > .5) continue;
+      const lat = w.addScaledVector(N, -along).length(); if (lat > R) continue;
+      const k = 1 - lat / R, fall = k * k * (3 - 2 * k);
+      const crinkle = .45 + 1.1 * Math.abs(Math.sin(arr[i] * 37.1 + arr[i + 1] * 51.7 + arr[i + 2] * 23.3));
+      arr[i] -= N.x * depth * fall * crinkle; arr[i + 1] -= N.y * depth * fall * crinkle; arr[i + 2] -= N.z * depth * fall * crinkle;
+    }
+    pos.needsUpdate = true; geo.computeVertexNormals(); geo.computeBoundingSphere();
+    // a scuff where the paint got scraped
+    const sc = new THREE.Mesh(new THREE.PlaneGeometry(d[6] * 2.2, d[6] * 2.2), new THREE.MeshBasicMaterial({ map: scuffTexture(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+    sc.position.copy(P).addScaledVector(N, .015 - depth * .55); sc.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), N); sc.rotation.z += Math.random() * 3;
+    sc.scale.set(1, .6 + Math.random() * .5, 1); g.add(sc); state(g).decals.push(sc);
+  }
+  function crack(g, pane, level, at) {
+    const gl = g.userData.glass && g.userData.glass[pane]; if (!gl) return;
+    const S = state(g), prev = S.glass[pane] || 0; if (level <= prev) return;
+    S.glass[pane] = level;
+    const n = gl.n.clone();
+    const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+    const centre = new THREE.Box3().setFromObject(gl.m).getCenter(new THREE.Vector3()).applyMatrix4(inv);   // the pane's middle (meshes may sit at their own origin)
+    const P = at ? toModel(at) : centre;
+    const decal = (size, p) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: crackTexture(), alphaTest: .35, side: THREE.DoubleSide }));
+      m.position.copy(p).addScaledVector(n, .012); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      m.rotateZ(Math.random() * Math.PI * 2); m.renderOrder = 2; g.add(m); S.decals.push(m); return m;
+    };
+    if (level >= 1 && prev < 1) decal(1.0, P);
+    if (level >= 2) {
+      if (!gl.orig) gl.orig = gl.m.material;
+      gl.m.material = frostMat();
+      decal(1.3, centre); decal(.9, P);
+    }
+  }
+  function apply(g, m) {
+    if (!g) return;
+    if (m.dent) dent(g, m.dent);
+    if (m.glass) crack(g, m.glass, m.level, m.at);
+  }
+  function applyAll(g, dmg) {
+    if (!g || !dmg) return;
+    for (const d of dmg.dents || []) dent(g, d);
+    for (const [pane, lvl] of Object.entries(dmg.glass || {})) crack(g, pane, lvl, null);
+  }
+  function reset(g) {
+    const S = g && g.userData.dmg; if (!S) return;
+    if (S.origGeo) { g.userData.body.geometry = S.origGeo; S.geo.dispose(); }
+    for (const d of S.decals) { g.remove(d); d.geometry.dispose(); }
+    for (const pane in g.userData.glass || {}) { const gl = g.userData.glass[pane]; if (gl.orig) { gl.m.material = gl.orig; gl.orig = null; } }
+    g.userData.dmg = null;
+  }
+  return { apply, applyAll, reset };
+})();
+
 // ===================== multiplayer client (GAME-77) =====================
 // Runs inside the look-test module, so it reuses its scene, shader and asset builders.
 // The server owns the world; this file draws it, predicts your own vagrant, and
@@ -1707,34 +2784,144 @@ const NET = (() => {
   // The server has walls at the town edge; mirror them so prediction agrees.
   for (const [x, z, hx, hz] of [[-60.5, 0, .5, 70], [60.5, 0, .5, 70], [0, -60.5, 70, .5], [0, 60.5, 70, .5]]) staticBox(x, 5, z, hx, 10, hz);
 
+  // The look test's three static vagrants are server-driven NPCs now (GAME-85).
+  for (const p of people.splice(0)) { scene.remove(p.g); world.removeBody(p.bodyRef); }
+
   // ---------- entities ----------
   const ents = new Map();            // id -> { kind, type, obj, buf: [{t,p,q,f}], ... }
   const fixtures = new Map();        // fixture id -> desc
+  const fixtureCars = new Map();     // parked car fixture id -> its model group (car damage)
+  const carGroupOf = id => { const v = ents.get(id); return (v && v.obj && v.obj.userData.carG) || fixtureCars.get(id) || null; };
   let me = null, myPid = null, meta = null, ws = null, grabbing = null;
   const INTERP_MS = 110;
   let clockOffset = null;            // serverTime - performance.now()
   const serverNow = () => performance.now() + (clockOffset || 0);
 
-  function shade(hex, l) { const c = new THREE.Color(hex); c.offsetHSL(0, 0, l); return c.getHex(); }
-  const SKINS = [[0xFFD9B8, 0xE9AE88], [0xC98A5E, 0xA86F48], [0xFFE7D6, 0xF0C4A6], [0x8D5A3B, 0x6E432B], [0xE8B48A, 0xC98F66]];
-  const BEARDS = [0x8B5A3C, 0x2E221A, 0xD9C6A8, 0x5A3A2A, 0xB04A2A];
-  function hash(str) { let h = 7; for (const ch of str) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
-  function vagrantLook(e) {
-    const h = hash(e.pid || e.id), col = new THREE.Color(e.color || '#ff6e9e').getHex();
-    const [skin, skinSh] = SKINS[h % SKINS.length];
-    const hat = [0xFF5D8F, 0xF2C230, 0x3FA8E8, 0x26D3A0, 0x8F6BFF][(h >> 3) % 5];
-    return { coat: col, coatSh: shade(col, -.12), hat, hatSh: shade(hat, -.12), pants: [0x4D6FC9, 0x5A4C80, 0x6A6E7E, 0x3E5A8A][(h >> 5) % 4],
-      hoodie: [0x9AA3B8, 0x7A3E4E, 0xD8C9A8, 0x5E7A4A][(h >> 7) % 4], skin, skinSh, beard: BEARDS[(h >> 9) % BEARDS.length], scarf: (h >> 11) % 2 ? 0xE8343F : 0 };
-  }
+  // City looks (GAME-93): the player's colour is the outer layer, the rest is picked from their id.
+  function vagrantLook(e) { return charLook(e.pid || e.id, e.color || '#ff6e9e'); }
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
+  // It is built unbaked and split into six limbs so it can ragdoll (GAME-83).
   function buildVagrant(e) {
-    const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e), rig: true });
-    p.arms = p.parts ? [p.parts.armR, p.parts.armL] : [];
+    const armRig = [], realBake = bake; bake = () => {};
+    let p; try { p = vagrant({ x: 0, z: 0, ry: 0, ...(e.kind === 'npc' ? e.look : vagrantLook(e)), armRig }); } finally { bake = realBake; }
+    p.arms = armRig;
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
+    rig(p);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
-    // The beer bottle everyone carries, in the right glove (others see it raised and thrown).
-    if (p.parts) { const b = bottleMesh(); b.position.set(-.07, -.6, .11); b.rotation.x = .15; p.parts.armR.add(b); p.held = b; }
     return p;
+  }
+
+  // ---------- ragdolls (GAME-83) ----------
+  // The server tumbles one capsule per knocked-down vagrant; each client runs a six-part
+  // cannon ragdoll of the model, seeded with the same hit velocity and pulled softly
+  // toward the server's capsule so everyone sees the body land in the same spot.
+  // Model space (p.g): origin at the feet, facing +z, left side on -x. A model may come with
+  // p.parts already split (six groups pivoting at their joints); otherwise rig() splits it.
+  const JOINTS = { torso: [0, .9, 0], head: [0, 1.48, 0], armL: [-.24, 1.36, 0], armR: [.24, 1.36, 0], legL: [-.1, .9, 0], legR: [.1, .9, 0] };
+  const RAGM = { torso: { m: 30 }, head: { m: 5, cone: .55 }, armL: { m: 4, cone: 1.6 }, armR: { m: 4, cone: 1.6 }, legL: { m: 9, cone: .9 }, legR: { m: 9, cone: .9 } };
+  function partOf(c) {
+    if (c.y > 1.47) return 'head';
+    if (Math.abs(c.x) > .21 && c.y > .62) return c.x < 0 ? 'armL' : 'armR';
+    if (c.y < .86) return c.x < 0 ? 'legL' : 'legR';
+    return 'torso';
+  }
+  // Split the (unbaked, parentless) model: each mesh goes under the pivot of its limb, then
+  // each limb is baked so a player still costs only a handful of draw calls.
+  function rig(p) {
+    const g = p.g; g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.updateMatrixWorld(true);
+    const box = new THREE.Box3(), c = new THREE.Vector3();
+    if (!p.parts) {
+      const parts = {}, arms = p.arms && p.arms.length === 2 ? p.arms : null;   // GAME-87 arm pivots (at the shoulders), left first
+      for (const k in JOINTS) parts[k] = new THREE.Group();
+      if (arms) { parts.armL = arms[0]; parts.armR = arms[1]; }
+      for (const ch of [...g.children]) {
+        if (arms && arms.includes(ch)) continue;
+        box.setFromObject(ch); if (box.isEmpty()) continue; box.getCenter(c);
+        let k = partOf(c); if (arms && k.startsWith('arm')) k = 'torso';
+        ch.position.sub(new THREE.Vector3(...JOINTS[k])); parts[k].add(ch);
+      }
+      for (const k in parts) {   // bake each limb at the origin, then put it back at its joint
+        const pv = parts[k], at = arms && k.startsWith('arm') ? pv.position.clone() : new THREE.Vector3(...JOINTS[k]);
+        g.remove(pv); pv.position.set(0, 0, 0); pv.rotation.set(0, 0, 0); pv.updateMatrixWorld(true); bake(pv); pv.position.copy(at); g.add(pv);
+      }
+      p.parts = parts;
+    }
+    // Physics box per limb from its bounds; offset = box centre relative to the joint.
+    g.updateMatrixWorld(true); p.rag = {};
+    for (const k in RAGM) {
+      const pv = p.parts[k]; if (!pv) continue;
+      box.setFromObject(pv); const ctr = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+      p.rag[k] = { pv, rest: pv.position.clone(), off: ctr.sub(pv.position), h: size.multiplyScalar(.42).max(new THREE.Vector3(.05, .05, .05)) };
+    }
+  }
+  const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q1 = new THREE.Quaternion(), _m1 = new THREE.Matrix4();
+  function startRagdoll(v, vel, spin) {
+    if (v.rag && !v.rag.up) return;
+    if (v.rag) endRagdollNow(v);
+    const P = v.model.rag; v.obj.updateMatrixWorld(true);
+    const bodies = {}, cons = [], torsoAt = P.torso.pv.localToWorld(P.torso.off.clone());
+    const V = new THREE.Vector3(...vel), W = new THREE.Vector3(...spin);
+    for (const k in P) {
+      const d = P[k];
+      const b = new CANNON.Body({ mass: RAGM[k].m, shape: new CANNON.Box(new CANNON.Vec3(d.h.x, d.h.y, d.h.z)), linearDamping: .05, angularDamping: .35 });
+      b.collisionFilterGroup = 8; b.collisionFilterMask = 1;      // the town and cars, not each other or you
+      d.pv.localToWorld(_v1.copy(d.off)); d.pv.getWorldQuaternion(_q1);
+      b.position.copy(_v1); b.quaternion.copy(_q1);
+      _v2.copy(W).cross(_v1.clone().sub(torsoAt)).add(V);         // rigid body velocity: v + w x r
+      b.velocity.set(_v2.x, _v2.y, _v2.z); b.angularVelocity.set(W.x, W.y, W.z);
+      world.addBody(b); bodies[k] = b;
+    }
+    for (const k in P) {
+      if (k === 'torso' || !bodies.torso) continue;
+      const jw = P[k].pv.getWorldPosition(new THREE.Vector3()), A = bodies.torso, B = bodies[k], J = new CANNON.Vec3(jw.x, jw.y, jw.z);
+      const c = new CANNON.ConeTwistConstraint(A, B, { pivotA: A.pointToLocalFrame(J), pivotB: B.pointToLocalFrame(J),
+        axisA: new CANNON.Vec3(0, 1, 0), axisB: new CANNON.Vec3(0, 1, 0), angle: RAGM[k].cone, twistAngle: .6 });
+      c.collideConnected = false; world.addConstraint(c); cons.push(c);
+    }
+    v.rag = { bodies, cons, up: null };
+  }
+  function removeRagBodies(R) { if (!R || !R.bodies) return; for (const c of R.cons) world.removeConstraint(c); for (const k in R.bodies) world.removeBody(R.bodies[k]); R.bodies = null; }
+  function endRagdollNow(v) {
+    removeRagBodies(v.rag); v.rag = null;
+    for (const k in v.model.rag) { const d = v.model.rag[k]; d.pv.position.copy(d.rest); d.pv.quaternion.identity(); }
+  }
+  // Getting up: freeze the pose and blend each limb back to standing over ~0.7 s.
+  function getUpRagdoll(v) {
+    const R = v.rag; if (!R || R.up) return;
+    const from = {};
+    for (const k in v.model.rag) { const pv = v.model.rag[k].pv; from[k] = { p: pv.getWorldPosition(new THREE.Vector3()), q: pv.getWorldQuaternion(new THREE.Quaternion()) }; }
+    removeRagBodies(R); R.up = { t: 0, from };
+  }
+  // Pose the model from the ragdoll (call after the normal transform is set). Returns false once standing again.
+  function poseRagdoll(v, dt, target) {
+    const R = v.rag, P = v.model.rag, g = v.model.g;
+    if (!R.up) {
+      const tb = R.bodies.torso;
+      if (target) {   // drift toward the server's body; limbs follow through the joints
+        const k = 1 - Math.exp(-dt * 2.5);
+        for (const b of Object.values(R.bodies)) { b.position.x += (target.x - tb.position.x) * k; b.position.z += (target.z - tb.position.z) * k; if (target.y > tb.position.y + .6) b.position.y += (target.y - tb.position.y) * k; }
+      }
+      v.obj.position.set(tb.position.x, tb.position.y, tb.position.z); v.obj.quaternion.identity();
+      g.position.set(0, -0.9, 0); g.rotation.set(0, 0, 0); g.scale.set(1, 1, 1);
+      v.obj.updateMatrixWorld(true);
+      _m1.copy(g.matrixWorld).invert();
+      for (const k in P) {   // pivot = body centre minus the rotated joint-to-centre offset
+        const b = R.bodies[k], d = P[k];
+        d.pv.quaternion.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+        d.pv.position.set(b.position.x, b.position.y, b.position.z).sub(_v1.copy(d.off).applyQuaternion(d.pv.quaternion)).applyMatrix4(_m1);
+      }
+      return true;
+    }
+    R.up.t += dt; const k = Math.min(1, R.up.t / .7), e = k * k * (3 - 2 * k);
+    v.obj.updateMatrixWorld(true);
+    _m1.copy(g.matrixWorld).invert(); g.getWorldQuaternion(_q1).invert();
+    for (const key in P) {
+      const d = P[key], f = R.up.from[key];
+      _v1.copy(f.p).applyMatrix4(_m1); d.pv.position.copy(_v1).lerp(d.rest, e);
+      d.pv.quaternion.copy(_q1).multiply(f.q).slerp(new THREE.Quaternion(), e);
+    }
+    if (k >= 1) { endRagdollNow(v); return false; }
+    return true;
   }
   function nameTag(text) {
     const cv = document.createElement('canvas'); cv.width = 512; cv.height = 112; const g = cv.getContext('2d');
@@ -1756,9 +2943,10 @@ const NET = (() => {
     const before = city.children.length, nb = world.bodies.length;
     car(0, 0, 0, new THREE.Color(hex).getHex());
     const g = city.children[before]; city.remove(g);
+    if (CAR_GROUPS[CAR_GROUPS.length - 1] === g) CAR_GROUPS.pop();   // only parked cars stay listed
     while (world.bodies.length > nb) world.removeBody(world.bodies[world.bodies.length - 1]);
     g.position.set(0, -0.7, 0); g.rotation.set(0, Math.PI / 2, 0);   // model is long along x, nose at -x
-    const w = new THREE.Group(); w.add(g); return w;
+    const w = new THREE.Group(); w.add(g); w.userData.carG = g; return w;
   }
   function buildProp(e) {
     if (e.type !== 'crate' && e.type !== 'cone') return PROPS.build(e);   // GAME-87 movable props
@@ -1767,24 +2955,121 @@ const NET = (() => {
     const d = dyn.splice(n, 1)[0]; world.removeBody(d.b); d.m.position.set(0, 0, 0);
     return d.m;
   }
+  // Stable small number per id, for picking item looks (was dropped in the GAME-93 merge; items crashed spawn).
+  function hash(str) { let h = 7; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
   function spawn(e) {
     if (ents.has(e.id)) despawn(e.id);
-    if (e.kind === 'fixture') { fixtures.set(e.id, e); return; }
-    if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); return; }
+    if (e.kind === 'fixture') {
+      fixtures.set(e.id, e);
+      if (e.type === 'car') {   // find the parked car model it belongs to, and show its damage
+        let best = null, bd = 9;
+        for (const g of CAR_GROUPS) { const d = (g.position.x - e.pos[0]) ** 2 + (g.position.z - e.pos[2]) ** 2; if (d < bd) { bd = d; best = g; } }
+        if (best) { fixtureCars.set(e.id, best); CARDMG.reset(best); CARDMG.applyAll(best, e.dmg); }
+      }
+      return;
+    }
+    if (e.id === me) { ents.set(e.id, { ...e, own: true, buf: [] }); setMyHeld(e.held); return; }
     let obj, extra = {};
-    if (e.kind === 'vagrant' || e.kind === 'sleeper') {
+    if (e.kind === 'vagrant' || e.kind === 'sleeper' || e.kind === 'npc') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
-      const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag);
-      extra = { model: v, tag, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
+      extra = { model: v, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
+      if (e.kind !== 'npc') { const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag); extra.tag = tag; }
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
-    } else if (e.kind === 'traffic') obj = buildCar(e.color);
+    } else if (e.kind === 'traffic') {
+      obj = buildCar(e.color);
+      // Same hood + cabin boxes as the server (nose along +z, body origin 0.7 m up).
+      const b = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+      b.addShape(new CANNON.Box(new CANNON.Vec3(.875, .385, 2.2)), new CANNON.Vec3(0, .545 - .7, 0));
+      b.addShape(new CANNON.Box(new CANNON.Vec3(.8, .235, .9)), new CANNON.Vec3(0, 1.165 - .7, -.25));
+      b.position.set(0, -50, 0); world.addBody(b); extra = { body: b };
+    }
     else if (e.kind === 'prop') obj = buildProp(e);
-    else if (e.kind === 'bottle') obj = bottleMesh();
+    else if (e.kind === 'item') obj = ITEMS.mesh(e.type, hash(e.id));
     else return;
     scene.add(obj);
-    ents.set(e.id, { ...e, obj, buf: [], ...extra });
+    if (obj.userData.carG && e.dmg) CARDMG.applyAll(obj.userData.carG, e.dmg);
+    const v = { ...e, obj, buf: [], ...extra };
+    ents.set(e.id, v);
+    if (v.model) setRemoteHeld(v, e.held);
   }
-  function despawn(id) { const v = ents.get(id); if (v && v.obj) scene.remove(v.obj); ents.delete(id); fixtures.delete(id); }
+  function despawn(id) {
+    if (fixtureCars.has(id)) { CARDMG.reset(fixtureCars.get(id)); fixtureCars.delete(id); }
+    const v = ents.get(id);
+    if (v) { if (v.obj) scene.remove(v.obj); if (v.body) world.removeBody(v.body); if (v.rag) removeRagBodies(v.rag); }
+    if (id === me && ownRag) { scene.remove(ownRag.obj); removeRagBodies(ownRag.rag); ownRag = null; }
+    ents.delete(id); fixtures.delete(id);
+  }
+
+  // ---------- held junk (GAME-82) ----------
+  // Your hand only comes up when it holds something; the item sits where the look test's
+  // bottle sat, inside the gloved grip. Other vagrants carry theirs in the right hand.
+  let myHeld = null, raise = 0, itemTarget = null, lastThrowAt = 0, lastHint = 0;
+  heldBottle.visible = false;
+  const heldSlot = new THREE.Group(); heldSlot.position.copy(heldBottle.position); vm.add(heldSlot);
+  function setMyHeld(type) {
+    type = type || null;
+    if (type === myHeld && heldSlot.children.length === (type ? 1 : 0)) return;
+    myHeld = type; heldSlot.clear();
+    if (type) { const m = ITEMS.mesh(type, 1); ITEMS.inHand(m, type); m.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } }); heldSlot.add(m); }
+  }
+  // Other vagrants: a lean (pick up, dig) or an arm swing (throw) played on their model.
+  // Other players' reach / dig / throw are clips in tools/anim.js (GAME-92), posed on their arms.
+  function remoteAnim(id, kind) { ANIM.playOn(ents.get(id), kind); }
+  function setRemoteHeld(v, type) {
+    if (v.heldObj) { v.model.g.remove(v.heldObj); v.heldObj = null; }
+    if (!type || v.kind !== 'vagrant') return;
+    v.heldObj = ITEMS.mesh(type, hash(v.id)); v.heldObj.rotation.x = .25;
+    // In the -x glove, on the arm (forearm if it has one) so it rises and swings with the arm.
+    const P = v.model.parts, arm = P && (P.armL.position.x < 0 ? P.armL : P.armR), fore = arm && (arm === P.armL ? P.foreL : P.foreR);
+    if (arm) { const at = new THREE.Vector3(-.31, .64, .14).sub(arm.position); if (fore) at.sub(fore.position); (fore || arm).add(v.heldObj); v.heldObj.position.copy(at); }
+    else { v.heldObj.position.set(-.31, .64, .14); v.model.g.add(v.heldObj); }
+  }
+  // Interaction animations: 'reach' bends down to grab junk, 'dig' rummages in a bin,
+  // 'throw' winds up and lets go. They layer on top of the look test's bob and kick.
+  let anim = null;                                   // { kind, t, dur }
+  const ANIM_DUR = { reach: .5, dig: .9, throw: .32 };
+  function playAnim(kind) { anim = { kind, t: 0, dur: ANIM_DUR[kind] }; }
+  const ease = x => x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x);
+  const bump = (x, a, b) => ease((x - a) / (b - a)) * (1 - ease((x - b) / (1 - b + 1e-6)));
+  const handDrop = () => (1 - Math.max(raise, anim && anim.kind !== 'throw' ? 1 : 0)) * .32;
+  const heldVisible = kick => { heldSlot.visible = kick < .6 && !(anim && anim.kind === 'reach' && anim.t / anim.dur < .45); handG.visible = raise > .02 || !!anim; };
+  function vmAnim(dt) {
+    if (!anim) return;
+    anim.t += dt; const k = anim.t / anim.dur;
+    if (k >= 1) { anim = null; return; }
+    if (anim.kind === 'reach') {                       // dip the view, hand sweeps down and forward, scoops, comes back up
+      const down = bump(k, 0, .4);
+      camera.rotation.x -= down * .42;
+      vm.position.y -= down * .1; vm.position.z -= down * .12; vm.position.x -= down * .05;
+      vm.rotation.x += down * .9; vm.rotation.z += Math.sin(k * Math.PI) * .25;
+    } else if (anim.kind === 'dig') {                  // lean in over the lid and root around
+      const lean = bump(k, 0, .2);
+      camera.rotation.x -= lean * .3; camera.position.y -= lean * .08;
+      vm.position.z -= lean * .14; vm.position.y += lean * .02;
+      vm.position.x += Math.sin(anim.t * 22) * .03 * lean; vm.rotation.z += Math.sin(anim.t * 17) * .3 * lean; vm.rotation.x += lean * .5;
+    } else if (anim.kind === 'throw') {               // wind back over the shoulder, then snap forward
+      const back = bump(k, 0, .35);
+      vm.position.y += back * .1; vm.position.z += back * .08; vm.rotation.x -= back * -.9;
+      camera.rotation.z += back * .03;
+    }
+  }
+  const _ld = new THREE.Vector3(), _to = new THREE.Vector3();
+  function findItemTarget() {
+    camera.getWorldDirection(_ld);
+    const eye = camera.getWorldPosition(new THREE.Vector3());
+    let best = null, bs = Infinity;
+    for (const v of ents.values()) {
+      if (v.kind !== 'item' || !v.obj) continue;
+      _to.copy(v.obj.position).sub(eye);
+      const flat = Math.hypot(v.obj.position.x - player.position.x, v.obj.position.z - player.position.z);
+      if (flat > 2.4 || _to.y < -2.2 || _to.y > 1) continue;
+      const d = _to.length(), dot = _to.divideScalar(d || 1).dot(_ld);
+      if (dot < .55 && flat > .9) continue;                 // not looking at it, and not at your feet
+      const score = d * (1.6 - dot);
+      if (score < bs) { bs = score; best = v; }
+    }
+    return best;
+  }
 
   // ---------- snapshots and interpolation ----------
   const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0);
@@ -1793,7 +3078,7 @@ const NET = (() => {
     // Track the smallest observed delay; drift slowly so a late packet doesn't jerk everything.
     if (clockOffset === null || sample > clockOffset) clockOffset = sample; else clockOffset += (sample - clockOffset) * 0.02;
     for (const r of m.b) {
-      const v = ents.get(r[0]); if (!v || v.own) continue;
+      const v = ents.get(r[0]); if (!v) continue;
       v.buf.push({ t: m.ts, p: new THREE.Vector3(r[1], r[2], r[3]), q: new THREE.Quaternion(r[4], r[5], r[6], r[7]), f: r[8] });
       if (v.buf.length > 30) v.buf.shift();
     }
@@ -1824,13 +3109,15 @@ const NET = (() => {
   function beforeStep(dt, mx, mz) {
     const f = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     lastIn.x = f.x * mz + r.x * mx; lastIn.z = f.z * mz + r.z * mx;
-    if (!haveAck) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us
+    if (!haveAck || ownRag) { player.velocity.x = player.velocity.z = 0; }   // stand still until the server places us, or while knocked down
+    if (FIGHT.isDown()) player.velocity.y = Math.min(player.velocity.y, 0);   // no jumping while knocked out
   }
   function afterStep(dt) {
+    FIGHT.afterStep(dt);
     // Blend in any correction over a few frames so it never reads as a snap.
     if (corr.lengthSq() > 1e-6) { const k = 1 - Math.exp(-dt * 8); player.position.x += corr.x * k; player.position.z += corr.z * k; corr.multiplyScalar(1 - k); }
     sendAcc += dt;
-    if (ws && ws.readyState === 1 && me && haveAck && sendAcc >= 1 / 30) {
+    if (ws && ws.readyState === 1 && me && haveAck && !ownRag && sendAcc >= 1 / 30) {
       const span = Math.min(sendAcc, 0.1); sendAcc = 0; seq = (seq + 1) >>> 0;
       ws.send(JSON.stringify({ t: 'in', seq, dt: +span.toFixed(4), x: +lastIn.x.toFixed(3), z: +lastIn.z.toFixed(3), yaw: +Math.atan2(-Math.sin(yaw), -Math.cos(yaw)).toFixed(3),
         jump: SET.down('jump'), run: SET.running() }));
@@ -1840,6 +3127,7 @@ const NET = (() => {
   }
   function onAck(m) {
     const [sx, sy, sz] = m.p;
+    if (ownRag && !ownRag.rag.up) return;                       // knocked down: the server is moving us
     if (!haveAck) { haveAck = true; player.position.set(sx, Math.max(.35, sy - 0.55), sz); player.velocity.set(0, 0, 0); hist.length = 0; return; }
     while (hist.length && hist[0].seq < m.seq) hist.shift();
     const h = hist[0]; if (!h || h.seq !== m.seq) return;
@@ -1852,19 +3140,17 @@ const NET = (() => {
       corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
     }
   }
-  const speedScale = () => { const g = grabbing && ents.get(grabbing); return !g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1); };
+  const speedScale = () => { const g = grabbing && ents.get(grabbing); return (!g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1)) * FIGHT.speedScale(); };
 
   // ---------- fixtures and effects ----------
   let dumpFire = null;
   function paneFor(f) { return glassPanes[f.index]; }
-  function breakPane(t, quiet) {
-    if (!t || t.broken) return; t.broken = true;
-    const gl = t.mesh, p = new THREE.Vector3(); gl.getWorldPosition(p);
-    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(gl.getWorldQuaternion(new THREE.Quaternion()));
-    gl.material = brokenGlassMat; gl.scale.x = Math.random() < .5 ? -1 : 1; if (t.hi) t.hi.visible = false;
-    if (!quiet) shards(p, 22, shardMat, .28, n.multiplyScalar(2.5), gl.geometry.parameters);
+  // Glass breaks from where it was hit (GAME-84, tools/glass.js). g = { s: seed, h: [[u, v], ...] }.
+  function breakPane(t, g, quiet, v) {
+    if (!t || !g) return; t.broken = true;
+    GLASS.shatter(t.mesh, { seed: g.s, hits: g.h, quiet, hi: t.hi, dir: v && new THREE.Vector3(...v) });
   }
-  function repairPane(t) { if (!t || !t.broken) return; t.broken = false; t.mesh.material = glassMat; t.mesh.scale.x = 1; if (t.hi) t.hi.visible = true; }
+  function repairPane(t) { if (!t || !t.broken) return; t.broken = false; GLASS.restore(t.mesh); }
   function resetPile(p) {
     p.state = 'idle'; p.t = 0; p.acc = 0; if (p.e) { p.e.fire = 0; p.e.smoke = 0; }
     p.mats.forEach(({ m, c }) => m.color.copy(c)); p.scorch.material.opacity = 0; if (p.soot) p.soot.material.opacity = 0;
@@ -1904,27 +3190,139 @@ const NET = (() => {
     else if (m.kind === 'smash') { const p = new THREE.Vector3(...m.at), v = new THREE.Vector3(...(m.v || [0, 0, 0])); shards(p, 8, bottleShardMat, .09, v.multiplyScalar(-.15)); if (p.y < .6) stain(p.x, p.z); dust(p, 3, 0xd8d2c4); }
     else if (m.kind === 'break') {
       const f = fixtures.get(m.id); if (!f) return;
-      if (f.type === 'window') breakPane(paneFor(f));
+      if (f.type === 'window') breakPane(paneFor(f), m.g, false, m.v);
       else shards(new THREE.Vector3(...m.at), 18, shardMat, .22, new THREE.Vector3(...m.v).multiplyScalar(-.1));
     }
     else if (m.kind === 'crate') splinters(m.at, m.s, m.hex, m.v || [0, 0, 0]);
-    else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
+    else if (m.kind === 'honk') {
+      popText(m.rage ? 'THAT\'S IT!!' : m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at);
+      if (m.target === me) feed(m.rage ? 'The driver has had enough of you. <b>Move!</b>' : 'A car is honking at you. Get out of the street!');
+    }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
     else if (m.kind === 'anim') { if (m.id === me) ANIM.echo(m.clip, m); else ANIM.playOn(ents.get(m.id), m.clip, m); }
+    else if (m.kind === 'held') {
+      if (m.id === me) { const had = myHeld; setMyHeld(m.item); if (m.item && m.item !== had) feed(`Got a <b>${esc(ITEMS.name(m.item))}</b>. Click to throw it.`); }
+      else { const v = ents.get(m.id); if (v && v.model) { if (m.item && !v.held2) remoteAnim(m.id, 'reach'); v.held2 = m.item; setRemoteHeld(v, m.item); } }
+    }
+    else if (m.kind === 'throw') { if (m.id !== me) remoteAnim(m.id, 'throw'); }
+    else if (m.kind === 'pocket') { if (m.id === me) feed(`You flip the lid and dig around... found <b>${esc(m.name)}</b>. Pocketed.`); }
+    else if (m.kind === 'thud') { const p = new THREE.Vector3(...m.at); dust(p, m.item === 'brick' || m.item === 'rock' ? 3 : 1, 0xd8d2c4); }
+    else if (m.kind === 'rummage') { const p = new THREE.Vector3(m.at[0], 1.9, m.at[2]); dust(p, 4, 0xb9b09a); if (m.by !== me) { remoteAnim(m.by, 'dig'); const v = ents.get(m.by); if (v && v.obj) popText('*rummage*', [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z], 'say'); } }
     else if (m.kind === 'grab') {
       if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
       const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
     }
+    else if (m.kind === 'cardmg') {
+      const g = carGroupOf(m.id); if (!g) return;
+      CARDMG.apply(g, m);
+      const lp = m.dent || m.at, wp = g.localToWorld(new THREE.Vector3(-lp[2], lp[1], lp[0]));
+      if (m.glass && m.level >= 2) shards(wp, 16, shardMat, .14, new THREE.Vector3(0, 1.5, 0));
+      else if (m.glass) shards(wp, 4, shardMat, .06, new THREE.Vector3(0, .8, 0));
+      else { thud(wp.toArray(), false); dust(wp, 2, 0xd8d2c4); }
+    }
+    else if (m.kind === 'carfix') CARDMG.reset(carGroupOf(m.id));
+    else if (m.kind === 'hit') onHit(m);
+    else if (m.kind === 'up') onUp(m);
+    else if (m.kind === 'flick') FIRE.onFlick(m.id === me, m.id);
+    else if (m.kind === 'strip') COPPER.fx(m);
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
+    else FIGHT.onFx(m);
   }
+  // ---------- getting hit (GAME-83) ----------
+  let ownRag = null;                 // { obj, model, rag, cam } while you are knocked down
+  const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
+  function thud(at, hard) {
+    const d = camera.position.distanceTo(new THREE.Vector3(...at)); if (d > 45) return;
+    try { actx ||= new AudioContext(); } catch { return; }
+    const vol = .5 * (1 - d / 45) * SET.vol() * (hard ? 1 : .5); if (vol <= 0) return;
+    const n = actx.sampleRate * .35, buf = actx.createBuffer(1, n, actx.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
+    const src = actx.createBufferSource(); src.buffer = buf;
+    const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380;
+    const g = actx.createGain(); g.gain.value = vol; src.connect(lp); lp.connect(g); g.connect(actx.destination); src.start();
+  }
+  function flash() {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:5;pointer-events:none;background:radial-gradient(circle,rgba(255,255,255,.0) 30%,rgba(232,52,63,.55));opacity:1;transition:opacity .9s ease-out';
+    document.body.appendChild(d); requestAnimationFrame(() => requestAnimationFrame(() => { d.style.opacity = 0; })); setTimeout(() => d.remove(), 1000);
+  }
+  function onHit(m) {
+    if (m.id === me) {
+      const e = ents.get(me); if (!e) return;
+      if (ownRag) { scene.remove(ownRag.obj); removeRagBodies(ownRag.rag); }
+      // Your own body appears where you stood, facing where you looked, and goes flying.
+      const obj = new THREE.Group(), model = buildVagrant(e); obj.add(model.g);
+      obj.position.set(player.position.x, player.position.y + .55, player.position.z);
+      obj.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
+      scene.add(obj);
+      const v = { obj, model };
+      startRagdoll(v, m.v, m.spin);
+      ownRag = { obj, model, rag: v.rag, v, t: 0, back: 0 };
+      camPos.copy(camera.position); camLook.copy(obj.position);
+      vm.visible = false; grabbing = null;
+      flash(); thud(obj.position.toArray(), true);
+      if (m.cause === 'car') feed('<b>WHAM.</b> You got hit by a car.');
+      return;
+    }
+    const v = ents.get(m.id); if (!v || !v.model) return;
+    startRagdoll(v, m.v, m.spin);
+    thud(v.obj.position.toArray(), true);
+    popText(m.cause === 'car' ? 'WHAM!' : 'OOF!', [v.obj.position.x, v.obj.position.y + 1.2, v.obj.position.z], 'honk');
+  }
+  function onUp(m) {
+    if (m.id === me) {
+      if (!ownRag) return;
+      getUpRagdoll(ownRag.v); ownRag.rag = ownRag.v.rag;
+      // Snap your predicted body to where the server stood you up.
+      haveAck = false; hist.length = 0; corr.set(0, 0, 0);
+      player.position.set(m.at[0], Math.max(.35, m.at[1] - .55), m.at[2]); player.velocity.set(0, 0, 0);
+      return;
+    }
+    const v = ents.get(m.id); if (v && v.rag) getUpRagdoll(v);
+  }
+  // Third-person camera on your own ragdoll, mouse orbits it; eases back to your eyes as you get up.
+  function knockedCamera(dt) {
+    if (!ownRag) { vm.visible = true; return; }
+    const R = ownRag.v.rag;
+    const target = R && !R.up && R.bodies ? new THREE.Vector3(R.bodies.torso.position.x, R.bodies.torso.position.y, R.bodies.torso.position.z) : ownRag.obj.position.clone();
+    const want = target.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.4, 1.9, Math.cos(yaw) * 3.4));
+    const k = 1 - Math.exp(-dt * 5);
+    camPos.lerp(want, k); camLook.lerp(target, 1 - Math.exp(-dt * 10));
+    const eye = camera.position.clone(), eyeQ = camera.quaternion.clone();
+    camera.position.copy(camPos); camera.lookAt(camLook);
+    if (R && R.up) {                                            // getting up: blend back into first person
+      const e = Math.min(1, R.up.t / .7);
+      camera.position.lerp(eye, e); camera.quaternion.slerp(eyeQ, e);
+    }
+    vm.visible = false;
+  }
+  function frameOwnRag(dt) {
+    if (!ownRag) return;
+    const v = ownRag.v;
+    const s = sampleBuf(ents.get(me) || { buf: [] }, serverNow() - INTERP_MS);
+    if (v.rag && v.rag.up) { v.obj.position.set(player.position.x, player.position.y + .55, player.position.z); v.obj.rotation.set(0, Math.atan2(-Math.sin(yaw), -Math.cos(yaw)), 0); }
+    const still = v.rag ? poseRagdoll(v, dt, s && s.p) : false;
+    if (!still) { scene.remove(v.obj); ownRag = null; vm.visible = true; }
+  }
+  // Standing on something (ground, a car hood, a roof) so you can jump again.
+  function grounded() {
+    for (const c of world.contacts) {
+      if (c.bi === player && c.ni.y < -.5) return true;
+      if (c.bj === player && c.ni.y > .5) return true;
+    }
+    return false;
+  }
+
   function onMeta(m) {
-    meta = m; damage = m.town;
+    meta = m; damage = m.town; FIGHT.onMeta(m); COPPER.meta(m);
     const mine = m.players.find(p => p.id === myPid);
     el('rows').innerHTML = m.players.map(p => `<div class="r ${p.asleep ? 'zz' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}${p.asleep ? ' (asleep)' : ''}<em>${money(p.damage)}</em></div>`).join('')
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
+    for (const [id, v] of ents) if (v.kind === 'vagrant' && v.model && m.objects[id] && m.objects[id].rag && !v.rag) startRagdoll(v, [0, 0, 0], [0, 0, 0]);
+    FIRE.onMeta(m, fixtures);
     for (const [id, f] of fixtures) {
       const st = m.objects[id] || {};
-      if (f.type === 'window') { const t = paneFor(f); if (st.broken) breakPane(t, true); else repairPane(t); }
+      if (f.type === 'window') { const t = paneFor(f); if (st.g) { breakPane(t, st.g, true); if (st.board) GLASS.board(t.mesh); } else repairPane(t); }
       else if (f.type === 'pile') { const p = piles[f.index]; if (!p) continue; if (st.fire && p.state === 'idle') lightPile(p); if (!st.fire && !st.burnt && p.state !== 'idle') resetPile(p); }
       else if (f.type === 'dumpster') {
         if (st.fire && !dumpFire) dumpFire = emitter(new THREE.Vector3(f.pos[0], 1.6, f.pos[2]), { radius: .9, fire: 1.2, smoke: 1.4 });
@@ -1948,29 +3346,45 @@ const NET = (() => {
     vm.position.z += -.16 * g - .12 * l;
     vm.rotation.x += .5 * g - .25 * l;
     vm.rotation.z = -.6 * g + Math.sin(vmT * 23) * .02 * strain;
-    if (g > .25) heldBottle.visible = false;
+    if (g > .25) heldSlot.visible = false;
   }
 
   // ---------- per-frame ----------
   const cur = new THREE.Vector3();
   function frame(dt, t) {
+    GLASS.update(dt);
     const rt = serverNow() - INTERP_MS, showTags = SET.tags();
+    raise += ((myHeld || grabbing ? 1 : 0) - raise) * (1 - Math.exp(-dt * 12));
+    if (itemTarget && itemTarget.obj) itemTarget.obj.scale.setScalar(1);
+    itemTarget = findItemTarget();
+    if (itemTarget) itemTarget.obj.scale.setScalar(1 + .12 * (.5 + .5 * Math.sin(t * 8)));
     for (const v of ents.values()) {
       if (!v.obj) continue;
       if (v.tag) v.tag.visible = showTags;
       const s = sampleBuf(v, rt); if (!s) continue;
-      if (v.kind === 'vagrant') {
+      if (v.kind === 'vagrant' || v.kind === 'npc') {
         cur.copy(v.obj.position); v.obj.position.copy(s.p);
         if (s.f !== undefined) v.obj.rotation.y = s.f;
         // Ground speed, smoothed so interpolation steps don't stutter the walk cycle.
         const sp = dt > 0 ? Math.hypot(s.p.x - cur.x, s.p.z - cur.z) / dt : 0;
         v.spd = (v.spd || 0) + (Math.min(sp, 12) - (v.spd || 0)) * (1 - Math.exp(-dt * 8));
-        ANIM.poseVagrant(v, dt, v.spd, t);
+        ANIM.poseVagrant(v, dt, v.spd, t);   // walk / run cycle, grab arms, interaction clips (tools/anim.js)
+        FIGHT.pose(v, dt, t);
       } else if (v.kind === 'sleeper') {
         v.obj.position.copy(s.p); v.model.g.quaternion.copy(s.q);   // lying ragdoll pose comes from the body
         v.zz.position.y = 1.0 + Math.sin(t * 2) * .12;
-      } else { v.obj.position.copy(s.p); v.obj.quaternion.copy(s.q); }
+      } else {
+        v.obj.position.copy(s.p); v.obj.quaternion.copy(s.q);
+        if (v.body) {                                            // kinematic car collider follows the drawn car
+          const b = v.body;
+          if (dt > 0 && b.position.y > -10) b.velocity.set((s.p.x - b.position.x) / dt, 0, (s.p.z - b.position.z) / dt);
+          b.position.set(s.p.x, s.p.y, s.p.z); b.quaternion.set(s.q.x, s.q.y, s.q.z, s.q.w);
+        }
+      }
+      if (v.rag && v.model) poseRagdoll(v, dt, v.rag.up || v.rag.noPull ? null : s.p);
     }
+    frameOwnRag(dt);
+    COPPER.frame(dt, t);
     // zone readout
     if (MAP) {
       const px = player.position.x, pz = player.position.z;
@@ -1992,7 +3406,7 @@ const NET = (() => {
     for (const f of actionables()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
-      const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt)) continue;
+      const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt || st.stripped || st.busy)) continue;
       const d = (f.pos[0] - player.position.x) ** 2 + (f.pos[2] - player.position.z) ** 2; if (d < bd) { bd = d; best = f; }
     }
     return best;
@@ -2009,31 +3423,45 @@ const NET = (() => {
   const keyLabel = k => esc(k.startsWith('Key') ? k.slice(3) : k);
   let promptMode = null;
   function updatePrompt(btn) {
-    const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
-    promptMode = f ? 'act' : g ? 'grab' : null; btn.hidden = !promptMode;
-    let html = '';
-    if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
-    else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
+    let html = ''; promptMode = null;
+    if (COPPER.busy()) { /* stripping copper: the progress bar replaces the prompt */ }
+    else if (itemTarget) { promptMode = 'pickup'; html = `${myHeld ? 'Swap for' : 'Pick up'} the ${esc(ITEMS.name(itemTarget.type))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`; }
+    else {
+      const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
+      promptMode = f ? 'act' : g ? 'grab' : null;
+      if (f && (f.type === 'dumpster' || f.type === 'pile')) html = `Dig through the ${f.type === 'pile' ? 'trash' : 'dumpster'} <kbd>${keyLabel(__set.s.binds.act)}</kbd> &nbsp;${esc(FIRE.verb(f.type, 'Light it'))} <kbd>${keyLabel(__set.s.binds.light)}</kbd>`;
+      else if (f) html = `${esc(COPPER.verb(f.type, FIRE.verb(f.type, MAP.actions[f.type].verb)))} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+      else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
+    }
+    btn.hidden = !html;
     if (html && btn.innerHTML !== html) btn.innerHTML = html;
   }
-  // Same clip names as ACTION_ANIM in server.mjs; played at once so the hand moves on the key press.
-  const ACTION_ANIM = { pile: 'light', dumpster: 'toss', stop_sign: 'panhandle', fire_can: 'warm', couch: 'sit' };
-  let lastAct = 0;
+  // Same clip names as ACTION_ANIM in server.mjs.
+  const ACTION_ANIM = { stop_sign: 'panhandle', fire_can: 'warm', couch: 'sit' };
+  const send = m => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+  const sendGrab = () => { if (!ownRag) send({ t: 'grab' }); };
+  let lastActAt = 0;
   const sendAct = () => {
-    if (!ws || ws.readyState !== 1) return;
-    const f = nearestAction(), now = performance.now();
-    if (f && now - lastAct > 600) { lastAct = now; const clip = (MAP.actions[f.type] || {}).anim || ACTION_ANIM[f.type]; if (clip) ANIM.play(clip); }
-    ws.send('{"t":"act"}');
+    if (ownRag) return;
+    const now = performance.now(); if (now - lastActAt < 600) return; lastActAt = now;
+    if (itemTarget) { send({ t: 'pickup', id: itemTarget.id }); playAnim('reach'); return; }
+    const f = nearestAction(); send({ t: 'act' });
+    if (f && (f.type === 'dumpster' || f.type === 'pile')) playAnim('dig');
+    else if (f) { const clip = (MAP.actions[f.type] || {}).anim || ACTION_ANIM[f.type]; if (clip) ANIM.play(clip); }   // GAME-92: your hand moves on the key press
   };
-  const sendGrab = () => { if (ws && ws.readyState === 1) ws.send('{"t":"grab"}'); };
   const act = () => (promptMode === 'grab' ? sendGrab : sendAct)();   // the on-screen button does whatever it says
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   function throwDir(dir) {
+    if (ownRag) return;
     if (lastPointer === 'mouse' && document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
     if (document.pointerLockElement === canvas) camera.getWorldDirection(dir);
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'throw', dir: { x: dir.x, y: dir.y, z: dir.z } }));
-    handKick = 1;
+    if (!myHeld) return FIGHT.punch(dir);                // empty hands: punch (GAME-85)
+    if (performance.now() - lastThrowAt < 380) return;
+    lastThrowAt = performance.now();
+    const d = { x: dir.x, y: dir.y, z: dir.z };
+    playAnim('throw');                                   // wind up, then release at the top of the swing
+    setTimeout(() => { send({ t: 'throw', dir: d }); handKick = 1; }, 110); setTimeout(() => { if (handKick < .3) setMyHeld(null); }, 400);   // the server confirms with a 'held' fx
   }
   addEventListener('mousemove', e => {
     if (document.pointerLockElement !== canvas) return;
@@ -2041,8 +3469,11 @@ const NET = (() => {
   });
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (SET.isBind('act', e.code) || e.code === 'KeyF') sendAct();
+    if (SET.isBind('act', e.code)) sendAct();
+    if (SET.isBind('light', e.code)) send({ t: 'act', light: 1 });
+    if (SET.isBind('drop', e.code) && myHeld) send({ t: 'drop' });
     if (SET.isBind('grab', e.code)) sendGrab();
+    if (SET.isBind('punch', e.code)) FIGHT.punch(camera.getWorldDirection(new THREE.Vector3()));
   });
 
   // ---------- connection ----------
@@ -2057,6 +3488,7 @@ const NET = (() => {
       else if (m.t === 'fx') onFx(m);
       else if (m.t === 'spawn') spawn(m.e);
       else if (m.t === 'despawn') despawn(m.id);
+      else if (m.t === 'inv') { FIRE.onInv(m); COPPER.inv(m); }
       else if (m.t === 'welcome') {
         try { localStorage.setItem('tw_token', m.token); } catch {}
         for (const id of [...ents.keys(), ...fixtures.keys()]) despawn(id);
@@ -2081,11 +3513,429 @@ const NET = (() => {
     el('login').addEventListener('pointerdown', e => e.stopPropagation());
     setTimeout(() => el('nameInput').focus(), 50);
   }
-  window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs,
-    look(y, p) { yaw = y; pitch = p ?? pitch; }, get yaw() { return yaw; } };   // look() aims the camera for captures and tests
+  window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p ?? pitch; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs, get down() { return !!ownRag; },
+    get held() { return myHeld; }, get busy() { return !!anim || COPPER.busy(); }, get target() { return itemTarget && itemTarget.id; }, send,
+    previewHeld(t) { setMyHeld(t); },
+    throwNow() { lastPointer = 'touch'; throwDir(camera.getWorldDirection(new THREE.Vector3())); },
+    lookAt(x, z, p = -.5) { yaw = Math.atan2(-(x - player.position.x), -(z - player.position.z)); pitch = p; },
+    // Debug: ragdoll someone locally without the server (vel/spin as in fx 'hit').
+    ragdoll(id, vel = [6, 4, 0], spin = [0, 0, -8]) { const v = ents.get(id); if (v && v.model) { startRagdoll(v, vel, spin); v.rag.noPull = true; } },
+    getUp(id) { const v = ents.get(id); if (v && v.rag) getUpRagdoll(v); } };
   // Read-only view of the networked world for the mini map (GAME-80).
   const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, handDrop, heldVisible, vmAnim, vmPose, view, send, ents, get me() { return me; }, popText, feed, esc, money, grounded, knockedCamera };
+})();
+
+// ===================== copper wire theft (GAME-91) =====================
+// Client side of poc/copper.mjs. Draws each lamppost's state (lit, or dark with its hand
+// hole pried open and the wiring yanked out onto the sidewalk), the pliers in your hand
+// and the stripping animation for you and for everyone watching, plus the pliers chip.
+//
+// Every mesh here is built once at startup from materials the town already uses, so
+// stripping a lamp only flips visibility: no new lights, no shader compiles mid-game.
+const COPPER = (() => {
+  const COPPER_HEX = 0xD9823B, DARK_LENS = 0x3B3F52, POLE = 0xC8CDDD;
+  const lamps = new Map();               // lamp id -> { g, lit, glow, open, base, head }
+  let pliers = 0, strip = null;          // strip: { lamp, t0, ms } for your own vagrant
+  const watching = new Map();            // vagrant entity id -> { lamp, t0, ms }
+
+  // ---------- models ----------
+  // Lineman's pliers: red dipped grips, steel jaws. Built along +y, jaws at the top.
+  function pliersMesh() {
+    const g = new THREE.Group(), jaw = new THREE.Group(), jaw2 = new THREE.Group();
+    for (const [grp2, s] of [[jaw, 1], [jaw2, -1]]) {
+      put(B(.022, .16, .016, .006), 0xE8343F, grp2, s * .016, -.06, 0, { rz: s * .12 });       // grip
+      put(B(.018, .02, .02, .004), 0x23202E, grp2, s * .018, .03, 0, { rz: s * .12 });         // grip cap
+      put(B(.016, .075, .014, .003), METAL, grp2, s * .005, .075, 0, { rz: -s * .08 });        // jaw
+      put(B(.006, .03, .014), DARKM, grp2, s * .001, .1, 0);                                    // cutter edge
+      g.add(grp2);
+    }
+    put(CYL(.014, .014, .026, 10), DARKM, g, 0, .04, 0, { rx: Math.PI / 2 });                  // pivot
+    g.userData.jaws = [jaw, jaw2];
+    return g;
+  }
+  function snip(p, k) { const [a, b] = p.userData.jaws; a.rotation.z = -k * .22; b.rotation.z = k * .22; }
+
+  // A few metres of wire spilling out of the hand hole and across the sidewalk, cut ends bare.
+  function wireSpill(parent, G) {   // G: height of the ground the wire lands on (sidewalk slab = .16)
+    // Out of the hole, slumped down the pole, then snaking along the sidewalk both ways.
+    const runs = [
+      [0x2A2A33, [[0, .8, -.11], [.03, .7, -.19], [.06, .3, -.2], [.12, .03, -.28], [.5, .03, -.42], [.85, .03, -.25], [1.3, .03, -.38]]],
+      [0xEDEDED, [[-.01, .79, -.11], [-.03, .68, -.2], [-.07, .25, -.22], [-.16, .03, -.32], [-.55, .03, -.5], [-.9, .03, -.3], [-1.25, .03, -.45]]],
+      [0x3FA34D, [[.01, .77, -.11], [.02, .6, -.18], [.0, .15, -.24], [.05, .03, -.42], [-.2, .03, -.75]]],
+    ];
+    for (const run of runs) run[1] = run[1].map(([x, y, z]) => [x, y < .1 ? y + G : y, z]);
+    for (const [hex, pts] of runs) {
+      tube(pts, .017, hex, parent, 28);
+      const end = pts[pts.length - 1], prev = pts[pts.length - 2];
+      const d = new THREE.Vector3(end[0] - prev[0], 0, end[2] - prev[2]).normalize();
+      put(CYL(.007, .007, .06, 6), COPPER_HEX, parent, end[0] + d.x * .03, end[1], end[2] + d.z * .03, { rz: Math.PI / 2, ry: Math.atan2(-d.z, d.x) });
+    }
+    // shredded insulation where the copper got skinned
+    let q = 11; const r = () => (q = (q * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 14; i++) put(B(.06 + r() * .07, .01, .016), i % 2 ? 0x2A2A33 : 0xEDEDED, parent, (r() - .5) * 2.2, G + .012, -.2 - r() * .8, { ry: r() * 3 });
+    // an empty skin of insulation coiled where they peeled it
+    for (let k = 0; k < 3; k++) put(new THREE.TorusGeometry(.14 - k * .015, .012, 6, 18), k % 2 ? 0x2A2A33 : 0xEDEDED, parent, .55 + k * .03, G + .015 + k * .012, -.85, { rx: Math.PI / 2 });
+  }
+
+  function buildLamp(l) {
+    const g = new THREE.Group(); g.position.set(l.p[0], 0, l.p[2]); g.rotation.y = l.ry || 0; scene.add(g);
+    // lit: a warm glow at the lens and the hand-hole cover screwed shut
+    const lit = new THREE.Group(); g.add(lit);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('rgba(255,238,170,.9)'), depthWrite: false, blending: THREE.AdditiveBlending, transparent: true }));
+    glow.position.set(0, 6.5, -1.65); glow.scale.set(1.5, 1.1, 1); fxl(glow); lit.add(glow);
+    put(B(.1, .22, .016, .004), POLE, lit, 0, .78, -.112);
+    for (const y of [.69, .87]) put(CYL(.008, .008, .01, 6), DARKM, lit, 0, y, -.122, { rx: Math.PI / 2 });
+    // stripped: dark lens, cover hanging off one screw, black hole, wiring on the ground
+    const open = new THREE.Group(); open.visible = false; g.add(open);
+    put(B(.3, .035, .52), DARK_LENS, open, 0, 6.585, -1.65);
+    put(B(.075, .18, .012), INK, open, 0, .78, -.108);
+    const hinge = new THREE.Group(); hinge.position.set(.045, .68, -.116); open.add(hinge);
+    put(B(.1, .22, .016, .004), POLE, hinge, -.03, .1, -.02, { rz: 2.5, ry: .5 });
+    wireSpill(open, l.gy ?? .16);
+    lamps.set(l.id, { g, lit, glow, open, stripped: false, base: new THREE.Vector3(l.p[0], .78, l.p[2]).add(new THREE.Vector3(0, 0, -.14).applyAxisAngle(_up, l.ry || 0)) });
+  }
+  const _up = new THREE.Vector3(0, 1, 0);
+  function setStripped(id, on) {
+    const L = lamps.get(id); if (!L || L.stripped === on) return;
+    L.stripped = on; L.lit.visible = !on; L.open.visible = on;
+  }
+
+  fetch('/town.json').then(r => r.json()).then(m => { for (const l of m.lampposts || []) buildLamp(l); });
+
+  // ---------- effects ----------
+  function spark(at, n, power = 1) {
+    for (let i = 0; i < n; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, color: i % 3 ? 0xFFD27A : 0xFFFFFF, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      s.scale.setScalar(.05 + Math.random() * .05); s.position.copy(at); s.layers.set(1);
+      s.userData = { t: Math.random() * .3, v: new THREE.Vector3((Math.random() - .5) * 2.4, 1 + Math.random() * 2.2, (Math.random() - .5) * 2.4).multiplyScalar(power) };
+      scene.add(s); sparks.push(s);
+    }
+  }
+  function pop(text, at) {
+    const v = at.clone().project(camera); if (v.z >= 1) return;
+    const d = document.createElement('div'); d.className = 'pop copper'; d.textContent = text;
+    d.style.left = ((v.x + 1) / 2 * innerWidth) + 'px'; d.style.top = ((1 - v.y) / 2 * innerHeight) + 'px';
+    document.body.appendChild(d); setTimeout(() => d.remove(), 1150);
+  }
+  const el = id => document.getElementById(id);
+  function feed(html) { const f = el('feed'); if (!f) return; const d = document.createElement('div'); d.innerHTML = html; f.prepend(d); setTimeout(() => d.remove(), 5000); while (f.children.length > 5) f.lastChild.remove(); }
+
+  // ---------- HUD: pliers chip and the strip progress bar ----------
+  const css = document.createElement('style');
+  css.textContent = `#pliersChip{position:fixed;z-index:5;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(136px + env(safe-area-inset-bottom,0px));background:rgba(255,255,255,.94);border-radius:14px;padding:6px 14px;font-size:13.5px;font-weight:700;gap:8px;align-items:center;box-shadow:0 3px 0 rgba(20,60,140,.2);pointer-events:none;display:none}
+#pliersChip i{width:9px;height:16px;border-radius:3px;background:linear-gradient(#9AA0B6 0 30%,#E8343F 30%)}
+#pliersChip em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
+#stripBar{position:fixed;z-index:6;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:rgba(255,255,255,.94);border-radius:16px;padding:8px 14px 10px;font-family:var(--display);font-weight:600;font-size:15px;box-shadow:0 3px 0 rgba(20,60,140,.25);display:none;text-align:center;pointer-events:none;min-width:220px}
+#stripBar i{display:block;height:10px;border-radius:6px;margin-top:6px;background:#F1E7D8;overflow:hidden}
+#stripBar i u{display:block;height:100%;width:0;background:linear-gradient(90deg,#D9823B,#FFB86B);border-radius:6px}
+.pop.copper{color:#D9823B;font-size:24px;-webkit-text-stroke:4px #fff}`;
+  document.head.appendChild(css);
+  const chip = document.createElement('div'); chip.id = 'pliersChip'; document.body.appendChild(chip);
+  const bar = document.createElement('div'); bar.id = 'stripBar'; bar.innerHTML = 'Stripping copper wire<i><u></u></i>'; document.body.appendChild(bar);
+  function inv(m) {
+    if (m.pliers === undefined) return;
+    const had = pliers; pliers = m.pliers;
+    chip.style.display = pliers > 0 ? 'flex' : 'none';
+    chip.innerHTML = `<i></i>Pliers <em>${pliers}</em>`; chip.title = `${pliers} lampposts left in them`;
+    if (had > 0 && pliers === 0) feed('Your pliers snapped. Find another pair.');
+    else if (!had && pliers > 0) feed('You have pliers. Find a lamppost and press <kbd>E</kbd> to strip its copper wire.');
+  }
+
+  // ---------- first-person pliers ----------
+  const fpPliers = pliersMesh(); fpPliers.visible = false;
+  fpPliers.position.set(-.03, .1, .02); fpPliers.rotation.set(.2, 0, .5); fpPliers.scale.setScalar(2.3); vm.add(fpPliers);
+  fpPliers.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } });
+  let crouch = 0;
+  // Runs after the look test places the camera and hand each frame.
+  function viewmodel(dt, t) {
+    const k = strip ? Math.min(1, (performance.now() - strip.t0) / strip.ms) : 0;
+    crouch += ((strip ? 1 : 0) - crouch) * Math.min(1, dt * 9);
+    if (crouch < .01) { if (fpPliers.visible) { fpPliers.visible = false; vm.rotation.z = 0; } return; }
+    for (const c of vm.children) if (c !== handG && c !== fpPliers) c.visible = false;   // pocket the held junk; it comes back next frame
+    handG.visible = true;
+    camera.position.y -= crouch * .55;                              // squat down at the pole base
+    heldBottle.visible = false; fpPliers.visible = true;
+    // reach in, then a rhythm of snip, twist and yank as the wire comes out
+    const cyc = (t * 2.6) % 1, yank = strip && cyc > .7 ? Math.sin((cyc - .7) / .3 * Math.PI) : 0;
+    snip(fpPliers, strip ? (cyc < .35 ? Math.sin(cyc / .35 * Math.PI) : 0) : 0);
+    vm.position.y += NET.handDrop() * crouch;                       // empty hands sit out of view (GAME-82): bring the glove up
+    vm.position.x -= crouch * .04; vm.position.y += crouch * (.015 - yank * .03); vm.position.z -= crouch * (.05 - yank * .05);
+    vm.rotation.x += crouch * (-.12 + yank * .22); vm.rotation.z = crouch * (.08 + Math.sin(t * 9) * .025 * (strip ? 1 : 0));
+    if (strip) bar.querySelector('u').style.width = (k * 100).toFixed(1) + '%';
+  }
+
+  // ---------- other vagrants stripping ----------
+  function thirdPerson(v) {
+    if (!v.model) return null;
+    if (!v.pliers) { const p = pliersMesh(); p.position.set(.08, .78, .42); p.rotation.set(1.1, 0, -.3); p.scale.setScalar(2.4); v.model.g.add(p); v.pliers = p; }
+    return v;
+  }
+  function frame(dt, t) {
+    const ents = window.__net && window.__net.ents; if (!ents) return;
+    const now = performance.now();
+    for (const [id, w] of watching) {
+      const v = ents.get(id); if (!v || !v.obj || !thirdPerson(v)) { watching.delete(id); continue; }
+      const L = lamps.get(w.lamp);
+      if (L) v.obj.rotation.y = Math.atan2(L.base.x - v.obj.position.x, L.base.z - v.obj.position.z);
+      const cyc = (t * 2.6) % 1, yank = cyc > .7 ? Math.sin((cyc - .7) / .3 * Math.PI) : 0;
+      v.model.g.position.y = -0.9 - .45 + yank * .06;                // down on their haunches at the pole
+      v.model.g.rotation.x = .5 - yank * .22;                         // leaning in, rocking back on each yank
+      v.model.g.rotation.z = Math.sin(t * 9) * .03;
+      v.model.head.rotation.x = .25;
+      if (v.model.arms) v.model.arms.forEach((pv, i) => { pv.rotation.x = -1.15 + yank * .5; pv.rotation.z = (i ? 1 : -1) * .22; });   // both hands on the wire
+      v.pliers.visible = true; snip(v.pliers, cyc < .35 ? Math.sin(cyc / .35 * Math.PI) : 0);
+      if (L && Math.random() < dt * 5) spark(L.base, 2, .7);
+    }
+    if (strip) { const L = lamps.get(strip.lamp); if (L && Math.random() < dt * 5) spark(L.base, 2, .7); }
+  }
+  function stopWatching(id) {
+    const v = window.__net && window.__net.ents.get(id);
+    if (v && v.model) { v.model.g.rotation.x = 0; v.model.head.rotation.x = 0; if (v.pliers) v.pliers.visible = false; if (v.model.arms) v.model.arms.forEach(pv => { pv.rotation.x = 0; pv.rotation.z = 0; }); }
+    watching.delete(id);
+  }
+
+  // ---------- server events ----------
+  function fx(m) {
+    const mine = window.__net && m.id === window.__net.me, L = lamps.get(m.lamp);
+    if (m.phase === 'start') {
+      if (mine) { strip = { lamp: m.lamp, t0: performance.now(), ms: m.ms }; bar.style.display = 'block'; bar.querySelector('u').style.width = '0%'; }
+      else watching.set(m.id, { lamp: m.lamp });
+      if (L) spark(L.base, 6, .8);
+    } else {
+      if (mine) { strip = null; bar.style.display = 'none'; } else stopWatching(m.id);
+      if (m.phase === 'done') {
+        setStripped(m.lamp, true);
+        if (L) { spark(L.base, 18, 1.2); spark(L.base.clone().setY(6.55).add(new THREE.Vector3(0, 0, -1.65).applyAxisAngle(_up, L.g.rotation.y)), 10, .6); dust(L.base.clone().setY(.2), 4, 0xcbbfa8); pop('COPPER!', L.base.clone().setY(1.9)); }
+        if (mine) feed(`You yank out the copper. <b>+$${m.cash}</b> scrap. ${m.left > 0 ? `Pliers: ${m.left} ${m.left === 1 ? 'use' : 'uses'} left.` : ''}`);
+      } else if (mine && m.why === 'moved') feed('You let go of the wire.');
+    }
+  }
+  function meta(m) { for (const id of lamps.keys()) setStripped(id, !!(m.objects[id] && m.objects[id].stripped)); }
+
+  // Prompt text for the E button. Returns null for things that are not ours.
+  function verb(type, base) { return type === 'lamppost' && !pliers ? base + ' (need pliers)' : base; }
+  const busy = () => !!strip;
+
+  window.__copper = { lamps, get pliers() { return pliers; }, get strip() { return strip; }, setStripped };
+  return { fx, meta, inv, verb, frame, viewmodel, busy, pliersMesh };
+})();
+
+// ===================== fist fights and hit reactions (GAME-85) =====================
+// Punching with empty hands, being hit (by fists, thrown things or cars), knockouts,
+// and the arm poses that let other vagrants and townsfolk throw hands.
+const FIGHT = (() => {
+  const MAX_HP = 100;
+  const own = { hp: MAX_HP, downUntil: 0, staggerUntil: 0, lastHit: 0, lastPunch: 0, punchT: 0, hand: 'R', flash: 0, shake: 0, ko: 0, kb: new THREE.Vector3() };
+  const now = () => performance.now();
+
+  // ---------- HUD: health pill, hurt vignette, knocked-out card ----------
+  const css = document.createElement('style');
+  css.textContent = `
+#hpWrap{position:fixed;z-index:5;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.92);border-radius:999px;padding:5px 12px 5px 10px;box-shadow:0 3px 0 rgba(20,60,140,.22);pointer-events:none;font-family:var(--display);font-weight:700;font-size:13px;color:var(--ink);transition:opacity .4s}
+#hpWrap.full{opacity:.55}
+#hpBar{width:120px;height:10px;border-radius:999px;background:#F1E4EC;overflow:hidden}
+#hpBar i{display:block;height:100%;width:100%;border-radius:999px;background:linear-gradient(90deg,#FF6E9E,#FFC93C);transition:width .15s}
+#hurtVig{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(255,60,80,0) 45%,rgba(200,20,50,.55) 100%)}
+#koCard{position:fixed;z-index:6;left:50%;top:38%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;display:none}
+#koCard b{display:block;font-family:var(--display);font-weight:700;font-size:44px;color:#fff;-webkit-text-stroke:6px #E8343F;paint-order:stroke fill;letter-spacing:1px}
+#koCard span{display:inline-block;margin-top:6px;background:rgba(255,255,255,.94);border-radius:14px;padding:5px 12px;font-weight:700;font-size:14px;color:var(--ink)}
+.pop.pow{color:#FFC93C;font-size:30px;-webkit-text-stroke:6px #E8343F}
+.pop.paid{color:#26B07A;font-size:24px}
+@media (pointer:coarse){ #hpWrap{bottom:calc(150px + env(safe-area-inset-bottom,0px))} }`;
+  document.head.appendChild(css);
+  const hud = document.createElement('div');
+  hud.innerHTML = `<div id="hpWrap" class="full">♥<div id="hpBar"><i></i></div></div><div id="hurtVig"></div><div id="koCard"><b>KNOCKED OUT</b><span id="koSub"></span></div>`;
+  document.body.append(...hud.children);
+  const $ = id => document.getElementById(id);
+  let koPaid = 0;
+  function drawHp() {
+    $('hpBar').firstChild.style.width = Math.max(0, own.hp) + '%';
+    $('hpWrap').classList.toggle('full', own.hp >= MAX_HP);
+  }
+
+  // ---------- sounds ----------
+  let ac = null;
+  function sfx(kind, at) {
+    const d = at ? camera.position.distanceTo(new THREE.Vector3(...at)) : 0; if (d > 35) return;
+    try { ac ||= new AudioContext(); } catch { return; }
+    const vol = (1 - d / 35) * SET.vol(); if (vol <= 0) return;
+    const len = kind === 'swoosh' ? .16 : .12, buf = ac.createBuffer(1, ac.sampleRate * len, ac.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / ch.length, kind === 'swoosh' ? 1.5 : 4);
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = kind === 'swoosh' ? 'bandpass' : 'lowpass'; f.frequency.value = kind === 'swoosh' ? 1400 : kind === 'bonk' ? 900 : 420;
+    const g = ac.createGain(); g.gain.value = (kind === 'swoosh' ? .05 : .32) * vol;
+    src.connect(f); f.connect(g); g.connect(ac.destination); src.start();
+    if (kind !== 'swoosh') { const o = ac.createOscillator(), og = ac.createGain(); o.frequency.setValueAtTime(kind === 'bonk' ? 520 : 140, ac.currentTime); o.frequency.exponentialRampToValueAtTime(60, ac.currentTime + .12); og.gain.value = .12 * vol; og.gain.exponentialRampToValueAtTime(.001, ac.currentTime + .14); o.connect(og); og.connect(ac.destination); o.start(); o.stop(ac.currentTime + .15); }
+  }
+
+  // ---------- first-person fists ----------
+  // Same fingerless knit gloves and orange canvas sleeves as the bottle hand.
+  const HAND = { glove: 0x7C8299, skin: 0xF2C6A0 };
+  function fist(side) {
+    const root = new THREE.Group();
+    const h = glove(root, [0, 0, 0], [0, 1, 0], HAND, false);
+    // knuckles forward (glove +y -> -z), palm down (glove +z -> -y), turned in a little
+    h.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0)))
+      .premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, side * .25, side * -.35)));
+    h.scale.setScalar(1.2);
+    const end = new THREE.Vector3(side * .1, -.3, .34);                  // forearm runs back and down out of view
+    limb([0, -.004, .05], end.toArray(), .034, .044, 'tx:canvas|' + 0xE07A2E, root, 14);
+    put(CYL(.05, .05, .035, 12), 'tx:knit|' + 0x9AA3B8, root, 0, -.002, .055, { rx: Math.PI / 2 - .55 });  // hoodie cuff
+    put(CYL(.043, .043, .025, 14), 0xB85E1E, root, side * .008, -.02, .09, { rx: Math.PI / 2 - .6 });     // sleeve hem
+    root.traverse(o => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 10; } });
+    camera.add(root); root.visible = false; return root;
+  }
+  const fists = { L: fist(-1), R: fist(1) };
+  const REST = { L: new THREE.Vector3(-.15, -.2, -.42), R: new THREE.Vector3(.15, -.195, -.41) };
+  const HIT = { L: new THREE.Vector3(-.04, -.09, -.66), R: new THREE.Vector3(.04, -.09, -.66) };
+  const _v = new THREE.Vector3();
+
+  // Empty hands (GAME-82 window.__net.held is null) mean fists.
+  const holding = () => (window.__net && 'held' in window.__net) ? window.__net.held != null : true;
+  const isDown = () => now() < own.downUntil;
+
+  function punch(dir) {
+    const t = now();
+    if (isDown() || t - own.lastPunch < 420 || !NET.me) return;
+    own.lastPunch = t;
+    own.hand = holding() ? 'L' : (own.hand === 'L' ? 'R' : 'L');   // bottle in the right hand: jab with the left
+    own.punchT = 1;
+    sfx('swoosh');
+    NET.send({ t: 'punch', dir: { x: dir.x, y: dir.y, z: dir.z } });
+  }
+
+  // ---------- movement while hurt (mirrors combat.mjs moveMod) ----------
+  function speedScale() { const t = now(); return t < own.downUntil ? 0 : t < own.staggerUntil ? .35 : 1; }
+  function afterStep(dt) {
+    if (own.kb.lengthSq() > 1e-4) {
+      player.position.x += own.kb.x * dt; player.position.z += own.kb.z * dt;
+      own.kb.multiplyScalar(Math.exp(-dt * 7));
+    }
+    if (isDown()) player.velocity.y = Math.min(player.velocity.y, 0);
+  }
+
+  // ---------- events from the server ----------
+  function stars() {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96; const g = cv.getContext('2d');
+    g.font = '700 64px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineWidth = 10; g.strokeStyle = '#fff'; g.fillStyle = '#FFC93C';
+    g.strokeText('✦ ✦ ✦', 128, 50); g.fillText('✦ ✦ ✦', 128, 50);
+    const tx = new THREE.CanvasTexture(cv); tx.colorSpace = THREE.SRGBColorSpace;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, depthWrite: false, transparent: true, fog: false })); s.scale.set(.75, .28, 1); fxl(s); return s;
+  }
+  const headAt = v => [v.obj.position.x, v.obj.position.y + (v.down ? -.4 : 1.1), v.obj.position.z];
+  const fx = v => v.fight || (v.fight = { punch: 0, hand: 'R', hurt: 0, fall: v.down ? 1 : 0, guardUntil: 0 });
+  function onFx(m) {
+    const meId = NET.me, v = NET.ents.get(m.id);
+    if (m.kind === 'punch') {
+      if (m.id === meId || !v || !v.model) return;
+      const F = fx(v); F.punch = 1; F.hand = m.hand; F.guardUntil = now() + 4000;
+      sfx('swoosh', headAt(v));
+    } else if (m.kind === 'hurt') {
+      const bonk = m.cause === 'item';
+      if (m.id === meId) {
+        own.hp = m.hp; own.lastHit = now(); own.staggerUntil = now() + 350; own.flash = 1; own.shake = bonk ? .05 : .035;
+        if (m.push) own.kb.add(new THREE.Vector3(m.push[0], 0, m.push[2]));
+        if (m.paid) { koPaid += m.paid; const at = camera.getWorldDirection(_v).multiplyScalar(1.2).add(camera.position); NET.popText('+' + NET.money(m.paid), [at.x, at.y - .2, at.z], 'paid'); }
+        if (m.cause === 'car') NET.feed(`Hit by a car! <b>+${NET.money(m.paid)}</b> for your pain and suffering.`);
+        drawHp(); sfx(bonk ? 'bonk' : 'thud');
+      } else if (v && v.model) {
+        const F = fx(v); F.hurt = 1;
+        const at = headAt(v);
+        NET.popText(m.cause === 'punch' ? ['POW!', 'BAM!', 'WHAP!', 'OOF!'][Math.floor(Math.random() * 4)] : m.cause === 'car' ? 'WHAM!' : 'BONK!', [at[0], at[1] + .5, at[2]], 'pow');
+        sfx(bonk ? 'bonk' : 'thud', at);
+        dust(new THREE.Vector3(at[0], at[1] - .1, at[2]), 3, 0xE8E0D0);
+        if (m.by === meId && m.paid === 0 && v.kind === 'vagrant') NET.feed(`You hit <b>${NET.esc(v.name)}</b>. They got paid for it.`);
+      }
+    } else if (m.kind === 'ko') {
+      if (m.id === meId) {
+        own.downUntil = now() + m.ms; own.hp = 0; drawHp();
+        $('koSub').textContent = koPaid ? `+${NET.money(koPaid)} in damages. Getting up in a sec...` : 'Getting up in a sec...';
+        $('koCard').style.display = 'block';
+      } else if (v && v.model) {
+        v.down = 1; NET.popText('K.O.!', headAt(v), 'pow');
+        if (m.by === meId) NET.feed(`You knocked out <b>${NET.esc(v.name || 'someone')}</b>!`);
+      }
+    } else if (m.kind === 'koup') {
+      if (m.id === meId) { own.downUntil = 0; own.hp = MAX_HP; koPaid = 0; drawHp(); $('koCard').style.display = 'none'; }
+      else if (v) v.down = 0;
+    } else if (m.kind === 'thud') { sfx('thud', m.at); dust(new THREE.Vector3(...m.at), 3, 0xE8E0D0); }
+  }
+  function onMeta(m) {
+    for (const v of NET.ents.values()) {
+      if (v.kind !== 'npc' && v.kind !== 'vagrant') continue;
+      const st = m.objects[v.id] || {};
+      v.angry = !!st.angry; if (!v.own) v.down = !!st.down;
+    }
+  }
+
+  // ---------- poses for other vagrants and townsfolk ----------
+  const ease = k => 1 - Math.pow(1 - k, 3);
+  function pose(v, dt, t) {
+    const m = v.model; if (!m) return;
+    const F = fx(v), g = m.g;
+    F.punch = Math.max(0, F.punch - dt / (F.hand === 'T' ? .5 : .3));
+    F.hurt = Math.max(0, F.hurt - dt * 3);
+    F.fall = Math.min(1, Math.max(0, F.fall + (v.down ? dt * 3.2 : -dt * 1.6)));
+    const guard = v.angry || now() < F.guardUntil;
+    const k = F.punch > 0 ? Math.sin((1 - F.punch) * Math.PI) : 0;
+    if (m.sign) m.sign.visible = !guard && !v.down && F.fall === 0;
+    if (F.stars) F.stars.visible = !!v.down;
+    // Not fighting: leave the walk / grab arm animation alone.
+    if (!guard && !v.down && F.punch === 0 && F.hurt === 0 && F.fall === 0) return;
+    if (m.arms && m.arms.length === 2) {
+      const [L, R] = m.arms, base = guard ? -.95 : 0;
+      L.rotation.set(base, 0, guard ? .32 : 0); R.rotation.set(base, 0, guard ? -.32 : 0);
+      if (F.punch > 0) {
+        if (F.hand === 'T') { const p = 1 - F.punch; R.rotation.x = p < .4 ? -2.8 * (p / .4) : -2.8 + 2.0 * ((p - .4) / .6); R.rotation.z = -.1; }
+        else { const A = F.hand === 'L' ? L : R; A.rotation.x = base + (-1.6 - base) * k; A.rotation.z *= 1 - k * .7; }
+      }
+      if (v.down) { L.rotation.set(-2.6, 0, .5); R.rotation.set(-2.4, 0, -.6); }   // sprawled
+    }
+    const twist = F.punch > 0 && F.hand !== 'T' ? (F.hand === 'R' ? -1 : 1) * .35 * k : 0;
+    g.rotation.y = twist;
+    g.rotation.x = (guard ? .1 : 0) + .15 * k - .4 * F.hurt - Math.PI / 2 * ease(F.fall);
+    g.rotation.z += Math.sin(t * 18) * F.hurt * .18;
+    if (F.fall > 0) g.position.y = -.9 + .12 * ease(F.fall);
+    if (v.down && !F.stars) { F.stars = stars(); F.stars.position.set(0, 2.0, 0); g.add(F.stars); }
+    if (F.stars) { F.stars.visible = !!v.down; F.stars.material.rotation = Math.sin(t * 3) * .3; F.stars.position.x = Math.sin(t * 4) * .08; }
+  }
+
+  // ---------- camera: hurt shake, knocked-out view, fists ----------
+  function afterCamera(dt, t) {
+    const down = isDown();
+    own.ko = Math.min(1, Math.max(0, own.ko + (down ? dt * 3 : -dt * 1.5)));
+    if (own.ko > 0) {
+      const k = ease(own.ko);
+      camera.position.y -= 1.0 * k;
+      camera.rotation.x += (1.1 - camera.rotation.x) * k * .85;
+      camera.rotation.z += .55 * k + Math.sin(t * 1.7) * .05 * k;
+    }
+    if (down && $('koCard').style.display === 'none') $('koCard').style.display = 'block';
+    if (!down && $('koCard').style.display !== 'none' && own.downUntil === 0) $('koCard').style.display = 'none';
+    if (own.shake > 0) { camera.rotation.x += (Math.random() - .5) * own.shake; camera.rotation.y += (Math.random() - .5) * own.shake; own.shake = Math.max(0, own.shake - dt * .25); }
+    own.flash = Math.max(0, own.flash - dt * 2.2);
+    $('hurtVig').style.opacity = Math.max(own.flash, down ? .6 : 0, own.hp < 35 ? .25 + Math.sin(t * 5) * .08 : 0).toFixed(3);
+    if (!down && own.hp < MAX_HP && now() - own.lastHit > 4000) { own.hp = Math.min(MAX_HP, own.hp + 8 * dt); if (Math.floor(own.hp) % 4 === 0 || own.hp >= MAX_HP) drawHp(); }
+    vm.visible = !down;                 // the bottle hand drops out of view while you're out cold
+    // fists
+    own.punchT = Math.max(0, own.punchT - dt / .28);
+    const empty = !holding(), pk = own.punchT > 0 ? Math.sin((1 - own.punchT) * Math.PI) : 0;
+    for (const h of ['L', 'R']) {
+      const f = fists[h], active = own.punchT > 0 && own.hand === h;
+      f.visible = !down && (empty || active) && !(window.__net && window.__net.busy);   // GAME-82 reach/dig uses the gloved hand
+      if (!f.visible) continue;
+      const k = active ? pk : 0;
+      _v.copy(REST[h]).lerp(HIT[h], k);
+      _v.y += Math.sin(t * 2.2 + (h === 'L' ? 1 : 0)) * .006 - (empty ? 0 : (1 - k) * .2);
+      f.position.copy(_v);
+      f.rotation.set(-k * .25, (h === 'L' ? 1 : -1) * (.12 - k * .1), (h === 'L' ? -1 : 1) * k * .3);
+    }
+  }
+
+  drawHp();
+  window.__fight = { own, pose, onFx, send: o => NET.send(o) };
+  return { holding, punch, speedScale, afterStep, onFx, onMeta, pose, afterCamera, isDown };
 })();
 
 // ===================== turf mini map (GAME-80) =====================
@@ -2484,6 +4334,9 @@ const MINI = (() => {
 (function prewarm() {
   const g = new THREE.Group(), geo = new THREE.PlaneGeometry(1, 1);
   for (const m of [shardMat, bottleShardMat, brokenGlassMat, glassMat, woodMat]) { const o = new THREE.Mesh(geo, m); o.castShadow = o.receiveShadow = true; g.add(o); }
+  // Procedural glass (GAME-84); the cracked pane uses RGBA vertex colours, a separate program.
+  const rgba = new THREE.PlaneGeometry(1, 1); rgba.setAttribute('color', new THREE.Float32BufferAttribute(new Array(16).fill(1), 4));
+  for (const [m, vc] of GLASS.materials) { const o = new THREE.Mesh(vc ? rgba : geo, m); o.castShadow = o.receiveShadow = true; g.add(o); }
   const st = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: stainTex, transparent: true, depthWrite: false })); g.add(st);
   for (const [map, blending] of [[flameTex, THREE.AdditiveBlending], [smokeTex, THREE.NormalBlending]])
     g.add(new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, blending })));

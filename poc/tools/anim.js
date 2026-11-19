@@ -16,6 +16,8 @@
 // The vagrant model is posed through p.parts = { torso, head, armL, armR, legL, legR }: each a
 // Group child of p.g, pivot at its joint, rest rotation identity, origin at the feet facing +z.
 // Arm rotation x < 0 swings an arm forward/up; leg rotation x < 0 swings a leg forward.
+// In clips, armR / legR mean the character's right side (-x, the hand that holds things),
+// whichever part carries that name. The held item is v.heldObj (GAME-82), on that arm.
 const ANIM = (() => {
   const clips = {};
   const clamp01 = k => k < 0 ? 0 : k > 1 ? 1 : k;
@@ -47,15 +49,15 @@ const ANIM = (() => {
 
   // ---------- first person ----------
   const fpS = {};
-  const fpOut = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, camY: 0, camPitch: 0, hideHeld: false };
+  const fpOut = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, camY: 0, camPitch: 0, hideHeld: false, w: 0 };
   function play(name, m) { if (clips[name]) start(fpS, name, m); }
   // The server echoes your own clips back; skip the echo if we already predicted it.
-  function echo(name, m) { if (fpS.name === name && performance.now() - fpS.at < 1500) return; play(name, m); }
+  function echo(name, m) { if ((m && m.tpOnly) || (fpS.name === name && performance.now() - fpS.at < 1500)) return; play(name, m); }
   function fpTick(dt, moving) {
     for (const k in fpOut) fpOut[k] = k === 'hideHeld' ? false : 0;
     const r = step(fpS, dt, moving); if (!r || !r.c.fp) return fpOut;
-    const p = r.c.fp(r.k, r.s.t, r.s.m) || {};
-    for (const k in p) { if (k === 'hideHeld') fpOut.hideHeld = !!p[k] && r.w > .3; else fpOut[k] = p[k] * r.w; }
+    const p = r.c.fp(r.k, r.s.t, r.s.m) || {}; fpOut.w = r.w;
+    for (const k in p) { if (k === 'w') continue; if (k === 'hideHeld') fpOut.hideHeld = !!p[k] && r.w > .3; else fpOut[k] = p[k] * r.w; }
     return fpOut;
   }
   // Applied right after the look test poses the viewmodel each frame.
@@ -64,6 +66,8 @@ const ANIM = (() => {
     vm.position.x += o.x; vm.position.y += o.y; vm.position.z += o.z;
     vm.rotation.x += o.rx; vm.rotation.y += o.ry; vm.rotation.z += o.rz;
     if (o.hideHeld) held.visible = false;
+    // Empty hands sit lowered out of view (GAME-82); bring the glove up while a clip plays.
+    if (o.w > .02) { if (typeof NET !== 'undefined' && NET.handDrop) vm.position.y += NET.handDrop() * o.w; handG.visible = true; }
   }
   const camY = () => fpOut.camY, camPitch = () => fpOut.camPitch;
 
@@ -102,8 +106,11 @@ const ANIM = (() => {
     const blend = (base, key) => { const a = pose && pose[key]; return a ? base.map((b, i) => b * (1 - w) + a[i] * w) : base; };
     g.position.set(0, -0.9 + y + (pose ? (pose.y || 0) * w : 0), pose ? (pose.fwd || 0) * w : 0);
     g.rotation.set(lean + (pose ? (pose.lean || 0) * w : 0), pose ? (pose.turn || 0) * w : 0, tilt + (pose ? (pose.tilt || 0) * w : 0));
-    setRot(P.armR, blend(arm, 'armR'), null, 0); setRot(P.armL, blend(armL, 'armL'), null, 0);
-    setRot(P.legR, blend(legR, 'legR'), null, 0); setRot(P.legL, blend(legL, 'legL'), null, 0);
+    // Clips name limbs by the character's side: right = -x (the hand that holds things).
+    const rx = P.armR.position.x < 0, R = rx ? P.armR : P.armL, L = rx ? P.armL : P.armR;
+    const lx = P.legR.position.x < 0, RL = lx ? P.legR : P.legL, LL = lx ? P.legL : P.legR;
+    setRot(R, blend(arm, 'armR'), null, 0); setRot(L, blend(armL, 'armL'), null, 0);
+    setRot(RL, blend(legR, 'legR'), null, 0); setRot(LL, blend(legL, 'legL'), null, 0);
     setRot(P.torso, ZERO, pose && pose.torso, w);
     P.head.rotation.set(pose && pose.head ? pose.head[0] * w : 0, pose && pose.head ? pose.head[1] * w : 0, Math.sin(t * 1.3 + v.model.ph) * .08 + (pose && pose.head ? pose.head[2] * w : 0));
     if (pose && pose.world && w > 0) {   // slide toward a spot, e.g. onto the couch
@@ -112,36 +119,10 @@ const ANIM = (() => {
       g.position.x += (dx * c + dz * s) * w; g.position.z += (-dx * s + dz * c) * w;
       if (face !== undefined) { let d = face - o.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); g.rotation.y += d * w; }
     }
-    if (v.model.held) v.model.held.visible = !hide && re < .25;
+    if (v.heldObj) v.heldObj.visible = !hide;
   }
 
-  // Split a freshly built vagrant into posable parts (same parts and materials, baked per part).
-  // Used by vagrant({ rig: true }) until the character module (GAME-93) supplies p.parts itself.
-  function rigVagrant(g, head) {
-    g.updateMatrixWorld(true);
-    const PIV = { torso: [0, .9, 0], armR: [-.24, 1.34, 0], armL: [.24, 1.34, 0], legR: [-.1, .9, 0], legL: [.1, .9, 0] };
-    const tmp = {}; for (const k in PIV) tmp[k] = new THREE.Group();
-    const box = new THREE.Box3(), c = new THREE.Vector3(), list = [];
-    g.traverse(o => { if (o.isMesh && o.userData.c !== undefined) list.push(o); });
-    for (const o of list) {
-      box.setFromObject(o).getCenter(c);
-      // Model faces +z, so the character's right side is -x.
-      const part = Math.abs(c.x) > .2 && c.y > .7 && c.y < 1.45 ? (c.x < 0 ? 'armR' : 'armL') : c.y < .88 ? (c.x < 0 ? 'legR' : 'legL') : 'torso';
-      tmp[part].attach(o);
-    }
-    for (const o of [...g.children]) if (!o.isMesh && !o.children.length) g.remove(o);   // empty glove groups
-    const parts = {};
-    for (const k in PIV) {
-      bake(tmp[k]);
-      const pg = new THREE.Group(); pg.position.set(...PIV[k]); pg.name = k;
-      for (const m of [...tmp[k].children]) { m.geometry.translate(-PIV[k][0], -PIV[k][1], -PIV[k][2]); pg.add(m); }
-      g.add(pg); parts[k] = pg;
-    }
-    parts.head = head;
-    return parts;
-  }
-
-  const api = { define, keys, ease, play, echo, applyFP, camY, camPitch, playOn, poseVagrant, rigVagrant, clips, get fp() { return fpS; } };
+  const api = { define, keys, ease, play, echo, applyFP, camY, camPitch, playOn, poseVagrant, clips, get fp() { return fpS; } };
   window.__anim = api;   // for captures, tests and the console
   return api;
 })();
@@ -173,7 +154,15 @@ ANIM.define('warm', { dur: 1.2, loop: true, cancelOnMove: true, maxLoop: 6,
 ANIM.define('sit', { dur: 4, loop: true, cancelOnMove: true, fadeIn: .4, fadeOut: .3,
   fp: (k, t) => ({ camY: -.55, camPitch: .05, y: -.05, rx: .2, z: .03 + Math.sin(t * 1.6) * .006, hideHeld: false }),
   tp: (k, t, m) => ({ y: -.28, lean: -.3, world: m.seat, legR: [-1.2, 0, -.1], legL: [-1.2, 0, .1], armR: [-.25, 0, -.35], armL: [-.25, 0, .35], head: [-.1, 0, Math.sin(t * 1.6) * .05] }) });
-// Throw the beer bottle (other players see it; your hand already kicks in first person).
+// Pick something up off the ground (GAME-82 plays the first-person part): bend and scoop.
+ANIM.define('reach', { dur: .65,
+  tp: k => { const d = ANIM.keys([[0, 0], [.45, 1], [1, 0]])(k);
+    return { y: -.1 * d, lean: .45 * d, armR: [-1.1 * d, 0, .1 * d], armL: [-.3 * d, 0, 0], legR: [-.35 * d, 0, 0], legL: [.25 * d, 0, 0], head: [.35 * d, 0, 0], hideHeld: k < .45 }; } });
+// Dig through a dumpster or trash pile (GAME-82 plays the first-person part): lean in and root around.
+ANIM.define('dig', { dur: 1.2,
+  tp: (k, t) => { const r = Math.sin(t * 16);
+    return { lean: .35, fwd: .05, armR: [-1.3 + r * .25, 0, .15], armL: [-1.3 - r * .25, 0, -.15], head: [.3, 0, r * .05], tilt: r * .03, hideHeld: true }; } });
+// Throw what you hold (other players see it; your hand already kicks in first person).
 ANIM.define('throw', { dur: .6,
   tp: k => { const s = ANIM.keys([[0, 0], [.3, 1], [.55, -.5], [1, 0]])(k);
     return { armR: [-1.6 - s * 1.3, 0, .1], turn: s * .3, lean: -s * .1, hideHeld: k > .3 && k < .95 }; } });
