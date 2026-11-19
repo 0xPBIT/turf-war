@@ -3,8 +3,11 @@
 // builders (house, tree, car, windowPane, sign...) so everything shares the locked Blend look.
 // World axes: +x = south on the concept map, +z = west. Main St runs along x at z=0,
 // Elm Ave along z at x=-12, the Route 9 Skyway deck along z at x=22.
-var BURN;   // trees, bushes and plants: {id,type,g,p,s}; their groups stay out of the grid bake
-function burnReg(type,g,x,z,s){ (BURN||(BURN=[])).push({id:'t:'+(BURN?BURN.length:0),type,g,p:[x,0,z],s}); g.userData.nobake=true; }
+// Planters, flower beds and reeds join the look test's BURN list (GAME-86: trees and bushes,
+// id "t:N" in build order) and stay out of the grid bake as their own small baked groups.
+function burnReg(type,g,x,z,s){ BURN.push({id:'t:'+BURN.length,type,g,x,z,s}); g.userData.nobake=true; }
+// Lampposts copper can be stripped from (GAME-91): the look test's five on Main St, then ours.
+const LAMPS=[0,1,2,3,4].map(i=>({id:'lamp:'+i,p:[-34+i*17,0,5.5],ry:0,style:'cobra'}));
 // Merge a group's meshes per material in the group's own space (bake() assumes a root at the origin).
 function bakeLocal(root){
   root.updateMatrixWorld(true); const inv=new THREE.Matrix4().copy(root.matrixWorld).invert(), groups=new Map(), kill=[], m4=new THREE.Matrix4();
@@ -21,7 +24,7 @@ function bakeLocal(root){
 const VC_MATS=new Map();
 function vcMat(base){ if(!VC_MATS.has(base)){ const m=getMat(base==='vc'?0xffffff:base).clone(); m.vertexColors=true; VC_MATS.set(base,m); } return VC_MATS.get(base); }
 function bakeGrid(root,cell){
-  for(const b of (BURN||[])) bakeLocal(b.g);
+  for(const b of BURN) if(b.g.userData.nobake) bakeLocal(b.g);
   // Window interiors (flat planes behind the glass) merge per material and cell; the glass and its
   // highlight stay separate so panes can still break one by one. Highlights skip the ink pass.
   { const ints=new Map(), kill=[], c=new THREE.Vector3(); root.updateMatrixWorld(true);
@@ -231,7 +234,7 @@ function signalPole(x,z,ry,armLen,ix,axis,names){
   if(names){ const bl=grp(g,armLen*.25,6.0,0); put(B(1.6,.3,.03),0x1F8A5A,bl,0,0,0); sign([names],1.5,.24,null,'#FFFFFF',bl,0,0,.02); sign([names],1.5,.24,null,'#FFFFFF',bl,0,0,-.02,Math.PI); }
   postBody(x,z,.14,6.2,'signal');
 }
-function cobra(x,z,ry){ const g=grp(city,x,0,z,ry); put(CYL(.07,.11,6.4,10),0xC8CDDD,g,0,3.2,0); put(CYL(.18,.2,.4,10),0xC8CDDD,g,0,.2,0); tube([[0,6.3,0],[0,6.7,-.4],[0,6.75,-1.4]],.05,0xC8CDDD,g,8); put(B(.38,.16,.75,.05),0xC8CDDD,g,0,6.68,-1.65); put(B(.28,.03,.5),0xFFF6D0,g,0,6.59,-1.65); postBody(x,z,.12,6.4); }
+function cobra(x,z,ry){ LAMPS.push({id:'lamp:'+LAMPS.length,p:[+x.toFixed(2),0,+z.toFixed(2)],ry:+ry.toFixed(4),style:'cobra',gy:.16}); const g=grp(city,x,0,z,ry); put(CYL(.07,.11,6.4,10),0xC8CDDD,g,0,3.2,0); put(CYL(.18,.2,.4,10),0xC8CDDD,g,0,.2,0); tube([[0,6.3,0],[0,6.7,-.4],[0,6.75,-1.4]],.05,0xC8CDDD,g,8); put(B(.38,.16,.75,.05),0xC8CDDD,g,0,6.68,-1.65); put(B(.28,.03,.5),0xFFF6D0,g,0,6.59,-1.65); postBody(x,z,.12,6.4); }
 function hydrant(x,z){ const g=grp(city,x,0,z,rnd()*6); const prof=[[0,0],[.17,0],[.17,.06],[.13,.08],[.13,.5],[.15,.52],[.15,.56],[.11,.6],[.06,.68],[0,.7]].map(([a,b])=>new THREE.Vector2(a,b)); put(new THREE.LatheGeometry(prof,14),0xFFD84A,g,0,0,0); for(const r of [0,HP,Math.PI]){ const o=grp(g,0,.4,0,r); put(CYL(.06,.06,.12,10),0xFFD84A,o,.17,0,0,{rz:HP}); put(CYL(.07,.07,.03,6),0xE8343F,o,.24,0,0,{rz:HP}); } put(CYL(.035,.035,.05,5),0xE8343F,g,0,.72,0); postBody(x,z,.17,.7); }
 function bench(x,z,ry,hex=null){ const g=grp(city,x,0,z,ry); for(let k=0;k<4;k++) put(B(2.2,.04,.12),hex??'tx:woodPale',g,0,.48,-.2+k*.13); for(let k=0;k<3;k++) put(B(2.2,.12,.03),hex??'tx:woodPale',g,0,.68+k*.16,.3,{rx:-.15}); for(const x2 of [-.9,.9]){ put(B(.06,.48,.06),DARKM,g,x2,.24,-.2); put(B(.06,.48,.06),DARKM,g,x2,.24,.2); put(B(.06,.06,.5),DARKM,g,x2,.46,0); put(B(.06,.6,.06),DARKM,g,x2,.75,.3,{rx:-.15}); } solid(g,0,.45,0,1.1,.45,.35); }
 function trashCan(x,z,hex=0x26A0D9){ const g=grp(city,x,0,z,rnd()*6); put(CYL(.3,.27,.95,16),hex,g,0,.48,0); for(const y of [.25,.7]) put(new THREE.TorusGeometry(.3,.02,6,16),DARKM,g,0,y,0,{rx:HP}); put(CYL(.33,.33,.08,16),DARKM,g,0,.98,0); put(CYL(.12,.12,.05,12),0x1A1D30,g,0,1.03,0); postBody(x,z,.3,1); }
@@ -393,7 +396,7 @@ function downtown(){
   // east side of Main (z<0), facing Main (+z)
   shop({x:-24.5,z:-13,w:10,d:12,face:E,wall:'tx:brickBlue',sign:'BOOKS',signBg:'#FFFFFF',signFg:'#2E2350',signHex:0xFFFFFF,interior:INT.books,awning:0x26D3A0,floors:2,upSign:['USED · RARE · COMICS'],name:'Books'});
   shop({x:-36,z:-12.5,w:12,d:11,face:E,wall:'tx:stuccoMint',sign:'SUDSY LAUNDROMAT',signBg:'#3FB8FF',signFg:'#FFFFFF',signHex:0x3FB8FF,interior:INT.laundry,doorAt:.85,name:'Sudsy Laundromat',hours:['OPEN 6-11'],
-    extra:(g,{w,fz})=>{ for(let k=0;k<5;k++){ const b2=new THREE.Mesh(new THREE.SphereGeometry(.18+k*.04,16,12),bubbleMat); b2.position.set(-w/2+1+k*.9,3.9+((k*7)%3)*.2,fz+.4); fxl(b2); g.add(b2); } } });
+    extra:(g,{w,fz})=>{ for(let k=0;k<5;k++){ const b2=new THREE.Mesh(new THREE.SphereGeometry(.18+k*.04,16,12),glassMat); b2.position.set(-w/2+1+k*.9,3.9+((k*7)%3)*.2,fz+.4); fxl(b2); g.add(b2); } } });
   cinema(-53,-15);
   shop({x:-70,z:-12.5,w:8,d:11,face:E,wall:'tx:stuccoPeach',sign:'FLOWERS',signBg:'#FF6E9E',signFg:'#FFFFFF',signHex:0xFF6E9E,interior:INT.flowers,awning:0xFF6E9E,name:'Flowers',
     extra:(g,{w,fz})=>{ for(let i=0;i<4;i++){ const b=grp(g,-w/2+1+i*1.1,0,fz+.9); put(B(.9,.5,.5),'tx:woodPale',b,0,.25,0); for(let k=0;k<5;k++) put(new THREE.SphereGeometry(.12,8,6),pick([0xFF6E9E,0xFFC93C,0xFFFFFF,0x8F6BFF]),b,-.3+k*.15,.6,(rnd()-.5)*.2); } } });
@@ -763,7 +766,7 @@ function railYard(){
   // creek bodies: the water is shallow but you can't walk through the banks' rocks; keep it open
   const bi=48, bp=sp[bi]; const fb=grp(city,bp.x,0,bp.y,0); put(B(1.8,.12,9,.03),'tx:woodPale',fb,0,.75,0); for(const s of [-1,1]){ for(let k=0;k<5;k++) put(B(.08,.9,.08),'tx:wood',fb,s*.85,1.1,-4+k*2); put(B(.08,.08,9),'tx:wood',fb,s*.85,1.5,0); } for(let k=0;k<4;k++) put(B(.2,.8,.2),'tx:wood',fb,(k%2?.7:-.7),.4,k<2?-3:3);
   // a quiet camp by the creek
-  const cp=sp[110]; CAMP=[cp.x+1.6,cp.y-9]; const tt=grp(city,cp.x,0,cp.y-7,.5); const tarp=new THREE.BufferGeometry(); tarp.setAttribute('position',new THREE.Float32BufferAttribute([-1,0,-1.2, 0,1.2,-1.2, 0,1.2,1.2, -1,0,-1.2, 0,1.2,1.2, -1,0,1.2, 1,0,-1.2, 0,1.2,1.2, 0,1.2,-1.2, 1,0,-1.2, 1,0,1.2, 0,1.2,1.2],3)); tarp.computeVertexNormals(); mesh(tarp,0x8F6BFF,tt); solid(tt,0,.6,0,1,.6,1.2);
+  const cp=sp[110]; CAMP=[cp.x+1.6,cp.y+9]; const tt=grp(city,cp.x,0,cp.y+7,.5); const tarp=new THREE.BufferGeometry(); tarp.setAttribute('position',new THREE.Float32BufferAttribute([-1,0,-1.2, 0,1.2,-1.2, 0,1.2,1.2, -1,0,-1.2, 0,1.2,1.2, -1,0,1.2, 1,0,-1.2, 0,1.2,1.2, 0,1.2,-1.2, 1,0,-1.2, 1,0,1.2, 0,1.2,1.2],3)); tarp.computeVertexNormals(); mesh(tarp,0x8F6BFF,tt); solid(tt,0,.6,0,1,.6,1.2);
   for(const [x,z] of [[100,-140],[120,-160],[90,-162],[70,-160],[132,-150],[50,-158],[142,-162],[78,-140],[110,-138],[58,-141]]) T(x,z,1+rnd()*.3);
   for(let i=0;i<14;i++) Bu(46+rnd()*95,-141-rnd()*21,.7+rnd()*.5);
   industrial();
@@ -884,13 +887,8 @@ function props(){
   for(const [x,z] of [[-2,-47.6],[0,-47.6],[2.2,-47.6],[14,-47.6],[15.5,-47.4],[-5.6,-57],[10,-46.5],[70,-3.8],[73.5,3.8],[-12,-3.8]]) cone(x,z);
   crate(9,64,.7,P.sunny); crate(29,-30,.7,P.gum);
 }
-function extraPeople(){
-  // a few more vagrants around town: the creek camp, the alley, panhandling at the Oak light, the park
-  vagrant({x:23.2,z:-15.8,ry:-1.7,coat:0x4D6FC9,coatSh:0x3A58A8,hat:0xFF9F1C,hatSh:0xE07A00,pants:0x3E3A4E,hoodie:0x8A3E5E,skin:0x8D5A3B,skinSh:0x6E432B,beard:0x1E1A16,pack:0x5E7A4A,packSh:0x4A6238,roll:0x9A3E3E});
-  vagrant({x:9.6,z:61.6,ry:2.6,coat:0x7A6A4E,coatSh:0x5E523C,hat:0x26D3A0,hatSh:0x1AA880,pants:0x4D6FC9,hoodie:0xD8C9A8,skin:0xFFD9B8,skinSh:0xE9AE88,beard:0xB04A2A});
-  vagrant({x:66.6,z:5.4,ry:Math.PI*.8,coat:0xE8343F,coatSh:0xB82A33,hat:0x8F6BFF,hatSh:0x6E4FD8,pants:0x5A4C80,hoodie:0x9AA3B8,sign:['WILL MOP','FOR $']});
-  vagrant({x:CAMP[0],z:CAMP[1],ry:.4,coat:0x5FA88A,coatSh:0x4A8A70,hat:0xFF6E9E,hatSh:0xE04A7E,pants:0x6A6E7E,hoodie:0x7A3E4E,skin:0xE8B48A,skinSh:0xC98F66,beard:0x5A3A2A});
-}
+// Townsfolk are server-driven NPCs now (GAME-85/93, npcs.json); the town only says where its camp is.
+function extraPeople(){}
 
 // ---------- zones (turf), spawn points, traffic routes (for town.json) ----------
 const ZONES=[
@@ -932,7 +930,7 @@ const sun0=new THREE.Vector3().copy(sunLight.position);
 let camOv=null, far0=0;
 let fog0=null; window.__townCam=(p,t,clear)=>{ if(!far0){ far0=camera.far; fog0=[scene.fog.near,scene.fog.far]; } camOv=p?{p,t,clear}:null; cullT=0; camera.far=p?1200:far0; camera.updateProjectionMatrix(); scene.fog.near=p&&clear?900:fog0[0]; scene.fog.far=p&&clear?2000:fog0[1]; vm.visible=!p; };
 function cam(){ if(camOv){ camera.position.set(...camOv.p); camera.lookAt(...camOv.t); } }
-window.__townMeshes=()=>{ const burn=new Set(); for(const t of (BURN||[])) t.g.traverse(o=>burn.add(o)); const out={}; scene.traverse(o=>{ if(!o.isMesh&&!o.isSprite) return; let k=o.userData.baked?'baked':burn.has(o)?'tree':o.material===glassMat?'glass':(o.material&&o.material.type)+(o.userData.c!==undefined?':c':''); out[k]=(out[k]||0)+1; }); return out; };
+window.__townMeshes=()=>{ const burn=new Set(); for(const t of BURN) t.g.traverse(o=>burn.add(o)); const out={}; scene.traverse(o=>{ if(!o.isMesh&&!o.isSprite) return; let k=o.userData.baked?'baked':burn.has(o)?'tree':o.material===glassMat?'glass':(o.material&&o.material.type)+(o.userData.c!==undefined?':c':''); out[k]=(out[k]||0)+1; }); return out; };
 window.__townFrustum=()=>{ const f=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse)); const out={}; let n=0,sh=0; scene.traverse(o=>{ if(!(o.isMesh)||!o.layers.test(camera.layers)) return; let v=true; for(let q=o;q;q=q.parent) if(!q.visible){ v=false; break; } if(!v) return; if(!f.intersectsObject(o)) return; n++; if(o.castShadow) sh++; const k=o.userData.baked?'baked':o.material===glassMat?'glass':(o.material&&o.material.type); out[k]=(out[k]||0)+1; }); out.total=n; out.cast=sh; return out; };
 window.__townDbg=()=>({sunLight,renderer,scene,camera,city,DET,THREE});
 window.__townStats=()=>{ const r=renderer.info.render; return {calls:r.calls,tris:r.triangles}; };
@@ -940,10 +938,12 @@ window.__townStats=()=>{ const r=renderer.info.render; return {calls:r.calls,tri
 // they move to an unused layer when far away, so .visible stays the game's to use.
 let DET=null, cullT=0; const CULL_LAYER=1<<6;
 function buildCull(){
-  DET=[]; city.updateMatrixWorld(true); const sp=new THREE.Sphere(), burn=new Set(); for(const t of (BURN||[])) t.g.traverse(o=>burn.add(o));
-  city.traverse(o=>{ if(!(o.isMesh||o.isSprite)) return; const isTree=burn.has(o); if(o.userData.baked && !isTree) return;
+  DET=[]; city.updateMatrixWorld(true); const sp=new THREE.Sphere(), burn=new Set(); for(const t of BURN) t.g.traverse(o=>burn.add(o));
+  for(const t of BURN) t.g.updateMatrixWorld(true);
+  const visit=o=>{ if(!(o.isMesh||o.isSprite)) return; const isTree=burn.has(o); if(o.userData.baked && !isTree) return;
     if(o.isMesh){ if(!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); sp.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld); } else { sp.center.setFromMatrixPosition(o.matrixWorld); sp.radius=1; }
-    const r=sp.radius; if(r>9) return; const d=isTree?190:r<1.2?80:r<4?135:175; DET.push({o,x:sp.center.x,z:sp.center.z,r2:d*d,off:false,m:0}); });
+    const r=sp.radius; if(r>9) return; const d=isTree?190:r<1.2?80:r<4?135:175; DET.push({o,x:sp.center.x,z:sp.center.z,r2:d*d,off:false,m:0}); };
+  city.traverse(visit); for(const t of BURN) if(!t.g.userData.nobake) t.g.traverse(visit);
 }
 function cull(dt){
   if(!DET || (cullT-=dt)>0) return; cullT=.25; const cx=camera.position.x, cz=camera.position.z, all=camOv&&camOv.clear;
@@ -1003,7 +1003,7 @@ function dump(){
     piles:piles.map((p,i)=>({id:'pile:'+i,i,x:r3(p.pos.x),z:r3(p.pos.z)})),
     npcs:people.map(p=>({x:r3(p.g.position.x),z:r3(p.g.position.z),ry:r3(p.g.rotation.y)})),
     newProps:PROPS, traffic:trafficSpec(),
-    burnables:(BURN||[]).map(b=>({id:b.id,type:b.type,p:b.p.map(r3),s:r3(b.s)})),
+    camp:CAMP, burnables:BURN.map(b=>({id:b.id,type:b.type,p:[r3(b.x),0,r3(b.z)],s:r3(b.s)})), lampposts:LAMPS,
     roads:META.roads, walks:META.walks, lots:META.lots, buildings:META.buildings, decks:META.decks,
   };
 }

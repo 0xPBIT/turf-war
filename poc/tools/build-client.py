@@ -16,9 +16,16 @@ OUT = HERE.parent / 'public' / 'index.html'
 NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
+ITEMS = (HERE / 'items-client.js').read_text()
+GLASS = (HERE / 'glass.js').read_text()
+FIGHTJS = (HERE / 'fight-client.js').read_text()
+SKY = (HERE / 'sky.js').read_text()
 PROPS = (HERE / 'props.js').read_text()
 MINI = (HERE / 'minimap.js').read_text()
+FIRE = (HERE / 'fire-client.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
+COPPER = (HERE / 'copper.js').read_text()
+CHARS = (HERE / 'characters.js').read_text()
 
 s = SRC.read_text()
 
@@ -35,12 +42,37 @@ rep('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js', '/vendor
 rep('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/', '/vendor/three/examples/jsm/')
 rep('https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js', '/vendor/cannon-es.js')
 
+# City vagrants (GAME-93): characters.js replaces the look test's camper vagrant() (kept, unused,
+# as campVagrant) with urban outfits built from six jointed parts (p.parts) for ragdolls and punches.
+rep('function vagrant(o){', CHARS + '\nfunction campVagrant(o){')
+# First-person sleeve: a heather hoodie sleeve instead of the canvas field jacket with a denim elbow patch.
+rep("limb([BX+.17,-.12,BZ+.11],[BX+.36,-.52,BZ+.42],.11,.088,'tx:canvas|'+0xE07A2E,handG,16);",
+    "limb([BX+.17,-.12,BZ+.11],[BX+.36,-.52,BZ+.42],.11,.088,'tx:fleece|'+0x5A5F70,handG,16);")
+rep("put(CYL(.094,.094,.05,16),0xB85E1E,handG,BX+.18,-.14,BZ+.125,{rz:.5,rx:-.45});", "put(CYL(.094,.094,.05,16),'tx:knit|'+0x4A4E5C,handG,BX+.18,-.14,BZ+.125,{rz:.5,rx:-.45});")
+rep("put(B(.13,.012,.012,.004),0xB85E1E,handG,", "put(B(.13,.012,.012,.004),0x464A58,handG,")
+rep("put(B(.1,.13,.02,.006),'tx:denim|'+0x6A86C8,sl,-.03,.02,.088,{rx:-.1,ry:-.3});", "put(B(.12,.03,.012,.004),0xC9CCD4,sl,-.03,.02,.092,{rx:-.1,ry:-.3,rz:.6}); put(B(.12,.03,.012,.004),0xC9CCD4,sl,-.03,.02,.094,{rx:-.1,ry:-.3,rz:-.6});")
+rep("for(let k=0;k<5;k++) put(B(.012,.012,.012),0xF4ECD8,sl,-.085+k*.028,.088,.098,{ry:-.3});", "")
+rep("put(B(.008,.36,.008),0x9A4C18,sl,.095,0,.0);", "put(B(.008,.36,.008),0x464A58,sl,.095,0,.0);")
+
 # HUD: hide the look-test panels (the Blend look is locked), add the multiplayer HUD.
 rep('<div class="hud" id="tl">', '<div class="hud" id="tl" style="display:none">')
 rep('<div class="panel" id="dials">', '<div class="panel" id="dials" style="display:none">')
 rep('<div class="panel" id="places">', '<div class="panel" id="places" style="display:none">')
 rep('<div class="hud" id="cap">', '<div class="hud" id="cap" style="display:none">')
 rep('<div id="joy"><span></span></div>', '<div id="joy"><span></span></div>\n' + HUD)
+
+# Sky (GAME-89): the sphere-clump clouds are replaced by clouds painted into the sky dome
+# (tools/sky.js); dome and sun follow the camera. The floating soap bubbles go too: under the
+# Blend shader they draw as flat pale discs hanging in the sky, which read as stray clouds.
+def cut(start, end, new):
+    global s
+    a = s.index(start); b = s.index(end, a)
+    s = s[:a] + new + s[b:]
+cut('// ---------- sky dome ----------', '// ---------- sun character ----------', SKY + '\n')
+cut('// ---------- clouds & bubbles ----------', '// ---------- physics ----------', '')
+rep("  for(const b of bubbles){ b.position.y+=b.userData.v*dt; b.position.x+=Math.sin(t*.6+b.userData.ph)*dt*.4; if(b.position.y>26){ b.position.y=1; } }\n", "")
+rep("  for(const c of clouds) c.position.x+=dt*.6;\n",
+    "  skyDome.position.copy(camera.position); skyDome.material.uniforms.time.value=t; sunGroup.position.copy(camera.position).add(SUN_OFFSET);\n")
 
 # No local props: the server owns crates and cones.
 rep('spawnProps();\nconst starTex', 'const starTex')
@@ -81,6 +113,24 @@ rep("  if(keys.has('Space') && player.position.y<.4){ player.velocity.y=6.5; }",
 rep("const k=e.pointerType==='touch'?.006:.004; yaw-=dx*k; pitch=Math.max(-1.2,Math.min(1.2,pitch-dy*k));", "SET.lookDrag(dx,dy,e.pointerType==='touch');")
 rep("player.position.y+1.25+Math.sin(bobT)*.04", "player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()")
 rep("vm.position.set(.2+Math.cos(bobT*.5)*.008,-.17+Math.abs(Math.sin(bobT*.5))*.01-handKick*.1", "vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1")
+# Throwable junk (GAME-82): the hand drops out of view when empty and only shows what you hold.
+rep("-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6;", "-handKick*.1-NET.handDrop(),-.45+handKick*.06); vm.rotation.x=-handKick*.9; NET.heldVisible(handKick); NET.vmAnim(dt);")
+
+# GAME-83: jump off anything you stand on (car hoods and roofs), not just the ground.
+rep("  if(SET.down('jump') && player.position.y<.4){ player.velocity.y=6.5; }", "  if(SET.down('jump') && (player.position.y<.4 || NET.grounded())){ player.velocity.y=6.5; }")
+# GAME-83: third-person camera while you are knocked down.
+rep("  camera.rotation.set(pitch,yaw,0,'YXZ');\n", "  camera.rotation.set(pitch,yaw,0,'YXZ');\n  NET.knockedCamera(dt);\n")
+
+# GAME-83: cars get a see-through cabin (roof, pillars, tinted glass windshield, windows,
+# seats, dash, wheel) instead of a solid dark window band, and a hood + cabin collider
+# you can climb onto. Same shape as carColliders() in server.mjs.
+rep("[-.95,.94],[-.35,1.4],[.8,1.4],[1.5,1.0]", "[-.95,.94],[1.5,1.0]")
+rep("const win=[[-.88,.95],[-.33,1.36],[.78,1.36],[1.44,1.0]]; const wm=shapeExtrude([...win,[1.44,.96],[-.88,.92]],Wd+.04,0x2A3050,g);",
+    "carCabin(g,Wd,bodyHex);")
+rep("put(B(.03,.42,Wd+.06),bodyHex,g,.25,1.15,0); put(B(.03,.4,Wd+.06),bodyHex,g,-.35,1.15,0,{rz:-.6});", "")
+rep("const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry); staticBox(x,.8,z,Math.abs(s.x)*2.2+Math.abs(s.z)*.9,.8,Math.abs(s.z)*2.2+Math.abs(s.x)*.9);",
+    "const s=new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0),ry), ax=Math.abs(s.x), az=Math.abs(s.z); staticBox(x,.545,z,ax*2.2+az*.875,.385,az*2.2+ax*.875); staticBox(x+s.x*.25,1.165,z+s.z*.25,ax*.9+az*.8,.235,az*.9+ax*.8);")
+rep("function car(x,z,ry,bodyHex){", (HERE / 'car-cabin.js').read_text() + "\nfunction car(x,z,ry,bodyHex){")
 
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
@@ -133,9 +183,6 @@ rep("scene.fog = new THREE.Fog(P.horizon, 70, 260);", "scene.fog = new THREE.Fog
 rep('\nbake(city);\n', '\n' + TOWN_JS + '\nTOWN.build();\nbakeGrid(city, 64);\n')
 i = s.index("\n", s.index("vagrant({x:21.8,z:9.3,ry:-2.4,"))
 s = s[:i] + "\nTOWN.afterPeople();" + s[i:]
-# Trees and bushes register as burnables (GAME-86) and stay out of the grid bake.
-rep("function tree(x,z,s=1,hexA='tx:leafA'){\n  const g=grp(city,x,0,z,R()*6);", "function tree(x,z,s=1,hexA='tx:leafA'){\n  const g=grp(city,x,0,z,R()*6); burnReg('tree',g,x,z,s);")
-rep("function bush(x,z,s=1){ const g=grp(city,x,0,z);", "function bush(x,z,s=1){ const g=grp(city,x,0,z); burnReg('bush',g,x,z,s);")
 # Sun shadows follow the player across town.
 rep("  camera.rotation.set(pitch,yaw,0,'YXZ');\n", "  camera.rotation.set(pitch,yaw,0,'YXZ');\n  TOWN.cam();\n")
 rep("  NET.frame(dt, t);\n", "  NET.frame(dt, t);\n  TOWN.frame(dt, t);\n")
@@ -152,7 +199,7 @@ rep("""  } else {
     for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""")
 rep("  bake(head); bake(g); head.position.y=1.62; g.add(head);", "  bake(head); bake(g); head.position.y=1.62; g.add(head); if(o.armRig) for(const pv of o.armRig) g.add(pv);")
 # First-person hands reach out, grip and strain while you hold something (net-client.js vmPose).
-rep("heldBottle.visible=handKick<.6;", "heldBottle.visible=handKick<.6; NET.vmPose(dt,ml>0);")
+rep("NET.heldVisible(handKick); NET.vmAnim(dt);", "NET.heldVisible(handKick); NET.vmPose(dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);")
 
 # Frame drops (fires, first smash): adding a light at runtime changes the scene's light
 # count, and three.js then recompiles every lit shader (about 12 programs, a long freeze).
@@ -168,9 +215,35 @@ rep("const m=new THREE.Mesh(g,mat); m.castShadow=true;", "const m=new THREE.Mesh
 rep("if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); }",
     "if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) world.removeBody(o.b); if(o.m.userData.ownGeo) o.m.geometry.dispose(); }")
 
+# GAME-85: the panhandler's arms get shoulder pivots too (so he can drop his sign and fight),
+# the sign is handed back on p.sign, and the knocked-out camera / fists run after the camera is placed.
+rep("""  if(o.sign){
+    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.27,1.08,.1], w=[s*.17,1.0,.33];""",
+"""  if(o.sign && o.armRig){
+    for(const [i,s] of [[0,-1],[1,1]]){ const pv=new THREE.Group(), rel=v=>[v[0]-sh[i][0],v[1]-sh[i][1],v[2]-sh[i][2]], e=rel([s*.27,1.08,.1]), w=rel([s*.17,1.0,.33]);
+      limb([0,0,0],e,.06,.065,'tx:canvas|'+o.coat,pv); limb(e,w,.05,.058,'tx:canvas|'+o.coat,pv); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,pv,...w); glove(pv,rel([s*.2,1.0,.39]),[0,1,.2],o,false);
+      bake(pv); pv.position.set(...sh[i]); o.armRig.push(pv); }
+    const sg=new THREE.Mesh(new THREE.BoxGeometry(.66,.42,.012),[0,0,0,0,new THREE.MeshLambertMaterial({map:labelTex(o.sign,512,330,'#D9A866','#3A2410',42)}),0].map(m=>m||new THREE.MeshLambertMaterial({color:0xB98A50}))); sg.position.set(0,1.02,.4); sg.rotation.set(-.15,0,-.05); g.add(sg); sg.castShadow=true; o._sign=sg;
+  } else if(o.sign){
+    for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.27,1.08,.1], w=[s*.17,1.0,.33];""")
+rep("const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62};", "const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62,sign:o._sign||null};")
+rep("  camera.rotation.set(pitch,yaw,0,'YXZ');", "  camera.rotation.set(pitch,yaw,0,'YXZ');\n  FIGHT.afterCamera(dt, t);")
+
+# Burnable trees and bushes (GAME-86): each one stays out of the city bake as its own small
+# baked group in burnGroup, listed in BURN with the id the server uses ("t:N", build order).
+rep("function lumpy(rad,sd){", "const burnGroup=new THREE.Group(); scene.add(burnGroup); const BURN=[];\nfunction lumpy(rad,sd){")
+rep("  const g=grp(city,x,0,z,R()*6);\n  put(CYL(.12*s,.22*s,2.2*s,8),'tx:pole',g,0,1.1*s,0);",
+    "  const g=grp(burnGroup,0,0,0), ry0=R()*6;\n  put(CYL(.12*s,.22*s,2.2*s,8),'tx:pole',g,0,1.1*s,0);")
+rep("  const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.25*s,.25*s,2.2*s,8)}); b.position.set(x,1.1*s,z); world.addBody(b);\n}",
+    "  bake(g); g.position.set(x,0,z); g.rotation.y=ry0; BURN.push({id:'t:'+BURN.length,type:'tree',g,x,z,s});\n  const b=new CANNON.Body({mass:0,shape:new CANNON.Cylinder(.25*s,.25*s,2.2*s,8)}); b.position.set(x,1.1*s,z); world.addBody(b);\n}")
+rep("function bush(x,z,s=1){ const g=grp(city,x,0,z);", "function bush(x,z,s=1){ const g=grp(burnGroup,0,0,0);")
+rep(",Math.sin(a)*.35*s); } }", ",Math.sin(a)*.35*s); } bake(g); g.position.set(x,0,z); BURN.push({id:'t:'+BURN.length,type:'bush',g,x,z,s}); }")
+# Burning plants update with the other fire effects.
+rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAct();")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + NET + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

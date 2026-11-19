@@ -1,0 +1,162 @@
+{
+ "note": "GAME-85 townsfolk NPCs. Positions are in town (map) coordinates; move them when the map changes. temper 0..1: how likely they are to fight instead of throwing back.",
+ "npcs": [
+  {
+   "x": -9.4,
+   "z": -4.4,
+   "ry": 0.5,
+   "name": "Sign Guy Sal",
+   "look": {
+    "coat": 14711342,
+    "coatSh": 12082718,
+    "hat": 16735631,
+    "hatSh": 14695026,
+    "pants": 5074889,
+    "hoodie": 10134456,
+    "scarf": 0,
+    "sign": [
+     "ANYTHING",
+     "HELPS :)"
+    ]
+   },
+   "temper": 0.3
+  },
+  {
+   "x": 19.4,
+   "z": 8.6,
+   "ry": 2.2,
+   "name": "Big Dale",
+   "look": {
+    "coat": 6269066,
+    "coatSh": 4885104,
+    "hat": 15909424,
+    "hatSh": 14263296,
+    "pants": 5917824,
+    "hoodie": 8011342,
+    "skin": 13208158,
+    "skinSh": 11038536,
+    "beard": 3023386,
+    "pack": 9071172,
+    "packSh": 7230516,
+    "roll": 4090522
+   },
+   "temper": 0.9
+  },
+  {
+   "x": 21.8,
+   "z": 9.3,
+   "ry": -2.4,
+   "name": "Old Gus",
+   "look": {
+    "coat": 8018616,
+    "coatSh": 6440858,
+    "hat": 4172008,
+    "hatSh": 2000072,
+    "pants": 6975102,
+    "hoodie": 14207400,
+    "skin": 16771030,
+    "skinSh": 15778982,
+    "beard": 14272168,
+    "brow": 13153430,
+    "scarf": 3124842,
+    "boot": 4864560
+   },
+   "temper": 0.5
+  },
+  {
+   "x": 23.2,
+   "z": -15.8,
+   "ry": -1.7,
+   "name": "Lot Larry",
+   "look": {
+    "coat": 5074889,
+    "coatSh": 3823784,
+    "hat": 16752412,
+    "hatSh": 14711296,
+    "pants": 4078158,
+    "hoodie": 9059934,
+    "skin": 9263675,
+    "skinSh": 7226155,
+    "beard": 1972758,
+    "pack": 6191690,
+    "packSh": 4874808,
+    "roll": 10108478
+   },
+   "temper": 0.6
+  },
+  {
+   "x": 9.6,
+   "z": 61.6,
+   "ry": 2.6,
+   "name": "Alley Pat",
+   "look": {
+    "coat": 8022606,
+    "coatSh": 6181436,
+    "hat": 2544544,
+    "hatSh": 1747072,
+    "pants": 5074889,
+    "hoodie": 14207400,
+    "skin": 16767416,
+    "skinSh": 15314568,
+    "beard": 11553322
+   },
+   "temper": 0.4
+  },
+  {
+   "x": 66.6,
+   "z": 5.4,
+   "ry": 2.513,
+   "name": "Mop Marv",
+   "look": {
+    "coat": 15217727,
+    "coatSh": 12069427,
+    "hat": 9399295,
+    "hatSh": 7229400,
+    "pants": 5917824,
+    "hoodie": 10134456,
+    "scarf": 0,
+    "sign": [
+     "WILL MOP",
+     "FOR $"
+    ]
+   },
+   "temper": 0.2
+  },
+  {
+   "x": 115.7,
+   "z": -143.8,
+   "ry": 0.4,
+   "name": "Creek Cora",
+   "look": {
+    "coat": 6269066,
+    "coatSh": 4885104,
+    "hat": 16739998,
+    "hatSh": 14699134,
+    "pants": 6975102,
+    "hoodie": 8011342,
+    "skin": 15250570,
+    "skinSh": 13209446,
+    "beard": 0
+   },
+   "temper": 0.5
+  },
+  {
+   "x": -30,
+   "z": 100,
+   "ry": 1.2,
+   "name": "Duck Lady Dot",
+   "look": {
+    "coat": 13213928,
+    "coatSh": 10976456,
+    "hat": 16763196,
+    "hatSh": 14263296,
+    "pants": 5074889,
+    "hoodie": 16051416,
+    "skin": 13208158,
+    "skinSh": 11038536,
+    "beard": 0
+   },
+   "temper": 0.1
+  }
+ ]
+}
