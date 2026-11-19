@@ -24,6 +24,7 @@ PROPS = (HERE / 'props.js').read_text()
 MINI = (HERE / 'minimap.js').read_text()
 FIRE = (HERE / 'fire-client.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
+CHARS = (HERE / 'characters.js').read_text()
 
 s = SRC.read_text()
 
@@ -39,6 +40,18 @@ rep('<title>Turf War Look Test</title>', '<meta charset="utf-8">\n<meta name="vi
 rep('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js', '/vendor/three/build/three.module.js')
 rep('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/', '/vendor/three/examples/jsm/')
 rep('https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js', '/vendor/cannon-es.js')
+
+# City vagrants (GAME-93): characters.js replaces the look test's camper vagrant() (kept, unused,
+# as campVagrant) with urban outfits built from six jointed parts (p.parts) for ragdolls and punches.
+rep('function vagrant(o){', CHARS + '\nfunction campVagrant(o){')
+# First-person sleeve: a heather hoodie sleeve instead of the canvas field jacket with a denim elbow patch.
+rep("limb([BX+.17,-.12,BZ+.11],[BX+.36,-.52,BZ+.42],.11,.088,'tx:canvas|'+0xE07A2E,handG,16);",
+    "limb([BX+.17,-.12,BZ+.11],[BX+.36,-.52,BZ+.42],.11,.088,'tx:fleece|'+0x5A5F70,handG,16);")
+rep("put(CYL(.094,.094,.05,16),0xB85E1E,handG,BX+.18,-.14,BZ+.125,{rz:.5,rx:-.45});", "put(CYL(.094,.094,.05,16),'tx:knit|'+0x4A4E5C,handG,BX+.18,-.14,BZ+.125,{rz:.5,rx:-.45});")
+rep("put(B(.13,.012,.012,.004),0xB85E1E,handG,", "put(B(.13,.012,.012,.004),0x464A58,handG,")
+rep("put(B(.1,.13,.02,.006),'tx:denim|'+0x6A86C8,sl,-.03,.02,.088,{rx:-.1,ry:-.3});", "put(B(.12,.03,.012,.004),0xC9CCD4,sl,-.03,.02,.092,{rx:-.1,ry:-.3,rz:.6}); put(B(.12,.03,.012,.004),0xC9CCD4,sl,-.03,.02,.094,{rx:-.1,ry:-.3,rz:-.6});")
+rep("for(let k=0;k<5;k++) put(B(.012,.012,.012),0xF4ECD8,sl,-.085+k*.028,.088,.098,{ry:-.3});", "")
+rep("put(B(.008,.36,.008),0x9A4C18,sl,.095,0,.0);", "put(B(.008,.36,.008),0x464A58,sl,.095,0,.0);")
 
 # HUD: hide the look-test panels (the Blend look is locked), add the multiplayer HUD.
 rep('<div class="hud" id="tl">', '<div class="hud" id="tl" style="display:none">')

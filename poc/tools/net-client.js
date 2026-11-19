@@ -23,17 +23,8 @@ const NET = (() => {
   let clockOffset = null;            // serverTime - performance.now()
   const serverNow = () => performance.now() + (clockOffset || 0);
 
-  function shade(hex, l) { const c = new THREE.Color(hex); c.offsetHSL(0, 0, l); return c.getHex(); }
-  const SKINS = [[0xFFD9B8, 0xE9AE88], [0xC98A5E, 0xA86F48], [0xFFE7D6, 0xF0C4A6], [0x8D5A3B, 0x6E432B], [0xE8B48A, 0xC98F66]];
-  const BEARDS = [0x8B5A3C, 0x2E221A, 0xD9C6A8, 0x5A3A2A, 0xB04A2A];
-  function hash(str) { let h = 7; for (const ch of str) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
-  function vagrantLook(e) {
-    const h = hash(e.pid || e.id), col = new THREE.Color(e.color || '#ff6e9e').getHex();
-    const [skin, skinSh] = SKINS[h % SKINS.length];
-    const hat = [0xFF5D8F, 0xF2C230, 0x3FA8E8, 0x26D3A0, 0x8F6BFF][(h >> 3) % 5];
-    return { coat: col, coatSh: shade(col, -.12), hat, hatSh: shade(hat, -.12), pants: [0x4D6FC9, 0x5A4C80, 0x6A6E7E, 0x3E5A8A][(h >> 5) % 4],
-      hoodie: [0x9AA3B8, 0x7A3E4E, 0xD8C9A8, 0x5E7A4A][(h >> 7) % 4], skin, skinSh, beard: BEARDS[(h >> 9) % BEARDS.length], scarf: (h >> 11) % 2 ? 0xE8343F : 0 };
-  }
+  // City looks (GAME-93): the player's colour is the outer layer, the rest is picked from their id.
+  function vagrantLook(e) { return charLook(e.pid || e.id, e.color || '#ff6e9e'); }
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
   // It is built unbaked and split into six limbs so it can ragdoll (GAME-83).
   function buildVagrant(e) {

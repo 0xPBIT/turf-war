@@ -12,6 +12,7 @@ What it shows:
 - **The approved art look (GAME-75).** The client is the look test page with its Blend shader (Ink .85, Paint .45, Retro .75) and detailed models, rebuilt for multiplayer. The town is the look-test corner; `town.json` holds its colliders, windows, piles, props, zones and traffic lanes.
 - **Smooth movement.** Your own vagrant is predicted locally with the same numbers the server uses. Each input says how long it was held, the server replays it for exactly that long, and acks it, so corrections are a few centimetres and get blended in. Everyone else is interpolated about 110 ms behind the server clock.
 
+- **City vagrants (GAME-93).** Players, sleepers and NPCs wear urban street looks (hoodies, puffers, track jackets, flannels, bombers; joggers, baggy jeans, cargos; sneakers or slides with socks; caps, watch caps, hoods, bucket hats; shades, headphones, chains, sling bags). A player's colour is their outer layer and the rest is picked from their id. Each body is six jointed parts (`p.parts`: torso, head, armL/armR with foreL/foreR, legL/legR) for ragdolls and punches. Code in `tools/characters.js`.
 - **Settings menu (GAME-79).** `Esc` or the gear button: mouse and touch sensitivity, invert Y, run toggle, rebindable keys, field of view, graphics quality, render resolution, glow, head bob, FPS meter, volume and HUD toggles. Saved per browser in localStorage (`tw_settings`). Code in `tools/settings.js`.
 - **Lighters and fire (GAME-86).** You need a lighter to set anything on fire (trash, the dumpster, trees, bushes, plants). It lives in your pockets (`p.items.lighter = {fuel}`, 10 lights); buy one at Sunny Mart for $5 of panhandling cash, or dig one out of a dumpster. Burning plants char to ash-grey husks, spread fire to plants nearby, and grow back after a few minutes. Server: the lighter section in `server.mjs`, `burnables` and `shops` in `town.json`. Client: `tools/fire-client.js`.
 
@@ -28,7 +29,7 @@ Rebuild the client after changing the look test or the network layer:
 python3 tools/build-client.py [path/to/look-test/index.html]   # writes public/index.html
 ```
 
-`tools/net-client.js` is the multiplayer layer, `tools/settings.js` the settings menu and `tools/net-hud.html` the HUD; the script fails loudly if the look test changes under it.
+`tools/net-client.js` is the multiplayer layer, `tools/characters.js` the vagrant models, `tools/settings.js` the settings menu and `tools/net-hud.html` the HUD; the script fails loudly if the look test changes under it.
 
 Capture stills, clips and before/after comparisons of the real game (GAME-90): see `tools/capture/README.md`, e.g. `node tools/capture/capture.mjs compare --name my-change --before origin/claude/project-thread-49r4j8`.
 

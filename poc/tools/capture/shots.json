@@ -122,6 +122,56 @@
    "seconds": 5,
    "optional": true,
    "note": "slow orbit in front of Sunny Mart"
+  },
+  "vagrants": {
+   "cam": [
+    4.6,
+    1.5,
+    -1.6,
+    0,
+    -0.08
+   ],
+   "setup": "if(!window.__lineup){ window.__lineup=1; const cols=[0xff6e9e,0x3fa8e8,0xf2c230,0x26d3a0,0x8f6bff,0xff8a3c,0xe07a2e]; const hats=[0xFF5D8F,0xF2C230,0x3FA8E8,0x26D3A0,0x8F6BFF], pants=[0x4D6FC9,0x5A4C80,0x6A6E7E,0x3E5A8A], hood=[0x9AA3B8,0x7A3E4E,0xD8C9A8,0x5E7A4A]; const sh=h=>{ const c=new THREE.Color(h); c.offsetHSL(0,0,-.12); return c.getHex(); }; for(let i=0;i<7;i++){ const look=typeof charLook==='function' ? charLook('lineup'+i,'#'+cols[i].toString(16).padStart(6,'0')) : {coat:cols[i],coatSh:sh(cols[i]),hat:hats[i%5],hatSh:sh(hats[i%5]),pants:pants[i%4],hoodie:hood[(i+1)%4],scarf:i%2?0xE8343F:0}; vagrant({x:1.2+i*1.15,z:-4.2,ry:i===6?-.35:(i%2?.25:-.25),...look,...(i===6?{sign:['ANYTHING','HELPS :)']}:{})}); } }",
+   "wait": 1,
+   "optional": true,
+   "note": "GAME-93: a lineup of seven default vagrant looks (one panhandler) on the Sunny Mart sidewalk"
+  },
+  "vagrants-close": {
+   "cam": [
+    3.2,
+    1.45,
+    -2.9,
+    0,
+    -0.12
+   ],
+   "setup": "if(!window.__lineup){ window.__lineup=1; const cols=[0xff6e9e,0x3fa8e8,0xf2c230,0x26d3a0,0x8f6bff,0xff8a3c,0xe07a2e]; const hats=[0xFF5D8F,0xF2C230,0x3FA8E8,0x26D3A0,0x8F6BFF], pants=[0x4D6FC9,0x5A4C80,0x6A6E7E,0x3E5A8A], hood=[0x9AA3B8,0x7A3E4E,0xD8C9A8,0x5E7A4A]; const sh=h=>{ const c=new THREE.Color(h); c.offsetHSL(0,0,-.12); return c.getHex(); }; for(let i=0;i<7;i++){ const look=typeof charLook==='function' ? charLook('lineup'+i,'#'+cols[i].toString(16).padStart(6,'0')) : {coat:cols[i],coatSh:sh(cols[i]),hat:hats[i%5],hatSh:sh(hats[i%5]),pants:pants[i%4],hoodie:hood[(i+1)%4],scarf:i%2?0xE8343F:0}; vagrant({x:1.2+i*1.15,z:-4.2,ry:i===6?-.35:(i%2?.25:-.25),...look,...(i===6?{sign:['ANYTHING','HELPS :)']}:{})}); } }",
+   "wait": 1,
+   "optional": true,
+   "note": "GAME-93: close on the left of the vagrant lineup"
+  },
+  "npc-sal": {
+   "cam": [
+    -7.96,
+    1.5,
+    -1.8,
+    0.5,
+    -0.08
+   ],
+   "wait": 1,
+   "optional": true,
+   "note": "GAME-93: Sign Guy Sal, the panhandler NPC, from the front"
+  },
+  "npc-camp": {
+   "cam": [
+    20.6,
+    1.5,
+    5.2,
+    3.1,
+    -0.06
+   ],
+   "wait": 1,
+   "optional": true,
+   "note": "GAME-93: Big Dale and Old Gus at the underpass camp"
   }
  }
 }
