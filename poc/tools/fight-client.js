@@ -68,7 +68,7 @@ const FIGHT = (() => {
   const HIT = { L: new THREE.Vector3(-.04, -.09, -.66), R: new THREE.Vector3(.04, -.09, -.66) };
   const _v = new THREE.Vector3();
 
-  // Until items can be put down (GAME-82), the bottle is always in hand.
+  // Empty hands (GAME-82 window.__net.held is null) mean fists.
   const holding = () => (window.__net && 'held' in window.__net) ? window.__net.held != null : true;
   const isDown = () => now() < own.downUntil;
 
@@ -200,7 +200,7 @@ const FIGHT = (() => {
     const empty = !holding(), pk = own.punchT > 0 ? Math.sin((1 - own.punchT) * Math.PI) : 0;
     for (const h of ['L', 'R']) {
       const f = fists[h], active = own.punchT > 0 && own.hand === h;
-      f.visible = !down && (empty || active);
+      f.visible = !down && (empty || active) && !(window.__net && window.__net.busy);   // GAME-82 reach/dig uses the gloved hand
       if (!f.visible) continue;
       const k = active ? pk : 0;
       _v.copy(REST[h]).lerp(HIT[h], k);

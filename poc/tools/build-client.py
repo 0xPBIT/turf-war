@@ -16,6 +16,7 @@ OUT = HERE.parent / 'public' / 'index.html'
 NET = (HERE / 'car-damage.js').read_text() + '\n' + (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
+ITEMS = (HERE / 'items-client.js').read_text()
 GLASS = (HERE / 'glass.js').read_text()
 FIGHTJS = (HERE / 'fight-client.js').read_text()
 SKY = (HERE / 'sky.js').read_text()
@@ -23,6 +24,8 @@ PROPS = (HERE / 'props.js').read_text()
 MINI = (HERE / 'minimap.js').read_text()
 FIRE = (HERE / 'fire-client.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
+COPPER = (HERE / 'copper.js').read_text()
+CHARS = (HERE / 'characters.js').read_text()
 
 s = SRC.read_text()
 
@@ -38,6 +41,18 @@ rep('<title>Turf War Look Test</title>', '<meta charset="utf-8">\n<meta name="vi
 rep('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js', '/vendor/three/build/three.module.js')
 rep('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/', '/vendor/three/examples/jsm/')
 rep('https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js', '/vendor/cannon-es.js')
+
+# City vagrants (GAME-93): characters.js replaces the look test's camper vagrant() (kept, unused,
+# as campVagrant) with urban outfits built from six jointed parts (p.parts) for ragdolls and punches.
+rep('function vagrant(o){', CHARS + '\nfunction campVagrant(o){')
+# First-person sleeve: a heather hoodie sleeve instead of the canvas field jacket with a denim elbow patch.
+rep("limb([BX+.17,-.12,BZ+.11],[BX+.36,-.52,BZ+.42],.11,.088,'tx:canvas|'+0xE07A2E,handG,16);",
+    "limb([BX+.17,-.12,BZ+.11],[BX+.36,-.52,BZ+.42],.11,.088,'tx:fleece|'+0x5A5F70,handG,16);")
+rep("put(CYL(.094,.094,.05,16),0xB85E1E,handG,BX+.18,-.14,BZ+.125,{rz:.5,rx:-.45});", "put(CYL(.094,.094,.05,16),'tx:knit|'+0x4A4E5C,handG,BX+.18,-.14,BZ+.125,{rz:.5,rx:-.45});")
+rep("put(B(.13,.012,.012,.004),0xB85E1E,handG,", "put(B(.13,.012,.012,.004),0x464A58,handG,")
+rep("put(B(.1,.13,.02,.006),'tx:denim|'+0x6A86C8,sl,-.03,.02,.088,{rx:-.1,ry:-.3});", "put(B(.12,.03,.012,.004),0xC9CCD4,sl,-.03,.02,.092,{rx:-.1,ry:-.3,rz:.6}); put(B(.12,.03,.012,.004),0xC9CCD4,sl,-.03,.02,.094,{rx:-.1,ry:-.3,rz:-.6});")
+rep("for(let k=0;k<5;k++) put(B(.012,.012,.012),0xF4ECD8,sl,-.085+k*.028,.088,.098,{ry:-.3});", "")
+rep("put(B(.008,.36,.008),0x9A4C18,sl,.095,0,.0);", "put(B(.008,.36,.008),0x464A58,sl,.095,0,.0);")
 
 # HUD: hide the look-test panels (the Blend look is locked), add the multiplayer HUD.
 rep('<div class="hud" id="tl">', '<div class="hud" id="tl" style="display:none">')
@@ -98,6 +113,8 @@ rep("  if(keys.has('Space') && player.position.y<.4){ player.velocity.y=6.5; }",
 rep("const k=e.pointerType==='touch'?.006:.004; yaw-=dx*k; pitch=Math.max(-1.2,Math.min(1.2,pitch-dy*k));", "SET.lookDrag(dx,dy,e.pointerType==='touch');")
 rep("player.position.y+1.25+Math.sin(bobT)*.04", "player.position.y+1.25+Math.sin(bobT)*.04*SET.bob()")
 rep("vm.position.set(.2+Math.cos(bobT*.5)*.008,-.17+Math.abs(Math.sin(bobT*.5))*.01-handKick*.1", "vm.position.set(.2+Math.cos(bobT*.5)*.008*SET.bob(),-.17+Math.abs(Math.sin(bobT*.5))*.01*SET.bob()-handKick*.1")
+# Throwable junk (GAME-82): the hand drops out of view when empty and only shows what you hold.
+rep("-handKick*.1,-.45+handKick*.06); vm.rotation.x=-handKick*.9; heldBottle.visible=handKick<.6;", "-handKick*.1-NET.handDrop(),-.45+handKick*.06); vm.rotation.x=-handKick*.9; NET.heldVisible(handKick); NET.vmAnim(dt);")
 
 # GAME-83: jump off anything you stand on (car hoods and roofs), not just the ground.
 rep("  if(SET.down('jump') && player.position.y<.4){ player.velocity.y=6.5; }", "  if(SET.down('jump') && (player.position.y<.4 || NET.grounded())){ player.velocity.y=6.5; }")
@@ -134,7 +151,7 @@ rep("""  } else {
     for(const [i,s] of [[0,-1],[1,1]]){ const e=[s*.29,1.06,-.02], w=[s*.3,.82,.08];""")
 rep("  bake(head); bake(g); head.position.y=1.62; g.add(head);", "  bake(head); bake(g); head.position.y=1.62; g.add(head); if(o.armRig) for(const pv of o.armRig) g.add(pv);")
 # First-person hands reach out, grip and strain while you hold something (net-client.js vmPose).
-rep("heldBottle.visible=handKick<.6;", "heldBottle.visible=handKick<.6; NET.vmPose(dt,ml>0);")
+rep("NET.heldVisible(handKick); NET.vmAnim(dt);", "NET.heldVisible(handKick); NET.vmPose(dt,ml>0); NET.vmAnim(dt); COPPER.viewmodel(dt,t);")
 
 # Frame drops (fires, first smash): adding a light at runtime changes the scene's light
 # count, and three.js then recompiles every lit shader (about 12 programs, a long freeze).
@@ -178,7 +195,7 @@ rep("updatePiles(dt); updateAct();", "updatePiles(dt); FIRE.update(dt); updateAc
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + NET + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + PROPS + '\n' + FIRE + '\n' + GLASS + '\n' + ITEMS + '\n' + NET + '\n' + COPPER + '\n' + FIGHTJS + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
