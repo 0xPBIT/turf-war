@@ -158,14 +158,12 @@ const NET = (() => {
   // ---------- fixtures and effects ----------
   let dumpFire = null;
   function paneFor(f) { return glassPanes[f.index]; }
-  function breakPane(t, quiet) {
-    if (!t || t.broken) return; t.broken = true;
-    const gl = t.mesh, p = new THREE.Vector3(); gl.getWorldPosition(p);
-    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(gl.getWorldQuaternion(new THREE.Quaternion()));
-    gl.material = brokenGlassMat; gl.scale.x = Math.random() < .5 ? -1 : 1; if (t.hi) t.hi.visible = false;
-    if (!quiet) shards(p, 22, shardMat, .28, n.multiplyScalar(2.5), gl.geometry.parameters);
+  // Glass breaks from where it was hit (GAME-84, tools/glass.js). g = { s: seed, h: [[u, v], ...] }.
+  function breakPane(t, g, quiet, v) {
+    if (!t || !g) return; t.broken = true;
+    GLASS.shatter(t.mesh, { seed: g.s, hits: g.h, quiet, hi: t.hi, dir: v && new THREE.Vector3(...v) });
   }
-  function repairPane(t) { if (!t || !t.broken) return; t.broken = false; t.mesh.material = glassMat; t.mesh.scale.x = 1; if (t.hi) t.hi.visible = true; }
+  function repairPane(t) { if (!t || !t.broken) return; t.broken = false; GLASS.restore(t.mesh); }
   function resetPile(p) {
     p.state = 'idle'; p.t = 0; p.acc = 0; if (p.e) { p.e.fire = 0; p.e.smoke = 0; }
     p.mats.forEach(({ m, c }) => m.color.copy(c)); p.scorch.material.opacity = 0; if (p.soot) p.soot.material.opacity = 0;
@@ -205,7 +203,7 @@ const NET = (() => {
     else if (m.kind === 'smash') { const p = new THREE.Vector3(...m.at), v = new THREE.Vector3(...(m.v || [0, 0, 0])); shards(p, 8, bottleShardMat, .09, v.multiplyScalar(-.15)); if (p.y < .6) stain(p.x, p.z); dust(p, 3, 0xd8d2c4); }
     else if (m.kind === 'break') {
       const f = fixtures.get(m.id); if (!f) return;
-      if (f.type === 'window') breakPane(paneFor(f));
+      if (f.type === 'window') breakPane(paneFor(f), m.g, false, m.v);
       else shards(new THREE.Vector3(...m.at), 18, shardMat, .22, new THREE.Vector3(...m.v).multiplyScalar(-.1));
     }
     else if (m.kind === 'crate') splinters(m.at, m.s, m.hex, m.v || [0, 0, 0]);
@@ -221,7 +219,7 @@ const NET = (() => {
       + (mine ? `<div class="r" style="margin-top:4px;color:var(--ink-soft)">Your cash<em>${money(mine.cash)}</em></div>` : '');
     for (const [id, f] of fixtures) {
       const st = m.objects[id] || {};
-      if (f.type === 'window') { const t = paneFor(f); if (st.broken) breakPane(t, true); else repairPane(t); }
+      if (f.type === 'window') { const t = paneFor(f); if (st.g) { breakPane(t, st.g, true); if (st.board) GLASS.board(t.mesh); } else repairPane(t); }
       else if (f.type === 'pile') { const p = piles[f.index]; if (!p) continue; if (st.fire && p.state === 'idle') lightPile(p); if (!st.fire && !st.burnt && p.state !== 'idle') resetPile(p); }
       else if (f.type === 'dumpster') {
         if (st.fire && !dumpFire) dumpFire = emitter(new THREE.Vector3(f.pos[0], 1.6, f.pos[2]), { radius: .9, fire: 1.2, smoke: 1.4 });
@@ -233,6 +231,7 @@ const NET = (() => {
   // ---------- per-frame ----------
   const cur = new THREE.Vector3();
   function frame(dt, t) {
+    GLASS.update(dt);
     const rt = serverNow() - INTERP_MS, showTags = SET.tags();
     for (const v of ents.values()) {
       if (!v.obj) continue;
@@ -331,6 +330,6 @@ const NET = (() => {
     el('login').addEventListener('pointerdown', e => e.stopPropagation());
     setTimeout(() => el('nameInput').focus(), 50);
   }
-  window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
+  window.__net = { glass: GLASS, panes: glassPanes, look: (y, p) => { yaw = y; pitch = p; }, get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
   return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir };
 })();
