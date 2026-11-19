@@ -16,6 +16,7 @@ OUT = HERE.parent / 'public' / 'index.html'
 NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
+FIGHTJS = (HERE / 'fight-client.js').read_text()
 
 s = SRC.read_text()
 
@@ -75,9 +76,22 @@ rep("vm.position.set(.2+Math.cos(bobT*.5)*.008,-.17+Math.abs(Math.sin(bobT*.5))*
 # Burning piles: the server counts the damage, so no local +$35 popups.
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
 
+# GAME-85: arms are their own pivots (at the shoulders) so vagrants can punch, guard and throw.
+rep("  const sh=[[-.24,1.34,0],[.24,1.34,0]];", "  const sh=[[-.24,1.34,0],[.24,1.34,0]]; const AG=[new THREE.Group(),new THREE.Group()]; g.add(AG[0],AG[1]);")
+rep(",'tx:canvas|'+o.coat,g); limb(e,w,.05,.058,'tx:canvas|'+o.coat,g); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,g,...w); }",
+    ",'tx:canvas|'+o.coat,AG[i]); limb(e,w,.05,.058,'tx:canvas|'+o.coat,AG[i]); put(CYL(.058,.058,.04,10),'tx:knit|'+o.hoodie,AG[i],...w); }", 2)
+rep("for(const s of [-1,1]) glove(g,", "for(const s of [-1,1]) glove(AG[s<0?0:1],", 2)
+rep("g.add(sg); sg.castShadow=true;", "g.add(sg); sg.castShadow=true; o._sign=sg;")
+rep("bake(head); bake(g); head.position.y=1.62; g.add(head);",
+    "for(const a of AG) g.remove(a);\n  bake(head); bake(g); head.position.y=1.62; g.add(head);\n"
+    "  const arms=AG.map((a,i)=>{ bake(a); const pv=new THREE.Group(); pv.position.set(...sh[i]); a.position.set(-sh[i][0],-sh[i][1],-sh[i][2]); pv.add(a); g.add(pv); return pv; });")
+rep("const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62};", "const p={g,head,ph:Math.random()*6,wob:0,bodyRef:b,hy:1.62,arms,sign:o._sign||null};")
+# GAME-85: knocked-out camera and fists run after the look test places the camera.
+rep("  camera.rotation.set(pitch,yaw,0,'YXZ');", "  camera.rotation.set(pitch,yaw,0,'YXZ');\n  FIGHT.afterCamera(dt, t);")
+
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + NET + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + NET + '\n' + FIGHTJS + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')
