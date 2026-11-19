@@ -62,7 +62,7 @@ const ANIM = (() => {
   function applyFP(vm, held, dt, moving) {
     const o = fpTick(dt, moving);
     vm.position.x += o.x; vm.position.y += o.y; vm.position.z += o.z;
-    vm.rotation.x += o.rx; vm.rotation.y = o.ry; vm.rotation.z = o.rz;
+    vm.rotation.x += o.rx; vm.rotation.y += o.ry; vm.rotation.z += o.rz;
     if (o.hideHeld) held.visible = false;
   }
   const camY = () => fpOut.camY, camPitch = () => fpOut.camPitch;
@@ -83,7 +83,19 @@ const ANIM = (() => {
     const st = v.stride, sw = Math.sin(v.walk), amp = (.5 + run * .35) * st;
     const arm = [-.3 + sw * amp * .6, 0, .05], armL = [-sw * amp * .9, 0, 0];
     const legR = [-sw * amp, 0, 0], legL = [sw * amp, 0, 0];
-    let y = Math.abs(Math.cos(v.walk)) * .05 * st, lean = run * .12 * st, fwd = 0, tilt = Math.sin(v.walk) * .025 * st;
+    let y = Math.abs(Math.cos(v.walk)) * .05 * st, lean = run * .12 * st, tilt = Math.sin(v.walk) * .025 * st;
+    // Grab layer (GAME-87): both arms swing up to what they hold, with a lunge as they grab it;
+    // the body leans in and the arms pump while they haul it.
+    const want = v.grabbing ? 1 : 0;
+    v.reach = (v.reach || 0) + (want - (v.reach || 0)) * (1 - Math.exp(-dt * (want ? 10 : 6)));
+    v.lunge = Math.max(0, (v.lunge || 0) - dt * 3.5);
+    const re = v.reach;
+    if (re > .001) {
+      const lunge = Math.sin(v.lunge * Math.PI) * .35, haul = v.grabbing && moving ? Math.sin(v.walk) * .12 : 0;
+      arm[0] = arm[0] * (1 - re) - (1.25 + lunge) * re - haul; arm[2] = arm[2] * (1 - re) - .18 * re;
+      armL[0] = armL[0] * (1 - re) - (1.25 + lunge) * re + haul; armL[2] = armL[2] * (1 - re) + .18 * re;
+      lean += (.16 + lunge * .3) * re;
+    }
     const r = step(v.anim, dt, moving);
     let hide = false, pose = null, w = 0;
     if (r && r.c.tp) { pose = r.c.tp(r.k, r.s.t, r.s.m, v) || {}; w = r.w; hide = !!pose.hideHeld && w > .3; }
@@ -100,7 +112,7 @@ const ANIM = (() => {
       g.position.x += (dx * c + dz * s) * w; g.position.z += (-dx * s + dz * c) * w;
       if (face !== undefined) { let d = face - o.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); g.rotation.y += d * w; }
     }
-    if (v.model.held) v.model.held.visible = !hide && !v.heldGone;
+    if (v.model.held) v.model.held.visible = !hide && re < .25;
   }
 
   // Split a freshly built vagrant into posable parts (same parts and materials, baked per part).
@@ -129,31 +141,33 @@ const ANIM = (() => {
     return parts;
   }
 
-  return { define, keys, ease, play, echo, applyFP, camY, camPitch, playOn, poseVagrant, rigVagrant, clips, get fp() { return fpS; } };
+  const api = { define, keys, ease, play, echo, applyFP, camY, camPitch, playOn, poseVagrant, rigVagrant, clips, get fp() { return fpS; } };
+  window.__anim = api;   // for captures, tests and the console
+  return api;
 })();
 
 // ---------- clips for today's interactions ----------
 // Light the trash pile: crouch, cup the hand down at the pile, two flicks of a lighter.
 ANIM.define('light', { dur: 1.5,
   fp: k => { const flick = Math.max(0, Math.sin((k - .35) * Math.PI * 7)) * (k > .35 && k < .8 ? 1 : 0);
-    return { camY: -.5, camPitch: -.35, y: -.06, z: -.1, x: -.04, rx: -.5 - flick * .12, rz: flick * .15, hideHeld: true }; },
+    return { camY: -.5, camPitch: -.3, x: -.1, y: .02, z: -.04, rx: -.6 - flick * .15, rz: flick * .2, hideHeld: true }; },
   tp: k => { const flick = Math.max(0, Math.sin((k - .35) * Math.PI * 7)) * (k > .35 && k < .8 ? 1 : 0);
     return { y: -.12, lean: .22, armR: [-.95 - flick * .2, 0, .15], armL: [-.35, 0, -.15], legR: [-.5, 0, 0], legL: [.35, 0, 0], head: [.45, 0, 0], hideHeld: true }; } });
 // Set the dumpster on fire: wind up and lob a lit match over the lip.
 ANIM.define('toss', { dur: 1.1,
   fp: k => { const wind = ANIM.keys([[0, 0], [.3, 1], [.5, -.6], [1, 0]])(k);
-    return { y: wind * .07, z: wind * .12, rx: wind * .9, camPitch: -wind * .05, hideHeld: k > .2 && k < .9 }; },
+    return { x: -.06, y: .05 * Math.abs(wind), z: wind * .05, rx: wind * .9, camPitch: -wind * .05, hideHeld: k > .2 && k < .9 }; },
   tp: k => { const wind = ANIM.keys([[0, 0], [.3, 1], [.5, -.6], [1, 0]])(k);
     return { armR: [-1.2 - wind * 1.2, 0, .1], lean: -wind * .15, turn: wind * .25, head: [.1, 0, 0], hideHeld: k > .2 && k < .9 }; } });
 // Panhandle at the stop sign: hold out a cupped hand, give it a hopeful little shake.
 ANIM.define('panhandle', { dur: 1.8,
   fp: (k, t) => { const shake = Math.sin(t * 22) * (k > .3 && k < .75 ? 1 : 0);
-    return { y: .03, z: -.12, x: -.05, rx: .35, rz: -.5 + shake * .06, hideHeld: true }; },
+    return { x: -.1, y: .05, z: -.06, rx: .3 + shake * .05, rz: -.4 + shake * .06, hideHeld: true }; },
   tp: (k, t) => { const shake = Math.sin(t * 22) * (k > .3 && k < .75 ? 1 : 0);
     return { armR: [-1.35 + shake * .08, 0, .05], lean: .12, head: [.15, 0, .12], hideHeld: true }; } });
 // Warm your hands at the fire can: lean in, rub, palms out. Stops when you walk off.
 ANIM.define('warm', { dur: 1.2, loop: true, cancelOnMove: true, maxLoop: 6,
-  fp: (k, t) => ({ y: -.02 + Math.sin(t * 9) * .012, z: -.1, x: -.07 + Math.cos(t * 9) * .015, rx: -.15, rz: -.35, camPitch: -.18, hideHeld: true }),
+  fp: (k, t) => ({ x: -.12 + Math.cos(t * 9) * .012, y: .03 + Math.sin(t * 9) * .01, z: -.02, rx: -.3, rz: .25 + Math.sin(t * 9) * .08, camPitch: -.15, hideHeld: true }),
   tp: (k, t) => ({ armR: [-1.1 + Math.sin(t * 9) * .08, 0, -.3], armL: [-1.1 - Math.sin(t * 9) * .08, 0, .3], lean: .18, head: [.15, 0, 0], hideHeld: true }) });
 // Hang out on the couch: slide onto the seat and slump. Stops when you walk off.
 ANIM.define('sit', { dur: 4, loop: true, cancelOnMove: true, fadeIn: .4, fadeOut: .3,

@@ -34,6 +34,7 @@ const NET = (() => {
   // vagrant() builds a detailed NPC with its own static body; strip that for networked players.
   function buildVagrant(e) {
     const p = vagrant({ x: 0, z: 0, ry: 0, ...vagrantLook(e), rig: true });
+    p.arms = p.parts ? [p.parts.armR, p.parts.armL] : [];
     world.removeBody(p.bodyRef); people.splice(people.indexOf(p), 1); scene.remove(p.g);
     p.g.position.set(0, -0.9, 0); p.g.rotation.set(0, 0, 0);
     // The beer bottle everyone carries, in the right glove (others see it raised and thrown).
@@ -65,6 +66,7 @@ const NET = (() => {
     const w = new THREE.Group(); w.add(g); return w;
   }
   function buildProp(e) {
+    if (e.type !== 'crate' && e.type !== 'cone') return PROPS.build(e);   // GAME-87 movable props
     const n = dyn.length;
     if (e.type === 'crate') crate(0, 0, 0, e.s, e.hex); else cone(0, 0);
     const d = dyn.splice(n, 1)[0]; world.removeBody(d.b); d.m.position.set(0, 0, 0);
@@ -78,7 +80,7 @@ const NET = (() => {
     if (e.kind === 'vagrant' || e.kind === 'sleeper') {
       obj = new THREE.Group(); const v = buildVagrant(e); obj.add(v.g);
       const tag = nameTag(e.name); tag.position.y = e.kind === 'sleeper' ? 0.9 : 1.25; obj.add(tag);
-      extra = { model: v, tag };
+      extra = { model: v, tag, grabbing: e.grabbing || null, reach: 0, lunge: 0 };
       if (e.kind === 'sleeper') { const z = zzzTag(); z.position.y = 1.4; obj.add(z); extra.zz = z; }
     } else if (e.kind === 'traffic') obj = buildCar(e.color);
     else if (e.kind === 'prop') obj = buildProp(e);
@@ -155,7 +157,7 @@ const NET = (() => {
       corr.x += ex; corr.z += ez; for (const k of hist) { k.x += ex; k.z += ez; }
     }
   }
-  const speedScale = () => { const g = grabbing && ents.get(grabbing); return g && g.kind === 'sleeper' ? 60 / 70 : 1; };
+  const speedScale = () => { const g = grabbing && ents.get(grabbing); return !g ? 1 : g.drag || (g.kind === 'sleeper' ? 60 / 70 : 1); };
 
   // ---------- fixtures and effects ----------
   let dumpFire = null;
@@ -214,7 +216,10 @@ const NET = (() => {
     else if (m.kind === 'honk') { popText(m.long ? 'HOOONK!!' : 'HONK!', [m.at[0], 2.2, m.at[2]], 'honk'); honkSound(m.long, m.at); if (m.target === me) feed('A car is honking at you. Get out of the street!'); }
     else if (m.kind === 'say') { const v = ents.get(m.id); const at = v && v.obj ? [v.obj.position.x, v.obj.position.y + 1.3, v.obj.position.z] : (m.id === me ? null : null); if (at) popText(m.text, at, 'say'); else if (m.id === me) feed(esc(m.text)); }
     else if (m.kind === 'anim') { if (m.id === me) ANIM.echo(m.clip, m); else ANIM.playOn(ents.get(m.id), m.clip, m); }
-    else if (m.kind === 'grab') { if (m.id === me) { grabbing = m.target; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); } }
+    else if (m.kind === 'grab') {
+      if (m.id === me) { grabbing = m.target; if (m.target) vmLunge = 1; feed(m.target ? 'Got it. Press grab again to let go.' : 'You let go.'); }
+      const v = ents.get(m.id); if (v && v.model) { v.grabbing = m.target; if (m.target) v.lunge = 1; }
+    }
     else if (m.kind === 'turf') feed(`<b>${esc(m.by)}</b> now owns <b>${esc(m.zone)}</b>`);
   }
   function onMeta(m) {
@@ -231,6 +236,24 @@ const NET = (() => {
         if (!st.fire && dumpFire) { dumpFire.fire = 0; dumpFire.smoke = 0; if (dumpFire.light) dumpFire.light.intensity = 0; emitters.splice(emitters.indexOf(dumpFire), 1); dumpFire = null; }
       }
     }
+  }
+
+  // ---------- grab / push / drag animation (GAME-87) ----------
+  // Other players' arms reaching for what they hold: see the grab layer in ANIM.poseVagrant.
+  // You (first person): the hand drops the bottle out of view, shoots forward to grab,
+  // then holds a tight grip that strains and shakes a little while you drag.
+  let vmGrab = 0, vmLunge = 0, vmT = 0;
+  function vmPose(dt, moving) {
+    vmGrab += ((grabbing ? 1 : 0) - vmGrab) * (1 - Math.exp(-dt * 9));
+    vmLunge = Math.max(0, vmLunge - dt * 3.2); vmT += dt;
+    const g = vmGrab, l = Math.sin(vmLunge * Math.PI);
+    const strain = grabbing && moving ? 1 : grabbing ? .3 : 0;
+    vm.position.x += -.06 * g + Math.sin(vmT * 31) * .003 * strain;
+    vm.position.y += -.05 * g + Math.sin(vmT * 7) * .012 * strain;
+    vm.position.z += -.16 * g - .12 * l;
+    vm.rotation.x += .5 * g - .25 * l;
+    vm.rotation.z = -.6 * g + Math.sin(vmT * 23) * .02 * strain;
+    if (g > .25) heldBottle.visible = false;
   }
 
   // ---------- per-frame ----------
@@ -264,9 +287,14 @@ const NET = (() => {
   }
 
   // ---------- actions ----------
+  // Props can carry an action too (the couch); they are wherever they were left.
+  function* actionables() {
+    yield* fixtures.values();
+    for (const v of ents.values()) if (v.kind === 'prop' && v.obj) yield { id: v.id, type: v.type, pos: [v.obj.position.x, v.obj.position.y, v.obj.position.z] };
+  }
   function nearestAction() {
     if (!MAP) return null; let best = null, bd = 9;
-    for (const f of fixtures.values()) {
+    for (const f of actionables()) {
       const a = MAP.actions[f.type]; if (!a || ['window', 'car', 'crate', 'cone'].includes(f.type)) continue;
       if (f.type === 'pile') { const p = piles[f.index]; if (p && p.state !== 'idle') continue; }
       const st = meta && meta.objects[f.id]; if (st && (st.fire || st.burnt)) continue;
@@ -274,19 +302,36 @@ const NET = (() => {
     }
     return best;
   }
+  // Anything loose within reach can be grabbed and dragged (same reach as the server).
+  function nearestGrabbable() {
+    let best = null, bd = 2.6 * 2.6;
+    for (const v of ents.values()) {
+      if ((v.kind !== 'prop' && v.kind !== 'sleeper') || !v.obj) continue;
+      const d = (v.obj.position.x - player.position.x) ** 2 + (v.obj.position.z - player.position.z) ** 2; if (d < bd) { bd = d; best = v; }
+    }
+    return best;
+  }
+  const keyLabel = k => esc(k.startsWith('Key') ? k.slice(3) : k);
+  let promptMode = null;
   function updatePrompt(btn) {
-    const f = nearestAction(); btn.hidden = !f;
-    if (f) { const k = __set.s.binds.act, html = `${esc(MAP.actions[f.type].verb)} <kbd>${esc(k.startsWith('Key') ? k.slice(3) : k)}</kbd>`; if (btn.innerHTML !== html) btn.innerHTML = html; }
+    const f = nearestAction(), g = !f && (grabbing ? ents.get(grabbing) : nearestGrabbable());
+    promptMode = f ? 'act' : g ? 'grab' : null; btn.hidden = !promptMode;
+    let html = '';
+    if (f) html = `${esc(MAP.actions[f.type].verb)} <kbd>${keyLabel(__set.s.binds.act)}</kbd>`;
+    else if (g) html = `${grabbing ? 'Let go of' : 'Grab'} the ${esc(g.kind === 'sleeper' ? g.name : g.label || g.type)} <kbd>${keyLabel(__set.s.binds.grab)}</kbd>`;
+    if (html && btn.innerHTML !== html) btn.innerHTML = html;
   }
   // Same clip names as ACTION_ANIM in server.mjs; played at once so the hand moves on the key press.
   const ACTION_ANIM = { pile: 'light', dumpster: 'toss', stop_sign: 'panhandle', fire_can: 'warm', couch: 'sit' };
   let lastAct = 0;
-  const act = () => {
+  const sendAct = () => {
     if (!ws || ws.readyState !== 1) return;
     const f = nearestAction(), now = performance.now();
     if (f && now - lastAct > 600) { lastAct = now; const clip = (MAP.actions[f.type] || {}).anim || ACTION_ANIM[f.type]; if (clip) ANIM.play(clip); }
     ws.send('{"t":"act"}');
   };
+  const sendGrab = () => { if (ws && ws.readyState === 1) ws.send('{"t":"grab"}'); };
+  const act = () => (promptMode === 'grab' ? sendGrab : sendAct)();   // the on-screen button does whatever it says
   let lastPointer = 'mouse';
   canvas.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   function throwDir(dir) {
@@ -301,8 +346,8 @@ const NET = (() => {
   });
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (SET.isBind('act', e.code) || e.code === 'KeyF') act();
-    if (SET.isBind('grab', e.code) && ws && ws.readyState === 1) ws.send('{"t":"grab"}');
+    if (SET.isBind('act', e.code) || e.code === 'KeyF') sendAct();
+    if (SET.isBind('grab', e.code)) sendGrab();
   });
 
   // ---------- connection ----------
@@ -343,5 +388,7 @@ const NET = (() => {
   }
   window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs,
     look(y, p) { yaw = y; pitch = p ?? pitch; }, get yaw() { return yaw; } };   // look() aims the camera for captures and tests
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir };
+  // Read-only view of the networked world for the mini map (GAME-80).
+  const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, vmPose, view };
 })();
