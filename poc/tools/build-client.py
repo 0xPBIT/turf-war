@@ -16,6 +16,7 @@ OUT = HERE.parent / 'public' / 'index.html'
 NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
+SKY = (HERE / 'sky.js').read_text()
 
 s = SRC.read_text()
 
@@ -38,6 +39,19 @@ rep('<div class="panel" id="dials">', '<div class="panel" id="dials" style="disp
 rep('<div class="panel" id="places">', '<div class="panel" id="places" style="display:none">')
 rep('<div class="hud" id="cap">', '<div class="hud" id="cap" style="display:none">')
 rep('<div id="joy"><span></span></div>', '<div id="joy"><span></span></div>\n' + HUD)
+
+# Sky (GAME-89): the sphere-clump clouds are replaced by clouds painted into the sky dome
+# (tools/sky.js); dome and sun follow the camera. The floating soap bubbles go too: under the
+# Blend shader they draw as flat pale discs hanging in the sky, which read as stray clouds.
+def cut(start, end, new):
+    global s
+    a = s.index(start); b = s.index(end, a)
+    s = s[:a] + new + s[b:]
+cut('// ---------- sky dome ----------', '// ---------- sun character ----------', SKY + '\n')
+cut('// ---------- clouds & bubbles ----------', '// ---------- physics ----------', '')
+rep("  for(const b of bubbles){ b.position.y+=b.userData.v*dt; b.position.x+=Math.sin(t*.6+b.userData.ph)*dt*.4; if(b.position.y>26){ b.position.y=1; } }\n", "")
+rep("  for(const c of clouds) c.position.x+=dt*.6;\n",
+    "  skyDome.position.copy(camera.position); skyDome.material.uniforms.time.value=t; sunGroup.position.copy(camera.position).add(SUN_OFFSET);\n")
 
 # No local props: the server owns crates and cones.
 rep('spawnProps();\nconst starTex', 'const starTex')
