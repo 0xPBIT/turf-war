@@ -418,7 +418,7 @@ const NET = (() => {
   }
   function onFx(m) {
     if (m.kind === 'damage') addDamage(m.cost, new THREE.Vector3(m.at[0], m.at[1] + 1.4, m.at[2]));
-    else if (m.kind === 'smash') { const p = new THREE.Vector3(...m.at), v = new THREE.Vector3(...(m.v || [0, 0, 0])); shards(p, 8, bottleShardMat, .09, v.multiplyScalar(-.15)); if (p.y < .6) stain(p.x, p.z); dust(p, 3, 0xd8d2c4); }
+    else if (m.kind === 'smash') { const p = new THREE.Vector3(...m.at), v = new THREE.Vector3(...(m.v || [0, 0, 0])); shards(p, 8, bottleShardMat, .09, v.multiplyScalar(-.15)); if (p.y - TERRAIN.h(p.x, p.z) < .6) stain(p.x, p.z); dust(p, 3, 0xd8d2c4); }
     else if (m.kind === 'break') {
       const f = fixtures.get(m.id); if (!f) return;
       if (f.type === 'window') breakPane(paneFor(f), m.g, false, m.v);

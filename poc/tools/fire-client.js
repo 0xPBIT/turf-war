@@ -32,7 +32,8 @@ const FIRE = (() => {
       b.parts.push({ m, part, key: m.userData.c, leaf });
     }
     const top = b.type === 'tree' ? 3.9 * b.s : .6 * b.s;   // flames start at the outside of the canopy, not hidden inside it
-    b.canopy = new THREE.Vector3(b.x, top, b.z);
+    b.gy = TERRAIN.h(b.x, b.z);   // on the hills (GAME-96)
+    b.canopy = new THREE.Vector3(b.x, top + b.gy, b.z);
     b.scorch = decal(scorchTex, b.x, b.z, b.type === 'tree' ? 2.2 * b.s : 1.3 * b.s, 0);
   }
   function setStage(b, k) {
@@ -49,8 +50,8 @@ const FIRE = (() => {
     const tree = b.type === 'tree';
     // Fires share the fixed FIRE_LIGHTS pool (never a new light, so no shader recompile).
     b.fx = emitter(b.canopy, { radius: (tree ? .9 : .75) * b.s, fire: .1, smoke: .2 });
-    if (tree) b.skirt = emitter(new THREE.Vector3(b.x, 2.2 * b.s, b.z), { radius: 1.35 * b.s, fire: .1, smoke: 0, light: false });   // flames licking up the sides
-    if (tree) b.base = emitter(new THREE.Vector3(b.x, .15, b.z), { radius: .3 * b.s, fire: .1, smoke: 0, light: false });   // trunk flames: glow comes from the canopy fire
+    if (tree) b.skirt = emitter(new THREE.Vector3(b.x, 2.2 * b.s + b.gy, b.z), { radius: 1.35 * b.s, fire: .1, smoke: 0, light: false });   // flames licking up the sides
+    if (tree) b.base = emitter(new THREE.Vector3(b.x, .15 + b.gy, b.z), { radius: .3 * b.s, fire: .1, smoke: 0, light: false });   // trunk flames: glow comes from the canopy fire
   }
   // Daylight flames: the look test's additive flames vanish against a bright sky, so burning
   // plants also shed solid, normal-blended tongues of flame off the canopy surface. They go

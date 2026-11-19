@@ -643,7 +643,7 @@ function suburbHouse(x,z,face,i){
   const ry=FACE[face];
   house(x,z,w,d,h,HOUSE_SIDS[i%8],HOUSE_ROOFS[(i*3+1)%4],TRIM,ry,DOORS[(i*5)%8]);
   bmeta(x,z,(face==='+x'||face==='-x')?d/2:w/2,(face==='+x'||face==='-x')?w/2:d/2,0,HOUSE_SIDS[i%8],HOUSE_ROOFS[(i*3+1)%4],'House');
-  const g=G(x,z,face); const fz=d/2+4.2;
+  const g=G(x,z,face); g.userData.terrain='split'; const fz=d/2+4.2;   // the lot's pieces each find their own ground (GAME-96)
   // driveway to a detached garage on the right-hand side of the lot
   const dx=w/2+2.6; put(B(3,.05,fz+.9+d/2),'tx:walk',g,dx,.025,(fz+.3-d/2-.6)/2,{ns:true});
   if(i%3!==1){ const gg=grp(g,dx,0,-1.6); put(B(3.6,2.6,4.2),HOUSE_SIDS[(i+3)%8],gg,0,1.3,0); put(B(3.8,.12,4.4),TRIM,gg,0,2.62,0); shapeExtrude([[-2.1,0],[2.1,0],[0,1.0]],4.6,HOUSE_ROOFS[(i*3+1)%4],gg).position.y=2.66;
@@ -681,13 +681,16 @@ function suburbs(){
   suburbHouse(cx,cz+12.2+7.4,'-z',n++); suburbHouse(cx-17.5,cz+9,'+x',n++); suburbHouse(cx+17.5,cz+9,'-x',n++);
   txt(['BLUEBELL CT'],2.4,.5,'#1F8A5A','#FFFFFF',city,cx-5,2.8,cz-13).rotation.y=HP;
   // sound wall and greenbelt between the Skyway and Maple Row
-  for(const [z0,z1] of [[8,64.5],[79.5,150]]){ const zc=(z0+z1)/2, ln=z1-z0; const sw=grp(city,28.2,0,zc); put(B(.4,2.4,ln),'tx:form',sw,0,1.2,0); put(B(.6,.12,ln+.2),'tx:curb',sw,0,2.45,0); staticBox(28.2,1.2,zc,.2,1.2,ln/2); }
+  // North of Creek Rd it doubles as the retaining wall where Bluebell Heights steps up from the
+  // Skyway greenbelt (GAME-96): built in 3 m bays that step up with the hill behind it.
+  for(const [z0,z1] of [[8,64.5],[79.5,240]]){ for(let za=z0; za<z1-.01; za+=3){ const zb=Math.min(z1,za+3), zc=(za+zb)/2, ln=zb-za, hi=Math.max(TERRAIN.h(28.4,za),TERRAIN.h(28.4,zb)), h=2.4+hi;
+    const sw=grp(city,27.9,0,zc); sw.userData.terrainDone=true; put(B(.6,h,ln),'tx:form',sw,0,h/2,0); put(B(.8,.12,ln+.02),'tx:curb',sw,0,h+.05,0); staticBox(27.9,h/2,zc,.3,h/2,ln/2).twTerrain=true; } }
   for(let z=10;z<146;z+=9){ const zz=z+rnd()*3; if(Math.abs(zz-72)<8) continue; T(27.0,zz,.8+rnd()*.3); }
   // the residential lanes get yield signs at Main / Creek, and street trees along the curb
   for(const [x,z,ry] of [[34+4.8,6.6,Math.PI],[110+4.8,6.6,Math.PI],[34-4.8,66.6,0],[34+4.8,78.4,Math.PI],[110-4.8,66.6,0],[110+4.8,78.4,Math.PI]]) yieldSign(x,z,ry);
   // power poles along Oak Ave with sagging wires
   const PX=66.8, ps=[]; for(let z=10;z<160;z+=16){ if(Math.abs(z-72)<8) continue; ps.push(z); const g=grp(city,PX,0,z); put(CYL(.14,.18,9,10),'tx:pole',g,0,4.5,0); put(B(.14,.14,2.4),'tx:pole',g,0,8.3,0); for(const s of [-1,0,1]) put(CYL(.05,.06,.18,8),0x5FD2A8,g,0,8.46,s*1.05); if(z%32===10) put(CYL(.32,.32,.9,14),0xB9C0D2,g,.35,7.2,0); postBody(PX,z,.18,9); }
-  for(let i=0;i<ps.length-1;i++){ const a=ps[i],b=ps[i+1]; if(b-a>20) continue; for(const s of [-1,0,1]) tube([[PX,8.54,a+s*1.05],[PX,8.15,a+4+s*1.05],[PX,7.95,(a+b)/2+s*1.05],[PX,8.15,b-4+s*1.05],[PX,8.54,b+s*1.05]],.018,INK,city,16); }
+  for(let i=0;i<ps.length-1;i++){ const a=ps[i],b=ps[i+1]; if(b-a>20) continue; for(const s of [-1,0,1]) tube([[PX,8.54,a+s*1.05],[PX,8.15,a+4+s*1.05],[PX,7.95,(a+b)/2+s*1.05],[PX,8.15,b-4+s*1.05],[PX,8.54,b+s*1.05]],.018,INK,city,16).userData.terrain='drape'; }
   // a barricade where Maple Row dead-ends
   const bc=grp(city,34,0,149.5); for(const s of [-1,1]) put(B(.12,1.2,.12),0xFFFFFF,bc,s*3,.6,0); for(let k=0;k<2;k++) for(let i=0;i<8;i++) put(B(.75,.22,.06),i%2?0xFFFFFF:0xE8343F,bc,-2.6+i*.75,.75+k*.35,0); staticBox(34,.7,149.5,3.1,.7,.1);
   rect(META.lots,28,6,143,165,{kind:'park'});
@@ -970,6 +973,144 @@ function lights(phases){
     for(const c of ['red','yellow','green']) s.lamps[c].color.setHex(lampMats[c][st===c?1:0]); }
 }
 
+// ================= hills (GAME-96) =================
+// The town is built on flat ground, then set onto TERRAIN (terrain.mjs, shared with the server):
+//  - the grass becomes a height-mapped grid (fine where it isn't flat, coarse far out);
+//  - flat or long things (roads, sidewalks, paint, lots, paths, curbs, fences, hedges, walls, wires)
+//    are draped: tessellated where the ground curves, then every vertex is lifted by H(x,z);
+//  - everything else (buildings, trees, lamps, benches, cars, signs) moves up as one piece; buildings
+//    sit level at the highest corner of their footprint on a concrete footing, like real houses on a hill;
+//  - static colliders follow (long ones are cut into short pieces that step with the slope), so the
+//    town.json extract and the client's own prediction both see the hills.
+const _tb=new THREE.Box3(), _tv=new THREE.Vector3();
+function terrainFlat(box,pad=.3){ const [,hi]=TERRAIN.range((box.min.x+box.max.x)/2,(box.min.z+box.max.z)/2,(box.max.x-box.min.x)/2+pad,(box.max.z-box.min.z)/2+pad); return hi<.004; }
+// Edge-consistent refinement: an edge is split only by a test on its own two end points, so the two
+// triangles sharing it always split it the same way and the draped surface has no cracks.
+function edgeNeedsSplit(ax,az,bx,bz){
+  const L=Math.hypot(bx-ax,bz-az); if(L<1.1) return false;
+  if(ax>bx||(ax===bx&&az>bz)){ let t=ax; ax=bx; bx=t; t=az; az=bz; bz=t; }
+  const ha=TERRAIN.h(ax,az), hb=TERRAIN.h(bx,bz), n=Math.max(2,Math.ceil(L/6));
+  for(let i=1;i<n;i++){ const t=i/n, y=TERRAIN.h(ax+(bx-ax)*t,az+(bz-az)*t); if(Math.abs(y-(ha+(hb-ha)*t))>.012) return true; }
+  return false;
+}
+function refineGeo(g){
+  const names=Object.keys(g.attributes), sizes=names.map(k=>g.attributes[k].itemSize), arrs=names.map(k=>g.attributes[k].array);
+  const stride=sizes.reduce((a,b)=>a+b,0), out=[], cnt=g.attributes.position.count, pIdx=names.indexOf('position');
+  let pOff=0; for(let i=0;i<pIdx;i++) pOff+=sizes[i];
+  const vert=i=>{ const v=new Float32Array(stride); let o=0; names.forEach((k,a)=>{ for(let c=0;c<sizes[a];c++) v[o++]=arrs[a][i*sizes[a]+c]; }); return v; };
+  const mid=(a,b)=>{ const v=new Float32Array(stride); for(let i=0;i<stride;i++) v[i]=(a[i]+b[i])/2; return v; };
+  const need=(a,b)=>edgeNeedsSplit(a[pOff],a[pOff+2],b[pOff],b[pOff+2]);
+  let budget=400000;
+  const tri=(A,B,C,d)=>{
+    const s0=d<22&&budget>0&&need(A,B), s1=d<22&&budget>0&&need(B,C), s2=d<22&&budget>0&&need(C,A), n=s0+s1+s2;
+    if(!n){ out.push(A,B,C); budget--; return; }
+    if(n===3){ const ab=mid(A,B), bc=mid(B,C), ca=mid(C,A); tri(A,ab,ca,d+1); tri(ab,B,bc,d+1); tri(ca,bc,C,d+1); tri(ab,bc,ca,d+1); return; }
+    // rotate so the split edges come first: one split edge = AB; two = AB and BC
+    if(n===1){ if(s1) return tri(B,C,A,d); if(s2) return tri(C,A,B,d); const ab=mid(A,B); tri(A,ab,C,d+1); tri(ab,B,C,d+1); return; }
+    if(!s0) return tri(B,C,A,d); if(!s1) return tri(C,A,B,d);
+    const ab=mid(A,B), bc=mid(B,C); tri(ab,B,bc,d+1); tri(A,ab,bc,d+1); tri(A,bc,C,d+1);
+  };
+  for(let i=0;i<cnt;i+=3) tri(vert(i),vert(i+1),vert(i+2),0);
+  const ng=new THREE.BufferGeometry(); let o=0;
+  names.forEach((k,a)=>{ const n=sizes[a], arr=new Float32Array(out.length*n); out.forEach((v,j)=>{ for(let c=0;c<n;c++) arr[j*n+c]=v[o+c]; }); o+=n; ng.setAttribute(k,new THREE.BufferAttribute(arr,n)); });
+  return ng;
+}
+// Lift every vertex of a mesh by the ground under it, in place (keeps its parent, material, burn group).
+function drapeMesh(m){
+  m.updateMatrixWorld(true); const M=m.matrixWorld, inv=new THREE.Matrix4().copy(M).invert();
+  let g=m.geometry.index?m.geometry.toNonIndexed():m.geometry.clone(); g.applyMatrix4(M);
+  for(const k of Object.keys(g.attributes)) if(g.attributes[k].isInterleavedBufferAttribute) g.setAttribute(k,g.attributes[k].clone());
+  g=refineGeo(g);
+  const p=g.attributes.position, nr=g.attributes.normal;
+  for(let i=0;i<p.count;i++){ const x=p.getX(i), z=p.getZ(i); p.setY(i,p.getY(i)+TERRAIN.h(x,z));
+    if(nr){ const ny=nr.getY(i); if(Math.abs(ny)>.6){ const n=TERRAIN.normal(x,z), s=Math.sign(ny); nr.setXYZ(i,n[0]*s,n[1]*s,n[2]*s); } } }
+  g.applyMatrix4(inv); if(nr) g.normalizeNormals?.();
+  g.computeBoundingBox(); g.computeBoundingSphere(); m.geometry=g;
+}
+function drapeNode(n){ n.traverse(o=>{ if(o.isMesh) drapeMesh(o); }); }
+// Concrete footing under a building that sits level on a slope.
+function footing(node,lo,hi){
+  const fb=new THREE.Box3(); let any=false; node.updateMatrixWorld(true);
+  node.traverse(o=>{ if(!o.isMesh) return; _tb.setFromObject(o); if(_tb.min.y-node.position.y<.3 && _tb.max.y-_tb.min.y>.8 && _tb.max.x-_tb.min.x<40 && _tb.max.z-_tb.min.z<40){ fb.union(_tb); any=true; } });
+  if(!any) return; const w=fb.max.x-fb.min.x-.04, d=fb.max.z-fb.min.z-.04, y0=lo-.35, y1=hi+.04;
+  const f=put(B(w,y1-y0,d),'tx:conc',city,(fb.min.x+fb.max.x)/2,(y0+y1)/2,(fb.min.z+fb.max.z)/2,{ns:true}); f.userData.terrainDone=true;
+}
+function placeNode(n){
+  if(n.userData.terrainDone || n.isLight || n.isCamera) return;
+  n.updateMatrixWorld(true); _tb.setFromObject(n); if(_tb.isEmpty()) return;
+  const L=Math.max(_tb.max.x-_tb.min.x,_tb.max.z-_tb.min.z), W=Math.min(_tb.max.x-_tb.min.x,_tb.max.z-_tb.min.z), hgt=_tb.max.y-_tb.min.y;
+  if(L>460 && n!==GROUND) return;                     // sky, distant scenery
+  if(terrainFlat(_tb)) return;
+  const cx=(_tb.min.x+_tb.max.x)/2, cz=(_tb.min.z+_tb.max.z)/2;
+  if(n.userData.terrain==='split'){ for(const c of [...n.children]) placeNode(c); return; }
+  if(n.userData.terrain==='drape'){ drapeNode(n); return; }
+  if(_tb.min.y>3.2) return;                           // up on the Skyway: its piers carry it
+  // Skyway piers and the like: tall and narrow under the deck. Stretch so the foot meets the ground and the top stays put.
+  if(_tb.max.y>5.2 && _tb.min.y<.5 && L<4 && cx>14 && cx<30){ const top=_tb.max.y; n.traverse(o=>{ if(!o.isMesh) return; o.updateMatrixWorld(true); const M=o.matrixWorld, inv=new THREE.Matrix4().copy(M).invert(); let g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone(); g.applyMatrix4(M); const p=g.attributes.position; for(let i=0;i<p.count;i++){ const y=p.getY(i); p.setY(i,y+TERRAIN.h(p.getX(i),p.getZ(i))*Math.max(0,1-y/top)); } g.applyMatrix4(inv); g.computeBoundingBox(); g.computeBoundingSphere(); o.geometry=g; }); return; }
+  let glass=false; n.traverse(o=>{ if(o.material===glassMat) glass=true; });
+  const flatish=hgt<.6 && _tb.min.y<.45, longLow=L>4 && hgt<2.7 && !glass && _tb.min.y<1.2;
+  if(n===GROUND || flatish&&L>1.2 || longLow){ drapeNode(n); return; }
+  // One rigid piece.
+  if(L<2.6){ n.position.y+=TERRAIN.h(cx,cz); return; }
+  const [lo,hi]=TERRAIN.range(cx,cz,(_tb.max.x-_tb.min.x)/2,(_tb.max.z-_tb.min.z)/2);
+  // buildings (glass, or a solid box like a garage) sit level on a footing; trees, play sets and gazebos just settle in
+  const building=glass || (W>2.8 && hgt>2.2 && L<8 && !n.userData.nobake && !BURN.some(b=>b.g===n));
+  if(building){ n.position.y+=hi; if(hi-lo>.06) footing(n,lo,hi); }
+  else n.position.y+=lo+(hi-lo)*.4;
+}
+// Colliders: lift with the ground; long ones are cut into pieces so they follow the slope.
+function placeBodies(){
+  const add=[], kill=[];
+  for(const b of world.bodies){
+    if(b.mass>0 || b===groundBody || b.twTerrain || !b.shapes.length) continue;
+    const s=b.shapes[0]; let hx,hz;
+    if(s instanceof CANNON.Box){ const q=b.quaternion, yaw=2*Math.atan2(q.y,q.w), c=Math.abs(Math.cos(yaw)), sn=Math.abs(Math.sin(yaw)); hx=s.halfExtents.x*c+s.halfExtents.z*sn; hz=s.halfExtents.x*sn+s.halfExtents.z*c; }
+    else if(s instanceof CANNON.Cylinder || s instanceof CANNON.Sphere){ hx=hz=s.radiusTop||s.radius||.3; } else continue;
+    const x=b.position.x, z=b.position.z;
+    if(b.position.y-(s.halfExtents?s.halfExtents.y:(s.height||0)/2)>3.2) continue;   // on the Skyway
+    const [lo,hi]=TERRAIN.range(x,z,hx,hz); if(hi<.004) continue;
+    const q=b.quaternion, axisAligned=Math.abs(q.x)<1e-4&&Math.abs(q.z)<1e-4&&(Math.abs(q.y)<1e-4||Math.abs(Math.abs(q.y)-Math.SQRT1_2)<1e-3||Math.abs(q.w)<1e-4);
+    if(s instanceof CANNON.Box && Math.max(hx,hz)>3 && hi-lo>.25 && !b.tw && !b.twTag && axisAligned){
+      // a long wall / hedge / fence: pieces of <= 3 m, each sitting on its own stretch of ground
+      const alongX=hx>=hz, len=alongX?hx:hz, n=Math.ceil(len/1.5), hy=s.halfExtents.y, y0=b.position.y-hy;
+      for(let i=0;i<n;i++){ const c=-len+len*(2*i+1)/n, px=alongX?x+c:x, pz=alongX?z:z+c, phx=alongX?len/n:hx, phz=alongX?hz:len/n;
+        const [l2,h2]=TERRAIN.range(px,pz,phx,phz), top=y0+2*hy+h2, bot=y0+l2-.2;
+        const nb=new CANNON.Body({mass:0,shape:new CANNON.Box(new CANNON.Vec3(phx,(top-bot)/2,phz))}); nb.position.set(px,(top+bot)/2,pz); nb.twTerrain=true; add.push(nb); }
+      kill.push(b); continue;
+    }
+    if(Math.max(hx,hz)>1.25 && s instanceof CANNON.Box && hi-lo>.03){
+      // sits level at its highest corner and reaches down to the lowest, like the footing drawn under it
+      const hy=s.halfExtents.y, top=b.position.y+hy+hi, bot=b.position.y-hy+lo;
+      b.removeShape(s); b.addShape(new CANNON.Box(new CANNON.Vec3(s.halfExtents.x,(top-bot)/2,s.halfExtents.z))); b.position.y=(top+bot)/2;
+    } else b.position.y+=TERRAIN.h(x,z);
+    b.aabbNeedsUpdate=true; b.twTerrain=true;
+  }
+  for(const b of kill) world.removeBody(b); for(const b of add) world.addBody(b);
+  // The client's own walking (prediction) uses cannon: give it the same hills as the server's heightfield.
+  const A=TERRAIN.AREA, data=[]; for(let i=0;i<=A.maxX-A.minX;i++){ const row=[]; for(let j=0;j<=A.maxZ-A.minZ;j++) row.push(TERRAIN.h(A.minX+i,A.maxZ-j)); data.push(row); }
+  const hb=new CANNON.Body({mass:0,shape:new CANNON.Heightfield(data,{elementSize:1})}); hb.quaternion.setFromEuler(-Math.PI/2,0,0); hb.position.set(A.minX,0,A.maxZ); hb.twTerrain=true; hb.twEdge=true; world.addBody(hb); TERRAIN_BODY=hb;
+}
+let GROUND=null, TERRAIN_BODY=null;
+// The look test's 800 m grass slab becomes a grid: 1.5 m cells over the hills, 20 m cells far out.
+function groundGrid(){
+  GROUND=city.children.find(o=>o.isMesh && o.userData.c==='tx:grass' && o.geometry.parameters && o.geometry.parameters.width>=800);
+  if(!GROUND) return; const A=TERRAIN.AREA;
+  const axis=(lo,hi,brk=[])=>{ const v=[]; for(let x=-400;x<lo;x+=20) v.push(x); for(let x=lo;x<hi;x+=1.5) v.push(x); for(let x=hi;x<=400;x+=20) v.push(x); if(v[v.length-1]<400) v.push(400); v.push(...brk); v.sort((a,b)=>a-b); return v.filter((x,i)=>!i||x-v[i-1]>.05); };
+  const xs=axis(A.minX,A.maxX,TERRAIN.BREAK_X), zs=axis(A.minZ,A.maxZ), nx=xs.length, nz=zs.length, pos=new Float32Array(nx*nz*3), nrm=new Float32Array(nx*nz*3), idx=[];
+  for(let j=0;j<nz;j++) for(let i=0;i<nx;i++){ const k=(j*nx+i)*3, x=xs[i], z=zs[j], n=TERRAIN.normal(x,z); pos[k]=x; pos[k+1]=TERRAIN.h(x,z); pos[k+2]=z; nrm[k]=n[0]; nrm[k+1]=n[1]; nrm[k+2]=n[2]; }
+  for(let j=0;j<nz-1;j++) for(let i=0;i<nx-1;i++){ const a=j*nx+i, b=a+1, c=a+nx, d=c+1; idx.push(a,c,b, b,c,d); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('normal',new THREE.BufferAttribute(nrm,3)); g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(nx*nz*2),2)); g.setIndex(idx);
+  GROUND.geometry=g; GROUND.position.set(0,0,0); GROUND.userData.terrainDone=true;
+}
+function terrain(){
+  groundGrid();
+  // Burn targets, trash piles and lamps keep their own records of where they stand.
+  for(const node of [...city.children, ...burnGroup.children, ...scene.children.filter(o=>o!==city && o!==burnGroup && (o.isMesh||o.isGroup))]) placeNode(node);
+  for(const p of piles){ const y=TERRAIN.h(p.pos.x,p.pos.z); if(y>.004){ if(p.g.parent===scene && Math.abs(p.g.position.y)<1e-6) p.g.position.y=y; p.pos.y+=y; } }
+  for(const l of LAMPS) l.p[1]=+TERRAIN.h(l.p[0],l.p[2]).toFixed(3);
+  placeBodies();
+}
+
 function build(){
   textures(); makeChainMat(); intersections(); roads(); streetFurniture();
   downtown(); dumpsterAlley(); gasStation(); construction(); schoolCampus(); underpass(); suburbs(); stripMall(); bigLot(); railYard(); puddlePark();
@@ -979,6 +1120,7 @@ function build(){
   rect(META.lots,17.5,-5,26.5,21,{kind:'dirt'});
   // trees placed by the look test before the town: register them too
   sc.left=-48; sc.right=48; sc.top=48; sc.bottom=-48; sc.far=170; sunLight.shadow.camera.updateProjectionMatrix();
+  terrain();
 }
 function afterPeople(){ extraPeople(); buildCull(); }
 
@@ -1011,7 +1153,7 @@ function dump(){
     piles:piles.map((p,i)=>({id:'pile:'+i,i,x:r3(p.pos.x),z:r3(p.pos.z)})),
     npcs:people.map(p=>({x:r3(p.g.position.x),z:r3(p.g.position.z),ry:r3(p.g.rotation.y)})),
     newProps:PROPS, traffic:trafficSpec(),
-    camp:CAMP, burnables:BURN.map(b=>({id:b.id,type:b.type,p:[r3(b.x),0,r3(b.z)],s:r3(b.s)})), lampposts:LAMPS,
+    camp:CAMP, burnables:BURN.map(b=>({id:b.id,type:b.type,p:[r3(b.x),r3(TERRAIN.h(b.x,b.z)),r3(b.z)],s:r3(b.s)})), lampposts:LAMPS,
     roads:META.roads, walks:META.walks, lots:META.lots, buildings:META.buildings, decks:META.decks,
   };
 }

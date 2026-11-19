@@ -51,7 +51,7 @@ const COPPER = (() => {
   }
 
   function buildLamp(l) {
-    const g = new THREE.Group(); g.position.set(l.p[0], 0, l.p[2]); g.rotation.y = l.ry || 0; scene.add(g);
+    const g = new THREE.Group(); g.position.set(l.p[0], l.p[1] || 0, l.p[2]); g.rotation.y = l.ry || 0; scene.add(g);
     // lit: a warm glow at the lens and the hand-hole cover screwed shut
     const lit = new THREE.Group(); g.add(lit);
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('rgba(255,238,170,.9)'), depthWrite: false, blending: THREE.AdditiveBlending, transparent: true }));
@@ -65,7 +65,7 @@ const COPPER = (() => {
     const hinge = new THREE.Group(); hinge.position.set(.045, .68, -.116); open.add(hinge);
     put(B(.1, .22, .016, .004), POLE, hinge, -.03, .1, -.02, { rz: 2.5, ry: .5 });
     wireSpill(open, l.gy ?? .16);
-    lamps.set(l.id, { g, lit, glow, open, stripped: false, base: new THREE.Vector3(l.p[0], .78, l.p[2]).add(new THREE.Vector3(0, 0, -.14).applyAxisAngle(_up, l.ry || 0)) });
+    lamps.set(l.id, { g, lit, glow, open, stripped: false, base: new THREE.Vector3(l.p[0], (l.p[1] || 0) + .78, l.p[2]).add(new THREE.Vector3(0, 0, -.14).applyAxisAngle(_up, l.ry || 0)) });
   }
   const _up = new THREE.Vector3(0, 1, 0);
   function setStripped(id, on) {

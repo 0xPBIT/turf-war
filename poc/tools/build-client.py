@@ -141,7 +141,13 @@ rep("root.traverse(o=>{ if(!o.isMesh || o.userData.c===undefined) return;", "roo
 rep("p.acc+=dt; if(p.acc>2){ p.acc=0; addDamage(35,p.pos.clone().add(new THREE.Vector3(0,1.6,0))); }", "")
 
 # ---------- GAME-81: the full Puddlewick town ----------
+# GAME-96: the shared terrain height function goes in first (town build, hydrants and the rest use it).
+TERRAIN_JS = (HERE.parent / 'terrain.mjs').read_text().replace('export const TERRAIN', 'const TERRAIN', 1)
 TOWN_JS = (HERE / 'town-build.js').read_text()
+# TERRAIN goes in before the look test builds anything, so decals and the town can use it.
+rep('const city = new THREE.Group(); scene.add(city);', TERRAIN_JS + '\nconst city = new THREE.Group(); scene.add(city);')
+# decals (scorch marks, bottle stains) lie on the hills, tilted to the slope
+rep('m.position.set(x,y+decals.length*.0004,z); fxl(m);', 'const gy=TERRAIN.h(x,z); m.position.set(x,gy+y+decals.length*.0004,z); if(gy>.004){ const n=TERRAIN.normal(x,z); m.lookAt(x+n[0],m.position.y+n[1],z+n[2]); } fxl(m);')
 def drop_line(prefix):
     global s
     lines = s.split('\n'); hits = [i for i, l in enumerate(lines) if l.startswith(prefix)]

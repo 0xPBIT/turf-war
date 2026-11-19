@@ -50,12 +50,12 @@ const HYD = (() => {
 
   // Same model as the look test's hydrant, turned so an outlet cap faces the jet.
   function buildHydrant(x, z, dir) {
-    const g = grp(scene, x, 0, z, dir - Math.PI / 2);
+    const gy = TERRAIN.h(x, z), g = grp(scene, x, gy, z, dir - Math.PI / 2);
     const prof = [[0, 0], [.17, 0], [.17, .06], [.13, .08], [.13, .5], [.15, .52], [.15, .56], [.11, .6], [.06, .68], [0, .7]].map(([a, b]) => new THREE.Vector2(a, b));
     put(new THREE.LatheGeometry(prof, 14), 0xFFD84A, g, 0, 0, 0);
     for (const r of [0, Math.PI / 2, Math.PI]) { const o = grp(g, 0, .4, 0, r); put(CYL(.06, .06, .12, 10), 0xFFD84A, o, .17, 0, 0, { rz: Math.PI / 2 }); put(CYL(.07, .07, .03, 6), 0xE8343F, o, .24, 0, 0, { rz: Math.PI / 2 }); }
     put(CYL(.035, .035, .05, 5), 0xE8343F, g, 0, .72, 0);
-    const b = new CANNON.Body({ mass: 0, shape: new CANNON.Cylinder(.17, .17, .7, 8) }); b.position.set(x, .35, z); world.addBody(b);
+    const b = new CANNON.Body({ mass: 0, shape: new CANNON.Cylinder(.17, .17, .7, 8) }); b.position.set(x, gy + .35, z); world.addBody(b);
   }
 
   function makeJet(f) {
@@ -66,8 +66,8 @@ const HYD = (() => {
       const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; fxl(pts); scene.add(pts); return pts;
     };
     const puddle = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), puddleMat.clone());   // clone shares the compiled program
-    puddle.rotation.x = -Math.PI / 2; puddle.position.set(f.pos[0] + dx * 2.6, .085, f.pos[2] + dz * 2.6); puddle.scale.set(5.5, 5.5, 1); fxl(puddle); scene.add(puddle);
-    const core = new THREE.Mesh(coreGeo, coreMat); core.position.set(f.pos[0] + dx * .28, .4, f.pos[2] + dz * .28);
+    puddle.rotation.x = -Math.PI / 2; puddle.position.set(f.pos[0] + dx * 2.6, TERRAIN.h(f.pos[0] + dx * 2.6, f.pos[2] + dz * 2.6) + .085, f.pos[2] + dz * 2.6); puddle.scale.set(5.5, 5.5, 1); fxl(puddle); scene.add(puddle);
+    const core = new THREE.Mesh(coreGeo, coreMat); core.position.set(f.pos[0] + dx * .28, f.pos[1] + .05, f.pos[2] + dz * .28);
     core.rotation.set(0, dir - Math.PI / 2, 0, 'YXZ'); core.visible = false; core.layers.set(2); scene.add(core);   // layer 2 = kept out of the paint filter (like sign text), so the jet stays crisp
     return { f, dx, dz, ox: f.pos[0] + dx * .3, oz: f.pos[2] + dz * .3, on: false, wet: 0, wetTarget: 0, core,
       drops: mk(N, waterMat), mist: mk(M, mistMat), p: new Float32Array(N * 3), v: new Float32Array(N * 3), age: new Float32Array(N).fill(9),
@@ -136,7 +136,7 @@ const HYD = (() => {
         while (j.acc > 1) {
           j.acc--; const i = j.next; j.next = (j.next + 1) % N;
           const sp = 7 + Math.random() * 2.2, side = (Math.random() - .5) * 1.1, up = 2.4 + Math.random() * 1.3;
-          p[i * 3] = j.ox; p[i * 3 + 1] = .4; p[i * 3 + 2] = j.oz;
+          p[i * 3] = j.ox; p[i * 3 + 1] = j.f.pos[1] + .05; p[i * 3 + 2] = j.oz;
           v[i * 3] = j.dx * sp + j.dz * side; v[i * 3 + 1] = up; v[i * 3 + 2] = j.dz * sp - j.dx * side;
           const pre = Math.random() * dt - dt;                  // rewind 0..dt; the step below moves it forward dt, so the batch spreads along the arc and low frame rates still read as a stream
           p[i * 3] += v[i * 3] * pre; p[i * 3 + 1] += (up - G * pre / 2) * pre; p[i * 3 + 2] += v[i * 3 + 2] * pre; v[i * 3 + 1] -= G * pre; age[i] = pre;
