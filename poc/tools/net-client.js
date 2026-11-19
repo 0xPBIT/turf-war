@@ -332,5 +332,7 @@ const NET = (() => {
     setTimeout(() => el('nameInput').focus(), 50);
   }
   window.__net = { get me() { return me; }, ents, fixtures, get corr() { return corr.length(); }, get pos() { return player.position; }, errs };
-  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir };
+  // Read-only view of the networked world for the mini map (GAME-80).
+  const view = { ents, fixtures, get meta() { return meta; }, get myPid() { return myPid; }, get me() { return me; }, get map() { return MAP; } };
+  return { beforeStep, afterStep, frame, speedScale, updatePrompt, act, throwDir, view };
 })();

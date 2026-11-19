@@ -16,6 +16,7 @@ OUT = HERE.parent / 'public' / 'index.html'
 NET = (HERE / 'net-client.js').read_text()
 HUD = (HERE / 'net-hud.html').read_text()
 SETTINGS = (HERE / 'settings.js').read_text()
+MINI = (HERE / 'minimap.js').read_text()
 PREWARM = (HERE / 'prewarm.js').read_text()
 
 s = SRC.read_text()
@@ -62,7 +63,7 @@ rep("  if(keys.has('Space') && player.position.y<.4){ player.velocity.y=6.5; }",
     "  if(keys.has('Space') && player.position.y<.4){ player.velocity.y=6.5; }\n  NET.beforeStep(dt, mx, mz, speed);")
 rep("  const speed=keys.has('ShiftLeft')?8:4.6;", "  const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?8:4.6)*NET.speedScale();")
 rep("  world.step(1/90,dt,6);\n  processBreaks();", "  world.step(1/90,dt,6);\n  NET.afterStep(dt);\n  processBreaks();")
-rep("  // camera\n  bobT+=dt*(ml>0?speed*2.2:0);", "  NET.frame(dt, t);\n  // camera\n  bobT+=dt*(ml>0?speed*2.2:0);")
+rep("  // camera\n  bobT+=dt*(ml>0?speed*2.2:0);", "  NET.frame(dt, t);\n  MINI.frame(dt, t);\n  // camera\n  bobT+=dt*(ml>0?speed*2.2:0);")
 
 # Settings (GAME-79): key bindings, run toggle, look sensitivity / invert, head bob.
 rep("  let mx=0,mz=0; if(keys.has('KeyW')||keys.has('ArrowUp')) mz+=1; if(keys.has('KeyS')||keys.has('ArrowDown')) mz-=1; if(keys.has('KeyA')||keys.has('ArrowLeft')) mx-=1; if(keys.has('KeyD')||keys.has('ArrowRight')) mx+=1;",
@@ -92,7 +93,7 @@ rep("if(debris.length>260){ const o=debris.shift(); scene.remove(o.m); if(o.b) w
 
 # Networking module goes right before the loop starts.
 i = s.rindex('tick();\n</script>')
-s = s[:i] + SETTINGS + '\n' + NET + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
+s = s[:i] + SETTINGS + '\n' + NET + '\n' + MINI + '\n' + PREWARM + '\ntick();\n</script>' + s[i + len('tick();\n</script>'):]
 
 OUT.write_text(s)
 print(f'wrote {OUT} ({len(s)} bytes) from {SRC}')

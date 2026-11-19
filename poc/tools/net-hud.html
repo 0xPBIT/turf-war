@@ -47,6 +47,41 @@
 #settings .brow button.wait{background:#FFC93C}
 #settings .sfoot{display:flex;gap:8px;justify-content:space-between}
 #settings #sResume{background:var(--candy);color:#fff;font-size:16px;padding:9px 22px}
+/* ---- turf mini map (GAME-80): under the damage counter, top right ---- */
+:root{--mm:188px;--mmTop:calc(74px + env(safe-area-inset-top,0px));--mmRight:max(12px,env(safe-area-inset-right,0px))}
+#zone{display:none}
+#mini{position:fixed;z-index:6;top:var(--mmTop);right:var(--mmRight);width:var(--mm);height:var(--mm);border-radius:50%;background:#fff;box-shadow:0 0 0 5px #fff,0 0 0 7px rgba(46,35,80,.14),0 6px 0 4px rgba(20,60,140,.25);cursor:pointer}
+#miniMap{display:block;width:100%;height:100%;border-radius:50%}
+#miniN{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:var(--candy);color:#fff;font-family:var(--display);font-weight:700;font-size:12px;line-height:22px;text-align:center;box-shadow:0 0 0 2.5px #fff,0 2px 0 3px rgba(20,60,140,.2);pointer-events:none}
+#miniKey{position:absolute;left:50%;bottom:-13px;transform:translateX(-50%);background:#fff;border-radius:999px;padding:1px 9px;font-family:var(--display);font-weight:600;font-size:11px;color:var(--ink-soft);box-shadow:0 2px 0 rgba(20,60,140,.2);white-space:nowrap;pointer-events:none}
+#miniKey kbd{font-family:var(--display);background:var(--pill-2);border-radius:5px;padding:0 5px;color:var(--ink)}
+#miniInfo{position:fixed;z-index:5;top:calc(var(--mmTop) + var(--mm) + 22px);right:var(--mmRight);width:calc(var(--mm) + 10px);margin-right:-5px;box-sizing:border-box;background:rgba(255,255,255,.94);border-radius:16px;padding:8px 12px 9px;box-shadow:0 3px 0 rgba(20,60,140,.25);text-align:center;display:grid;gap:4px;justify-items:center;pointer-events:none}
+#miniInfo b{font-family:var(--display);font-weight:700;font-size:16px;line-height:1.1}
+#miniInfo .tag{--c:#888;font-family:var(--display);font-weight:600;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#fff;background:var(--c);border-radius:999px;padding:2px 10px;text-shadow:0 1px 0 rgba(46,35,80,.35)}
+#miniInfo .tag[style*="--c2"]{background:repeating-linear-gradient(135deg,var(--c) 0 8px,var(--c2) 8px 16px);animation:mmPulse 1.6s ease-in-out infinite}
+#miniInfo .tag.none{background:var(--pill-2);color:var(--ink-soft);text-shadow:none}
+#miniInfo .heat{display:flex;width:100%;height:7px;border-radius:99px;overflow:hidden;background:var(--pill-2);box-shadow:inset 0 0 0 1px rgba(46,35,80,.12)}
+#miniInfo .heat i{display:block;height:100%}
+#miniInfo small{font-size:11px;font-weight:700;color:var(--ink-soft)}
+@keyframes mmPulse{50%{filter:brightness(1.18)}}
+#gear{top:calc(var(--mmTop) + var(--mm) - 30px);right:calc(var(--mmRight) + var(--mm) - 30px);z-index:7}
+#fpsMeter{top:calc(12px + env(safe-area-inset-top,0px));right:auto;left:50%;transform:translateX(-50%)}
+#bigMap{position:fixed;inset:0;z-index:27;display:none;place-items:center;background:rgba(46,35,80,.38);backdrop-filter:blur(3px)}
+#bigMap.open{display:grid}
+#bigMap .card{background:#fff;border-radius:26px;padding:16px;box-shadow:0 6px 0 rgba(20,60,140,.3);display:grid;grid-template-columns:auto 190px;gap:16px;align-items:start;max-width:calc(100vw - 32px)}
+#bigMap h2{margin:0 0 8px;font-family:var(--display);font-weight:700;font-size:24px;color:var(--candy)}
+#bigMapCv{display:block;width:min(560px,calc(100vh - 80px),calc(100vw - 260px));aspect-ratio:1;border-radius:18px;box-shadow:inset 0 0 0 2px rgba(46,35,80,.15)}
+#bigLegend{display:grid;gap:8px;font-weight:700;font-size:13.5px}
+#bigLegend .lg{display:grid;grid-template-columns:18px 1fr;gap:2px 8px;align-items:center}
+#bigLegend .lg i{width:18px;height:18px;border-radius:5px;box-shadow:inset 0 0 0 2px rgba(46,35,80,.2)}
+#bigLegend .lg em{grid-column:2;font-style:normal;font-size:12px;color:var(--ink-soft)}
+#bigLegend .lg.you{font-size:15px}
+#bigLegend .st{background:repeating-linear-gradient(135deg,#FF6E9E 0 5px,#8F6BFF 5px 10px)}
+#bigLegend .un{background:transparent;box-shadow:none!important;border:2px dashed #b9b4d6;box-sizing:border-box}
+#bigLegend .ht{background:radial-gradient(circle,rgba(255,96,40,.85),rgba(255,190,90,.15))}
+#bigLegend p{margin:4px 0 0;font-size:12px;color:var(--ink-soft);font-weight:700}
+#bigMap .close{font-size:12.5px;color:var(--ink-soft);font-weight:700;margin-top:6px}
+@media (max-width:640px){ :root{--mm:124px;--mmTop:calc(68px + env(safe-area-inset-top,0px))} #miniKey{display:none} #miniInfo small{display:none} #bigMap .card{grid-template-columns:1fr} #bigMapCv{width:min(calc(100vw - 64px),calc(100vh - 260px))} }
 </style>
 <div class="hud chip" id="zone"><b id="zoneName">Sunnyside</b><span id="zoneOwner">nobody owns this turf</span></div>
 <div id="board"><h3>Vagrants</h3><div id="rows"></div></div>
@@ -54,6 +89,9 @@
 <div id="help">Click to look around · <kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump<br>Click throws a bottle · <kbd>E</kbd> do the thing · <kbd>G</kbd> grab or drag<br>Close the tab and your vagrant lies down right where you are.</div>
 <div id="status"></div>
 <div id="login"><div class="card"><h1>Turf War</h1><p>Pick a name, vagrant.</p><input id="nameInput" maxlength="16" placeholder="Sunny Steve" autocomplete="off"><button type="button" id="go">Wake up</button></div></div>
+<div id="mini" title="Your turf (M for the big map)"><canvas id="miniMap"></canvas><div id="miniN">N</div><div id="miniKey"><kbd>M</kbd> map</div></div>
+<div id="miniInfo"></div>
+<div id="bigMap" role="dialog" aria-label="Town map"><div class="card"><canvas id="bigMapCv"></canvas><div><h2>Sunnyside turf</h2><div id="bigLegend"></div><div class="close">Press M or click to close</div></div></div></div>
 <button type="button" id="gear" title="Settings (Esc)" aria-label="Settings">⚙</button>
 <div id="fpsMeter"></div>
 <div id="settings" role="dialog" aria-label="Settings"><div class="card">
